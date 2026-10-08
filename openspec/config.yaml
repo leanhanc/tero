@@ -1,0 +1,56 @@
+schema: spec-driven
+
+context: |
+  Tero is a self-hosted PaaS: one Go binary installed on one Linux server that builds and runs apps from GitHub, with security locked down by default.
+  Platforms: Ubuntu 26.04 LTS (amd64, arm64) is the first tested platform, not a permanent limit;
+  specs should name it as the tested platform and keep OS-specific steps behind that list.
+  On Ubuntu 26.04 LTS: Podman 5.7, systemd 259, `sudo` is sudo-rs and coreutils are the Rust uutils
+  (test Tero's commands against them); third-party apt repos use a key in /etc/apt/keyrings with signed-by.
+  Runtime: the service runs as the unprivileged `tero` user with only CAP_NET_BIND_SERVICE;
+  Caddy is built into the binary and serves 80/443; every container is rootless Podman under `tero`.
+  Root is used only by `sudo tero init` and other `sudo tero ...` CLI commands, never from the dashboard.
+  Work is planned in vertical slices. Current slice (slice 1): onboarding with the security lockdown,
+  meaning the install script, `sudo tero init` with host hardening, the `tero` service user, and first
+  access to the dashboard (one-time link, password + TOTP, `sudo tero reset-login`).
+  openspec/specs holds only the current slice's capabilities. openspec/drafts holds rough specs for later
+  slices (apps, deployments, domains, app logs, build pipeline, GitHub connection); they are not commitments.
+  Security standards (ADR 0001): OWASP ASVS 5.0.0 Level 2 for the dashboard and HTTP endpoints, citing
+  requirement IDs like v5.0.0-6.5.1; a documented subset of the CIS Benchmark Level 1 Server per distro for
+  the host, checked with a minimum Lynis score in e2e CI; SLSA v1.1 Build L3 for release binaries.
+  Secrets requirements arrive with the slice that adds apps.
+
+rules:
+  specs:
+    - Write requirements with SHALL and give each at least one WHEN/THEN scenario
+    - Scenarios should be checkable by an end-to-end test against a real server
+
+# Project context (optional)
+# This is shown to AI when creating artifacts.
+# Add your tech stack, conventions, style guides, domain knowledge, etc.
+# Example:
+#   context: |
+#     Tech stack: TypeScript, React, Node.js
+#     We use conventional commits
+#     Domain: e-commerce platform
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing
