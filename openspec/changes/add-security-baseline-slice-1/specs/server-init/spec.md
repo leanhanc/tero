@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Host hardening
-Init SHALL harden the host to a documented subset of the CIS Benchmark Level 1 Server profile for the host's distro before Tero starts serving traffic. The subset, its CIS IDs per distro, and every skipped control with its reason are listed in `security/cis-subset.md`. The subset covers SSH, the firewall, automatic security updates, kernel settings, auditing, AppArmor, unneeded services, and permissions on sensitive files.
+Init SHALL harden the host to a documented subset of the CIS Benchmark Level 1 Server profile for the host's distro before Tero starts serving traffic. The subset, its CIS IDs per distro, and every skipped control with its reason are listed in `docs/security/cis-subset.md`. The subset covers SSH, the firewall, automatic security updates, kernel settings, auditing, AppArmor, unneeded services, and permissions on sensitive files.
 
 #### Scenario: Hardening applied
 - **WHEN** init completes
@@ -26,6 +26,7 @@ Init SHALL harden the host to a documented subset of the CIS Benchmark Level 1 S
 #### Scenario: Kernel settings
 - **WHEN** init completes
 - **THEN** the sysctls in the subset are set and persist across reboots, including `kernel.kptr_restrict`, `kernel.dmesg_restrict`, reverse-path filtering, and refusing ICMP redirects
+- **AND** core dumps are disabled with a hard limit for every user
 
 #### Scenario: Auditing and AppArmor
 - **WHEN** init completes

@@ -1,0 +1,17 @@
+# Ubuntu 22.04, which is not on Tero's tested list, for checking that init
+# refuses to run on untested platforms. Used on demand:
+#   limactl create --name=tero-other-os lima/tero-other-os.yaml
+minimumLimaVersion: 2.0.0
+base: template:ubuntu-22.04
+
+vmType: vz
+arch: aarch64
+cpus: 1
+memory: 2GiB
+disk: 10GiB
+
+containerd:
+  system: false
+  user: false
+
+mounts: []

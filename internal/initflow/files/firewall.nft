@@ -1,0 +1,26 @@
+#!/usr/sbin/nft -f
+# Written by `tero init`. Inbound traffic is dropped unless it is a reply,
+# loopback, essential ICMP, DHCP, or SSH/HTTP/HTTPS. Only Tero's own table is
+# replaced on reload, so rules other tools add (e.g. Podman) are left alone.
+
+table inet tero
+delete table inet tero
+
+table inet tero {
+	chain input {
+		type filter hook input priority filter; policy drop;
+
+		ct state established,related accept
+		ct state invalid drop
+		iif "lo" accept
+
+		ip protocol icmp icmp type { echo-request, destination-unreachable, time-exceeded, parameter-problem } accept
+		ip6 nexthdr icmpv6 icmpv6 type { echo-request, destination-unreachable, packet-too-big, time-exceeded, parameter-problem, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert } accept
+
+		udp sport 67 udp dport 68 accept
+		udp sport 547 udp dport 546 accept
+
+		tcp dport { 22, 80, 443 } accept
+		udp dport 443 accept
+	}
+}

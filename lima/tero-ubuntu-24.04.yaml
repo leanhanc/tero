@@ -1,0 +1,18 @@
+# Plain Ubuntu 24.04 server for Tero's end-to-end tests. Nothing Tero needs is
+# preinstalled: `tero init` has to do it all.
+#   scripts/vm-test.sh creates, uses and recreates this VM.
+minimumLimaVersion: 2.0.0
+base: template:ubuntu-24.04
+
+vmType: vz
+arch: aarch64
+cpus: 2
+memory: 4GiB
+disk: 20GiB
+
+containerd:
+  system: false
+  user: false
+
+# No host directories are shared with the VM, like a real server.
+mounts: []

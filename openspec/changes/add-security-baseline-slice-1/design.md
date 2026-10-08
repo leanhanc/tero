@@ -1,6 +1,6 @@
 ## Context
 
-ADR 0001 (`tero/adr-0001-security-baseline.md` in the project files) is the source for every requirement in this change. Slice 1 has no app or build containers yet, so only the ADR's dashboard, host and delivery sections apply. Ubuntu 26.04 LTS is the first tested platform. On it, `sudo` is sudo-rs and coreutils are the Rust uutils.
+ADR 0001 (`tero/adr-0001-security-baseline.md` in the project files) is the source for every requirement in this change. Slice 1 has no app or build containers yet, so only the ADR's dashboard, host and delivery sections apply. The tested platforms are Ubuntu 24.04 LTS and Ubuntu 26.04 LTS. They differ in ways init has to handle: 26.04 ships Podman 5.7 with sudo-rs and the Rust uutils coreutils, and 24.04 ships Podman 4.9 with GNU sudo and coreutils.
 
 ## Goals / Non-Goals
 
@@ -9,14 +9,14 @@ ADR 0001 (`tero/adr-0001-security-baseline.md` in the project files) is the sour
 - The host lockdown can be checked automatically in CI.
 
 **Non-Goals:**
-- Claiming CIS compliance. The CIS benchmark is a long list of individual settings ("controls"). Tero applies only the ones that fit a single-disk VPS, and for each one it leaves out, such as putting `/tmp` on its own disk partition, `security/cis-subset.md` says why.
+- Claiming CIS compliance. The CIS benchmark is a long list of individual settings ("controls"). Tero applies only the ones that fit a single-disk VPS, and for each one it leaves out, such as putting `/tmp` on its own disk partition, `docs/security/cis-subset.md` says why.
 - Passkeys, which come right after v1, and re-asking for TOTP before dangerous actions. Slice 1 has no such actions yet, and the first one (changing the dashboard domain) arrives with a later slice.
 - Container rules, secrets, and self-update signature checks, which come in later slices.
 
 ## Decisions
 
-- **ASVS traceability.** `security/asvs-l2.md` gets one row per L2 requirement, listing the spec and test that cover it or "not applicable" with a reason. Test names include the ASVS ID, for example `TestLogin_v5_0_0_6_5_1_TOTPReplay`.
-- **CIS subset as data.** `security/cis-subset.md` lists the controls by topic, with one CIS ID column per distro. Until CIS publishes a 26.04 benchmark, the IDs come from CIS Ubuntu 24.04 LTS v2.0.0. Init reads its per-distro settings from one table in code that mirrors this file, so adding a distro means adding a column in both places.
+- **ASVS traceability.** `docs/security/asvs-l2.md` gets one row per L2 requirement, listing the spec and test that cover it or "not applicable" with a reason. Test names include the ASVS ID, for example `TestLogin_v5_0_0_6_5_1_TOTPReplay`.
+- **CIS subset as data.** `docs/security/cis-subset.md` lists the controls by topic, with one CIS ID column per distro. The Ubuntu IDs come from CIS Ubuntu 24.04 LTS v2.0.0, which also stands in for 26.04 until CIS publishes a 26.04 benchmark. Init reads its per-distro settings from one table in code that mirrors this file, so adding a distro means adding a column in both places.
 - **Lynis as the CI gate.** The e2e suite starts a fresh VM, installs, runs `sudo tero init`, and then runs Lynis plus Tero's own assertions, one per scenario in `server-init`. The minimum Lynis score is fixed in the suite after the first green run, and later changes can only raise it.
 - **SSH lockout guard.** Init runs every check before it makes any change, so a refusal leaves the host untouched. This guard is not in the ADR. It exists because disabling password SSH on a host that only has a password is the easiest way for init to brick a VPS.
 - **Breached-password check.** The embedded list is the top 100k common passwords. Have I Been Pwned is queried with `Add-Padding: true`. If the API is unreachable, the embedded list alone decides and a security event records that the online check was skipped. The alternative of failing closed would block setup on a transient network error.
@@ -24,13 +24,23 @@ ADR 0001 (`tero/adr-0001-security-baseline.md` in the project files) is the sour
 - **TOTP replay.** Store the last accepted TOTP time step for the account and reject any code at or before it.
 - **Rate limiting.** Keep counters in SQLite so they survive restarts and a restart can't be used to reset them. Use exponential backoff starting after 5 failures per IP and 10 per account.
 - **Release provenance.** GoReleaser runs inside a reusable workflow, and the calling workflow only invokes it. That isolation is what reaches SLSA Build L3. `actions/attest-build-provenance` signs through Sigstore, and Syft produces the SBOMs.
-- **uutils and sudo-rs.** Init shells out as little as possible. Every command it does run is exercised in e2e on 26.04, where uutils and sudo-rs are the defaults.
+- **Per-release differences.** Init shells out as little as possible, and every command it runs is exercised in e2e on each tested release, so both sudo-rs and uutils (26.04) and GNU sudo and coreutils (24.04) are covered.
+
+- **Implementation order.** The slice is built in four parts: init and the lockdown, then dashboard first access, then releases and `install.sh`, then e2e on a cloud provider. Each part leaves a VM that passes everything built so far. Init comes first because everything else runs on a host it prepared.
+- **Local test loop.** For each tested release, a Lima VM running plain Ubuntu on the Mac (arm64) is recreated for each full run, the same way the build spike did it. amd64 is first exercised in part 4.
+- **HTTPS inside the VM.** The VM has no public IP, so Let's Encrypt can't issue there. The VM runs Pebble, Let's Encrypt's ACME test server, and `tero serve` is pointed at it by a test-only setting. That keeps the real ACME path under test, unlike Caddy's internal CA. Real certificates on sslip.io are first exercised in part 4.
+- **Dashboard UI.** A client-side React + TypeScript app built with Vite, with Bun as the package manager and script runner for development and builds (`bun install`, `bun run build`). Bun is used only at build time. The build output is embedded in the Go binary with `go:embed` and served by `tero serve`, so the server needs no Node runtime. All security logic lives in the Go JSON API: authentication, sessions, rate limits and the password checks. React server actions or Next.js would put a Node process on every server, adding attack surface and update burden without moving any security decision out of Go. Because every asset is self-hosted, the dashboard can use a strict Content-Security-Policy (`default-src 'self'`, no inline scripts). State-changing API calls require the `SameSite=Strict` session cookie and a JSON content type, which blocks cross-site form posts.
+- **Firewall.** nftables rules written by init, rather than ufw. nftables is the kernel's current packet-filtering framework and ufw is a front end to it. The later per-app network isolation in the ADR also uses nftables, so one tool covers both.
 
 ## Risks / Trade-offs
 
 - [A cloud image ships an SSH config that overrides Tero's, for example a drop-in under `sshd_config.d`] → Init writes a drop-in that sorts first, and the e2e suite checks the effective settings with `sshd -T`.
+- [The service's sandboxing (`NoNewPrivileges`, a bounding set of only `CAP_NET_BIND_SERVICE`) blocks `newuidmap`, so rootless Podman can't be started as a child of the service] → Slice 1 starts no containers from the service. When apps arrive, containers run under `tero`'s systemd user manager (for example with Quadlet) instead of as children of the service.
+- [Apport turns setuid core dumps back on at boot] → Init disables Apport, which CIS also recommends; the reboot test checks `fs.suid_dumpable`.
 - [Some VPS providers manage their own firewall or AppArmor profiles] → The skipped controls and their reasons go in `cis-subset.md`, and init warns rather than fails when a provider tool already owns a setting.
 - [The `curl | sh` install can only check a checksum from the same origin] → The ADR accepts this. Provenance can be checked with `gh attestation verify`, and self-update verification arrives with the self-update slice.
+
+- [sslip.io names may hit Let's Encrypt rate limits if many Tero servers share them] → Check whether sslip.io is on the Public Suffix List, which makes limits apply per IP subdomain, before part 4. If it isn't, document the risk and recommend a custom domain.
 
 ## Open Questions
 

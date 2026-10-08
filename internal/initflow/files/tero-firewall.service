@@ -1,0 +1,17 @@
+# Written by `tero init`.
+[Unit]
+Description=Tero host firewall
+DefaultDependencies=no
+Before=network-pre.target
+Wants=network-pre.target
+After=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/tero/firewall.nft
+ExecReload=/usr/sbin/nft -f /etc/tero/firewall.nft
+ExecStop=/usr/sbin/nft delete table inet tero
+
+[Install]
+WantedBy=sysinit.target

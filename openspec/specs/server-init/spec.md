@@ -1,7 +1,7 @@
 # server-init Specification
 
 ## Purpose
-`sudo tero init` turns a fresh server on a tested platform (initially Ubuntu 26.04 LTS, see `installation`) into a Tero host in one run: it hardens the host, installs Podman, creates the unprivileged `tero` system user, installs the Tero service, and hands the admin a way into the dashboard. It is the only step that needs root for setup.
+`sudo tero init` turns a fresh server on a tested platform (see `installation`) into a Tero host in one run: it hardens the host, installs Podman, creates the unprivileged `tero` system user, installs the Tero service, and hands the admin a way into the dashboard. It is the only step that needs root for setup.
 
 ## Requirements
 
@@ -18,7 +18,7 @@
 - **AND** the message says the server is already a Tero host, shows the dashboard URL, and points to `sudo tero reset-login` for anyone who lost dashboard access
 
 ### Requirement: Host hardening
-Init SHALL harden the host to a documented subset of the CIS Benchmark Level 1 Server profile for the host's distro before Tero starts serving traffic. The subset, its CIS IDs per distro, and every skipped control with its reason are listed in `security/cis-subset.md`.
+Init SHALL harden the host to a documented subset of the CIS Benchmark Level 1 Server profile for the host's distro before Tero starts serving traffic. The subset, its CIS IDs per distro, and every skipped control with its reason are listed in `docs/security/cis-subset.md`.
 
 #### Scenario: Hardening applied
 - **WHEN** init completes

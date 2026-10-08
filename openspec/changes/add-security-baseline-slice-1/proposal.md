@@ -4,7 +4,7 @@ Tero's pitch is security from the first minute, and ADR 0001 defines what that m
 
 ## What Changes
 
-- Install: every release carries SLSA Build L3 provenance and an SBOM, and the install docs show how to verify a download with `gh attestation verify`.
+- Install: the tested platforms are Ubuntu 24.04 LTS and Ubuntu 26.04 LTS. Every release carries SLSA Build L3 provenance and an SBOM, and the install docs show how to verify a download with `gh attestation verify`.
 - Init: the host hardening requirement lists the CIS subset by topic (SSH, firewall, automatic updates, kernel settings, auditd, AppArmor, services, file permissions), and init refuses to turn off SSH password login when doing so would lock the admin out.
 - Dashboard first access:
   - The password policy follows ASVS V6.2: at least 15 characters, at least 64 accepted, no composition rules, paste allowed, and breached passwords rejected.
@@ -23,14 +23,14 @@ None.
 
 ### Modified Capabilities
 
-- `installation`: release provenance and SBOM; verification instructions.
+- `installation`: Ubuntu 24.04 LTS added to the tested platforms; release provenance and SBOM; verification instructions.
 - `server-init`: CIS subset by topic; SSH lockout guard.
 - `dashboard-access`: ASVS L2 password policy, password storage, TOTP replay protection, brute-force protection, session management, security events.
 
 ## Impact
 
 - Release pipeline: GoReleaser in a reusable GitHub Actions workflow with `actions/attest-build-provenance` and Syft SBOMs.
-- Repo docs: `security/asvs-l2.md` (ASVS L2 matrix) and `security/cis-subset.md` (CIS controls per distro, including skipped ones).
+- Repo docs: `docs/security/asvs-l2.md` (ASVS L2 matrix) and `docs/security/cis-subset.md` (CIS controls per distro, including skipped ones).
 - Init touches `sshd_config`, firewall, sysctl, auditd, AppArmor and unattended-upgrades on the host.
 - Dashboard login: a bundled common-password list, outbound HTTPS to the Have I Been Pwned range API, and new SQLite tables for the TOTP last-used step, rate-limit state, sessions and security events.
 - End-to-end CI runs Lynis on a freshly initialized server and enforces a minimum score.

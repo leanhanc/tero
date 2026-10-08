@@ -2,10 +2,11 @@ schema: spec-driven
 
 context: |
   Tero is a self-hosted PaaS: one Go binary installed on one Linux server that builds and runs apps from GitHub, with security locked down by default.
-  Platforms: Ubuntu 26.04 LTS (amd64, arm64) is the first tested platform, not a permanent limit;
-  specs should name it as the tested platform and keep OS-specific steps behind that list.
-  On Ubuntu 26.04 LTS: Podman 5.7, systemd 259, `sudo` is sudo-rs and coreutils are the Rust uutils
-  (test Tero's commands against them); third-party apt repos use a key in /etc/apt/keyrings with signed-by.
+  Platforms: the tested list is Ubuntu 24.04 LTS and Ubuntu 26.04 LTS, each on amd64 and arm64. Specs stay
+  distro-neutral ("a tested platform") and keep OS-specific steps behind that list.
+  Ubuntu 26.04 LTS: Podman 5.7, systemd 259, `sudo` is sudo-rs and coreutils are the Rust uutils.
+  Ubuntu 24.04 LTS: Podman 4.9, systemd 255, GNU sudo and coreutils.
+  Test Tero's commands on every tested release; third-party apt repos use a key in /etc/apt/keyrings with signed-by.
   Runtime: the service runs as the unprivileged `tero` user with only CAP_NET_BIND_SERVICE;
   Caddy is built into the binary and serves 80/443; every container is rootless Podman under `tero`.
   Root is used only by `sudo tero init` and other `sudo tero ...` CLI commands, never from the dashboard.

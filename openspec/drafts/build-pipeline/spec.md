@@ -3,7 +3,7 @@
 ## Purpose
 Turn a commit into a runnable image on the same server, without root and without a registry. Railpack, used as a Go library, plans the build; a short-lived rootless BuildKit container under Podman executes it; the result is loaded straight into Podman. A repository with a Dockerfile is built from that Dockerfile instead.
 
-The build path, including the 1,000,000-id subuid range and the `unmask=/proc/*` requirement, must be validated on Ubuntu 26.04 LTS with the spike program on the local branch `spike/railpack-podman-buildkit` (`SPIKE.md`) before these requirements are treated as confirmed.
+The build path, including the 1,000,000-id subuid range and the `unmask=/proc/*` requirement, must be validated on every tested Ubuntu release with the spike program on the local branch `spike/railpack-podman-buildkit` (`SPIKE.md`) before these requirements are treated as confirmed.
 
 ## Requirements
 
