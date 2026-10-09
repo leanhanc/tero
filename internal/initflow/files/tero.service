@@ -4,6 +4,8 @@ Description=Tero
 Documentation=https://github.com/leanhanc/tero
 After=network-online.target tero-firewall.service
 Wants=network-online.target
+# The dashboard only starts behind the firewall.
+Requires=tero-firewall.service
 
 [Service]
 User=tero
@@ -21,6 +23,11 @@ StateDirectory=tero
 StateDirectoryMode=0750
 Environment=XDG_DATA_HOME=/var/lib/tero/data XDG_CONFIG_HOME=/var/lib/tero/config
 UMask=0077
+
+# Bounds the service alone, so a flood of requests can't push the kernel's OOM
+# killer onto sshd or the apps.
+MemoryHigh=384M
+MemoryMax=512M
 
 ProtectSystem=strict
 ProtectHome=yes

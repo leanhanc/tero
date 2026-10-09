@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Password policy
-The admin password SHALL meet OWASP ASVS 5.0.0 V6.2. It SHALL be at least 15 characters (v5.0.0-6.2.1), passwords of at least 64 characters SHALL be accepted (v5.0.0-6.2.9), there SHALL be no composition rules (v5.0.0-6.2.5), and paste and password managers SHALL be allowed (v5.0.0-6.2.7). Passwords found in a bundled list of common passwords or in the Have I Been Pwned range API SHALL be rejected (v5.0.0-6.2.12). The range API is queried with a hash prefix only.
+The admin password SHALL meet OWASP ASVS 5.0.0 V6.2. It SHALL be at least 15 characters (v5.0.0-6.2.1), passwords of at least 64 characters SHALL be accepted (v5.0.0-6.2.9), there SHALL be no composition rules (v5.0.0-6.2.5), and paste and password managers SHALL be allowed (v5.0.0-6.2.7). Passwords found in a bundled list of common passwords or in the Have I Been Pwned range API SHALL be rejected (v5.0.0-6.2.12). The bundled list SHALL hold at least the 3,000 most common passwords that meet the length rule, and SHALL be checked on every new password, whether or not the API is reachable. The range API is queried with a hash prefix only.
 
 #### Scenario: Password too short
 - **WHEN** the admin chooses a 14-character password during setup
@@ -38,7 +38,7 @@ A TOTP code SHALL be accepted at most once (v5.0.0-6.5.1).
 - **THEN** the second login fails
 
 ### Requirement: Brute-force protection
-Login attempts SHALL be rate limited per source IP and per account, with increasing delays after repeated failures (v5.0.0-6.3.1).
+Login attempts SHALL be rate limited per source IP (per /64 for IPv6) and per account, with increasing delays after repeated failures (v5.0.0-6.3.1). Concurrent attempts SHALL NOT get past a limit. A browser the admin has logged in from SHALL be limited per device instead of per account, so failures from others can't lock the admin out.
 
 #### Scenario: Repeated failures from one IP
 - **WHEN** one IP submits 5 failed logins in a row
@@ -46,7 +46,11 @@ Login attempts SHALL be rate limited per source IP and per account, with increas
 
 #### Scenario: Distributed guessing
 - **WHEN** failed logins for the admin account come from many IPs
-- **THEN** the per-account limit applies and slows all attempts on that account
+- **THEN** the per-account limit applies and slows all attempts on that account from browsers the admin hasn't logged in from
+
+#### Scenario: Attackers can't lock the admin out
+- **WHEN** the per-account limit is active and the admin logs in from a browser they logged in from before
+- **THEN** that browser is limited only by its own failures, not the account's
 
 #### Scenario: Limit does not leak validity
 - **WHEN** a rate-limited client submits correct credentials

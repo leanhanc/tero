@@ -35,6 +35,10 @@ func checkPreflight(ctx context.Context, h host) error {
 		return err
 	}
 
+	if err := checkTeroAccount(h); err != nil {
+		return err
+	}
+
 	return checkSSHLockout(ctx, h)
 }
 

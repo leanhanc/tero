@@ -19,7 +19,10 @@
 -w /usr/local/bin/tero -p wa -k tero
 
 # Changes to the network identity and the AppArmor policy
+# Each syscall rule has a 32-bit twin, so the compat syscall interface
+# can't be used to avoid it.
 -a always,exit -F arch=b64 -S sethostname,setdomainname -k system-locale
+-a always,exit -F arch=b32 -S sethostname,setdomainname -k system-locale
 -w /etc/hosts -p wa -k system-locale
 -w /etc/hostname -p wa -k system-locale
 -w /etc/apparmor -p wa -k MAC-policy
@@ -27,6 +30,7 @@
 
 # Kernel module loading
 -a always,exit -F arch=b64 -S init_module,finit_module,delete_module -k kernel_modules
+-a always,exit -F arch=b32 -S init_module,finit_module,delete_module -k kernel_modules
 
 # Logins and sessions
 -w /var/log/wtmp -p wa -k session

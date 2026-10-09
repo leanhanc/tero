@@ -11,7 +11,8 @@ Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/sbin/nft -f /etc/tero/firewall.nft
 ExecReload=/usr/sbin/nft -f /etc/tero/firewall.nft
-ExecStop=/usr/sbin/nft delete table inet tero
+# No ExecStop: stopping the unit must not open the host. Remove the rules
+# with `nft delete table inet tero` on purpose instead.
 
 [Install]
 WantedBy=sysinit.target

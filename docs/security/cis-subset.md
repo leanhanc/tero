@@ -16,13 +16,13 @@ The end-to-end suite (`e2e/init_test.go`) checks every applied control and repor
 | SSH | No host-based auth, rhosts, user environment or X11 forwarding | 5.1 | `files/sshd-hardening.conf` | `SSH locked down` |
 | SSH | MaxAuthTries 4, MaxSessions 10, MaxStartups 10:30:60, LoginGraceTime 60, client alive 300s × 3, LogLevel VERBOSE | 5.1 | `files/sshd-hardening.conf` | `SSH locked down` |
 | SSH | `sshd_config` and host private keys readable by root only | 5.1 (file permissions) | `services.go` | `Unneeded services and file permissions` |
-| Firewall | Default deny inbound; allow replies, loopback, essential ICMP, DHCP, 22, 80, 443 | 4 (host-based firewall, nftables) | `files/firewall.nft` | `Firewall default deny` |
+| Firewall | Default deny inbound; allow replies, loopback, essential ICMP, DHCP, the SSH server's ports, 80, 443. Stopping the unit keeps the rules, and the service only starts behind them | 4 (host-based firewall, nftables) | `files/firewall.nft` | `Firewall default deny` |
 | Updates | Security updates installed automatically | 1.2.2 | `files/20auto-upgrades` | `Automatic security updates` |
 | Kernel | ASLR on, no setuid core dumps, ptrace restricted, kernel pointers and dmesg hidden | 1.5 | `files/sysctl-hardening.conf` | `Kernel settings` |
 | Kernel | Core dumps disabled with a hard limit for every user | 1.5 | `files/limits-core.conf` | `Kernel settings` |
 | Network | No IP forwarding, redirects or source routing; reverse-path filtering; log martians; SYN cookies; ignore broadcast and bogus ICMP | 3.3 | `files/sysctl-hardening.conf` | `Kernel settings` |
 | Auditing | auditd installed and running | 6.3.1 | `steps.go` | `Auditing and AppArmor` |
-| Auditing | Changes to sudoers, users and groups, network identity, AppArmor policy, kernel modules, logins, SSH config, Tero's config and binary are recorded | 6.3.3 | `files/audit.rules` | `Auditing and AppArmor` |
+| Auditing | Changes to sudoers, users and groups, network identity, AppArmor policy, kernel modules, logins, SSH config, Tero's config and binary are recorded; syscall rules cover both the 64-bit and 32-bit interfaces | 6.3.3 | `files/audit.rules` | `Auditing and AppArmor` |
 | AppArmor | Installed and enabled; init stops if it isn't | 1.3.1 | `steps.go` | `Auditing and AppArmor` |
 | Services | apport (it re-enables setuid core dumps), avahi, cups, rpcbind, NFS, Samba, DHCP server, LDAP, DNS, FTP, IMAP, Squid, SNMP, rsync daemon, telnet and xinetd disabled when installed | 2.1 | `services.go` | `Unneeded services and file permissions` |
 | Files | `/etc/passwd`, `group`, `shadow`, `gshadow` and their backups owned by root with CIS modes | 7.1 | `services.go` | `Unneeded services and file permissions` |

@@ -16,6 +16,7 @@ import (
 
 	"github.com/leanhanc/tero/internal/config"
 	"github.com/leanhanc/tero/internal/hostfs"
+	"github.com/leanhanc/tero/internal/loginlink"
 	"github.com/leanhanc/tero/internal/sysexec"
 )
 
@@ -70,15 +71,21 @@ func Run(ctx context.Context, opts Options) error {
 func finish(ctx context.Context, h host, version, domain string) error {
 	hasCertificate := waitForCertificate(ctx, domain, 3*time.Minute)
 
+	link, err := loginlink.Run(ctx, loginlink.Issue)
+	if err != nil {
+		return fmt.Errorf("Setup stopped while creating the dashboard setup link.\n\n%s\n\nRun `sudo tero init` again. Finished steps are skipped", capitalize(err.Error()))
+	}
+
 	marker := config.Marker{Version: version, Domain: domain, CompletedAt: time.Now().UTC()}
 	if err := config.SaveMarker(h.files, marker); err != nil {
 		return err
 	}
 
-	fmt.Fprintf(h.out, "\nDone. Open https://%s to finish setting up Tero.\n", domain)
 	if !hasCertificate {
 		fmt.Fprintf(h.out, "\nThe page may take a few minutes to load: %s has to point to this server's IP address first.\n", domain)
 	}
+	// The link is the last line, so it is easy to find and copy.
+	fmt.Fprintf(h.out, "\nDone. Open this link to set up your dashboard login:\n\n  %s\n", link)
 
 	return nil
 }

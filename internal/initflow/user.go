@@ -3,6 +3,7 @@ package initflow
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -37,23 +38,72 @@ func createTeroUser(ctx context.Context, h host) error {
 	return checkRootlessPodman(ctx, h, tero.uid, hasNewRange)
 }
 
+// systemIDLimit is where Ubuntu starts regular user and group ids.
+const systemIDLimit = 1000
+
+// checkTeroAccount refuses init when a tero user or group exists that isn't
+// one an earlier init created: taking over someone's account would lock them
+// out, and running the service as a user with sudo would undo the isolation.
+func checkTeroAccount(h host) error {
+	accounts, err := readAccounts(h.files)
+	if err != nil {
+		return err
+	}
+	groups, err := readGroups(h.files)
+	if err != nil {
+		return err
+	}
+
+	existing, hasUser := accounts[teroUser]
+	if hasUser {
+		return checkExistingTeroUser(h, existing)
+	}
+
+	existingGroup, hasGroup := groups[teroUser]
+	isUsableGroup := existingGroup.gid < systemIDLimit && len(existingGroup.members) == 0
+	if hasGroup && !isUsableGroup {
+		return fmt.Errorf("A group named %s already exists (gid %d), and Tero needs that name for its own system group.\nInit stopped without changing anything. Rename or remove that group, then run init again", teroUser, existingGroup.gid)
+	}
+
+	return nil
+}
+
+func checkExistingTeroUser(h host, existing account) error {
+	groupNames, err := groupsOf(h.files, existing)
+	if err != nil {
+		return err
+	}
+
+	isSystemUser := existing.uid < systemIDLimit && existing.home == teroHome && existing.shell == noLogin
+	hasSudo := slices.ContainsFunc(sudoGroups, func(name string) bool { return slices.Contains(groupNames, name) })
+	if isSystemUser && !hasSudo {
+		return nil
+	}
+
+	return fmt.Errorf("A user named %s already exists (uid %d, home %s), and Tero needs that name for the unprivileged user that runs it.\nInit stopped without changing anything. Rename or remove that user, then run init again", teroUser, existing.uid, existing.home)
+}
+
+// ensureAccount creates the tero system user, or reuses the one an earlier,
+// interrupted init created (checkTeroAccount has vetted it).
 func ensureAccount(ctx context.Context, h host) error {
 	accounts, err := readAccounts(h.files)
 	if err != nil {
 		return err
 	}
-
-	existing, exists := accounts[teroUser]
-	if !exists {
-		_, err := h.run.Run(ctx, "useradd", "--system", "--user-group",
-			"--home-dir", teroHome, "--create-home", "--shell", noLogin, teroUser)
-		if err != nil {
-			return err
-		}
+	groups, err := readGroups(h.files)
+	if err != nil {
+		return err
 	}
 
-	if exists && existing.shell != noLogin {
-		if _, err := h.run.Run(ctx, "usermod", "--shell", noLogin, teroUser); err != nil {
+	if _, exists := accounts[teroUser]; !exists {
+		groupOption := []string{"--user-group"}
+		if _, hasGroup := groups[teroUser]; hasGroup {
+			groupOption = []string{"--gid", teroUser}
+		}
+
+		args := append([]string{"--system"}, groupOption...)
+		args = append(args, "--home-dir", teroHome, "--create-home", "--shell", noLogin, teroUser)
+		if _, err := h.run.Run(ctx, "useradd", args...); err != nil {
 			return err
 		}
 	}

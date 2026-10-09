@@ -14,7 +14,10 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/leanhanc/tero/internal/config"
+	"github.com/leanhanc/tero/internal/hostfs"
 	"github.com/leanhanc/tero/internal/initflow"
+	"github.com/leanhanc/tero/internal/loginlink"
 	"github.com/leanhanc/tero/internal/rootcheck"
 	"github.com/leanhanc/tero/internal/serve"
 )
@@ -52,7 +55,9 @@ func run(ctx context.Context, args []string) error {
 	case "serve":
 		return serve.Run(ctx)
 	case "reset-login":
-		return runResetLogin()
+		return runResetLogin(ctx)
+	case loginlink.Command:
+		return loginlink.RunChild(ctx, commandArgs)
 	case "version", "--version":
 		fmt.Println(version)
 		return nil
@@ -81,12 +86,21 @@ func runInit(ctx context.Context, args []string) error {
 	})
 }
 
-func runResetLogin() error {
+func runResetLogin(ctx context.Context) error {
 	if err := rootcheck.Require("reset-login"); err != nil {
 		return err
 	}
+	if _, err := config.LoadMarker(hostfs.Host); err != nil {
+		return err
+	}
 
-	return errors.New("Resetting the dashboard login isn't available yet")
+	link, err := loginlink.Run(ctx, loginlink.Reset)
+	if err != nil {
+		return fmt.Errorf("reset the dashboard login: %w", err)
+	}
+
+	fmt.Printf("The dashboard login was reset. Open this link to set it up again:\n\n  %s\n", link)
+	return nil
 }
 
 func isTerminal(file *os.File) bool {

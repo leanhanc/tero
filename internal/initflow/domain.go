@@ -72,6 +72,13 @@ func normalizeDomain(raw string) (string, error) {
 		}
 	}
 
+	// No top-level domain is all digits; a name like 1.2.3 can't get a
+	// certificate.
+	topLevel := labels[len(labels)-1]
+	if strings.Trim(topLevel, "0123456789") == "" {
+		return "", fmt.Errorf("%q is not a valid domain name, e.g. dashboard.example.com", raw)
+	}
+
 	return domain, nil
 }
 

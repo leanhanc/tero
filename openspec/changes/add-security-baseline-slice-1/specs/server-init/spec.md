@@ -17,7 +17,7 @@ Init SHALL harden the host to a documented subset of the CIS Benchmark Level 1 S
 
 #### Scenario: Firewall default deny
 - **WHEN** init completes
-- **THEN** the host firewall drops inbound traffic by default and allows only ports 22, 80 and 443
+- **THEN** the host firewall drops inbound traffic by default and allows only the ports the SSH server listens on, 80 and 443
 
 #### Scenario: Automatic security updates
 - **WHEN** init completes

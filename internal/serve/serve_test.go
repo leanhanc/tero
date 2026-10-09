@@ -27,3 +27,20 @@ func TestBuildCaddyConfigServesOnlyTheDashboardDomain(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildCaddyConfigSetsStrictCSP(t *testing.T) {
+	cfg, err := buildCaddyConfig("dash.example.com", map[string]any{"module": "acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	apps, _ := json.Marshal(cfg.AppsRaw)
+	if strings.Contains(string(apps), "unsafe-inline") || strings.Contains(string(apps), "unsafe-eval") {
+		t.Error("the CSP allows inline or eval'd code")
+	}
+	for _, expected := range []string{"default-src 'self'", "frame-ancestors 'none'", `"tero_dashboard"`} {
+		if !strings.Contains(string(apps), expected) {
+			t.Errorf("config is missing %s", expected)
+		}
+	}
+}

@@ -25,11 +25,12 @@ type testedPlatform struct {
 	arches    []string
 }
 
-// tested lists every OS release Tero is tested on. Adding a platform means
-// adding a row here and running the end-to-end suite on it.
+// tested lists every OS release and architecture the end-to-end suite runs
+// on. Adding one means adding it here and running the suite on it. amd64
+// joins once the suite runs on amd64 servers.
 var tested = []testedPlatform{
-	{osID: "ubuntu", versionID: "26.04", name: "Ubuntu 26.04 LTS", arches: []string{"amd64", "arm64"}},
-	{osID: "ubuntu", versionID: "24.04", name: "Ubuntu 24.04 LTS", arches: []string{"amd64", "arm64"}},
+	{osID: "ubuntu", versionID: "26.04", name: "Ubuntu 26.04 LTS", arches: []string{"arm64"}},
+	{osID: "ubuntu", versionID: "24.04", name: "Ubuntu 24.04 LTS", arches: []string{"arm64"}},
 }
 
 // Detect reads the running host's platform.

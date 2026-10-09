@@ -30,10 +30,10 @@ func TestIsTested(t *testing.T) {
 		want      bool
 	}{
 		{"ubuntu 26.04 arm64", ubuntu2604, "arm64", true},
-		{"ubuntu 26.04 amd64", ubuntu2604, "amd64", true},
+		{"ubuntu 26.04 amd64, not run end to end yet", ubuntu2604, "amd64", false},
 		{"ubuntu 26.04 riscv64", ubuntu2604, "riscv64", false},
 		{"ubuntu 24.04 arm64", ubuntu2404, "arm64", true},
-		{"ubuntu 24.04 amd64", ubuntu2404, "amd64", true},
+		{"ubuntu 24.04 amd64, not run end to end yet", ubuntu2404, "amd64", false},
 		{"ubuntu 22.04 arm64", ubuntu2204, "arm64", false},
 		{"debian", "ID=debian\nVERSION_ID=\"13\"\n", "amd64", false},
 		{"empty os-release", "", "amd64", false},
@@ -57,7 +57,7 @@ func TestString(t *testing.T) {
 }
 
 func TestTestedListNamesEveryUbuntuRelease(t *testing.T) {
-	for _, want := range []string{"Ubuntu 26.04 LTS on amd64 or arm64", "Ubuntu 24.04 LTS on amd64 or arm64"} {
+	for _, want := range []string{"Ubuntu 26.04 LTS on arm64", "Ubuntu 24.04 LTS on arm64"} {
 		if !strings.Contains(TestedList(), want) {
 			t.Errorf("TestedList() = %q, missing %q", TestedList(), want)
 		}

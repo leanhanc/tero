@@ -65,9 +65,14 @@ func assertContains(t *testing.T, haystack string, needles ...string) {
 	}
 }
 
-// etcChecksum fingerprints every file under /etc, to prove a refused command
-// changed nothing.
+// etcChecksum fingerprints /etc and /usr/local, where init installs things,
+// to prove a refused command changed nothing: every entry's type, mode, owner
+// and symlink target, plus every regular file's contents. /var/lib/tero is
+// left out because the running service writes there.
 func etcChecksum(t *testing.T) string {
 	t.Helper()
-	return must(t, `sudo find /etc -xdev -type f -print0 | sort -z | sudo xargs -0 sha256sum | sha256sum`)
+	return must(t, `paths="/etc /usr/local"
+		{ sudo find $paths -xdev -printf '%y %m %u %g %p -> %l\n' 2>/dev/null | sort
+		  sudo find $paths -xdev -type f -print0 2>/dev/null | sort -z | sudo xargs -0 sha256sum
+		} | sha256sum`)
 }

@@ -22,7 +22,7 @@ const (
 
 	// minimumLynisScore is the hardening index the first green run reached.
 	// Raise it when hardening improves; never lower it.
-	minimumLynisScore = 64
+	minimumLynisScore = 65
 
 	capNetBindServiceOnly = "0000000000000400"
 )
@@ -38,8 +38,10 @@ func TestSlice1(t *testing.T) {
 	t.Run("server-init: Init without root", testInitWithoutRoot)
 	t.Run("process-isolation: Root command run without sudo", testRootCommandWithoutSudo)
 	t.Run("server-init: SSH lockout guard / No SSH key configured", testSSHLockoutGuard)
+	t.Run("server-init: SSH lockout guard / root login and StrictModes", testSSHLockoutGuardEdges)
+	t.Run("setup: sshd also listens on port 2222", addSSHPort)
 
-	t.Run("server-init: Admin skips the domain (runs init)", testInit)
+	t.Run("server-init: Admin skips the domain (runs init) / Link printed at the end of init", testInit)
 	if t.Failed() {
 		t.FailNow()
 	}
@@ -62,6 +64,7 @@ func TestSlice1(t *testing.T) {
 	t.Run("server-init: Admin skips the domain (serves HTTPS)", func(t *testing.T) { assertServesHTTPS(t, skippedDomain) })
 	t.Run("server-init: Admin provides a domain", testProvidedDomain)
 	t.Run("server-init: Init on an already initialized server", testSecondInit)
+	t.Run("dashboard-access", testDashboardAccess)
 	t.Run("server-init: Lynis score in end-to-end tests", testLynis)
 	t.Run("server-init: Service survives reboot", testReboot)
 }
@@ -95,11 +98,46 @@ func testSSHLockoutGuard(t *testing.T) {
 	if got.exitCode == 0 {
 		t.Fatal("init ran without any SSH key for a sudo user")
 	}
-	assertContains(t, got.output, "no user who can run sudo has an SSH key", "without changing anything")
+	assertContains(t, got.output, "wouldn't accept a key for", "without changing anything")
 
 	if after := etcChecksum(t); after != before {
 		t.Fatal("a refused init changed files under /etc")
 	}
+}
+
+// testSSHLockoutGuardEdges checks two lockouts the guard used to miss: init
+// run from a root login, and a key file sshd ignores because the home
+// directory is group-writable.
+func testSSHLockoutGuardEdges(t *testing.T) {
+	before := etcChecksum(t)
+
+	asRoot := run(t, "sudo env -u SUDO_USER TERO_E2E_PUBLIC_IP="+publicIP+" tero init")
+	if asRoot.exitCode == 0 {
+		t.Fatal("init ran from a root login")
+	}
+	assertContains(t, asRoot.output, "logged in as root")
+
+	writableHome := run(t, `chmod g+w "$HOME"
+		sudo env TERO_E2E_PUBLIC_IP=`+publicIP+` tero init; status=$?
+		chmod g-w "$HOME"
+		exit $status`)
+	if writableHome.exitCode == 0 {
+		t.Fatal("init ran although sshd would ignore the admin's key")
+	}
+	assertContains(t, writableHome.output, "StrictModes")
+
+	if after := etcChecksum(t); after != before {
+		t.Fatal("a refused init changed files under /etc")
+	}
+}
+
+// addSSHPort makes sshd listen on 2222 as well, as on servers that move SSH
+// off port 22, so the firewall test can check init keeps it reachable.
+func addSSHPort(t *testing.T) {
+	must(t, `printf 'Port 22\nPort 2222\n' | sudo tee /etc/ssh/sshd_config.d/50-e2e-extra-port.conf >/dev/null
+		sudo systemctl daemon-reload
+		if systemctl is-active --quiet ssh.socket; then sudo systemctl restart ssh.socket; else sudo systemctl restart ssh.service; fi`)
+	waitUntil(t, 30*time.Second, func() bool { return run(t, "nc -z -w 2 127.0.0.1 2222").exitCode == 0 })
 }
 
 func testInit(t *testing.T) {
@@ -109,10 +147,19 @@ func testInit(t *testing.T) {
 	}
 	t.Logf("init output:\n%s", got.output)
 
-	assertContains(t, got.output, "Done. Open https://"+skippedDomain)
 	if strings.Contains(got.output, "may take a few minutes") {
 		t.Error("init did not see the HTTPS certificate")
 	}
+
+	setupLink = lastLine(got.output)
+	if !strings.HasPrefix(setupLink, "https://"+skippedDomain+"/setup#") {
+		t.Fatalf("the last line of init is not the setup link: %q", setupLink)
+	}
+}
+
+func lastLine(output string) string {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
 }
 
 func asTero(command string) string {
@@ -223,27 +270,33 @@ func testSSHLockedDown(t *testing.T) {
 	}
 }
 
-// testFirewall probes the VM from a separate network namespace joined by a
-// veth pair, so the packets arrive on a real interface and go through the
-// input chain, like traffic from the internet.
+// testFirewall probes the VM over IPv4 and IPv6 from a separate network
+// namespace joined by a veth pair, so the packets arrive on a real interface
+// and go through the input chain, like traffic from the internet.
 func testFirewall(t *testing.T) {
-	assertContains(t, must(t, "sudo nft list table inet tero"), "policy drop", "tcp dport { 22, 80, 443 } accept")
+	assertContains(t, must(t, "sudo nft list table inet tero"), "policy drop", "tcp dport { 22, 80, 443, 2222 } accept")
 
 	must(t, `sudo ip netns add e2e-probe
 		sudo ip link add e2e-host type veth peer name e2e-probe netns e2e-probe
 		sudo ip addr add 10.200.0.1/30 dev e2e-host && sudo ip link set e2e-host up
 		sudo ip -n e2e-probe addr add 10.200.0.2/30 dev e2e-probe
-		sudo ip -n e2e-probe link set e2e-probe up && sudo ip -n e2e-probe link set lo up`)
+		sudo ip -n e2e-probe link set e2e-probe up && sudo ip -n e2e-probe link set lo up
+		sudo ip -6 addr add fd00:200::1/64 dev e2e-host nodad
+		sudo ip -n e2e-probe -6 addr add fd00:200::2/64 dev e2e-probe nodad`)
 	defer run(t, "sudo ip link del e2e-host; sudo ip netns del e2e-probe")
 
 	must(t, "sudo systemd-run --unit=e2e-listener --collect nc -lk 8080")
 	defer run(t, "sudo systemctl stop e2e-listener")
+	must(t, "sudo systemd-run --unit=e2e-listener6 --collect nc -6 -lk 8080")
+	defer run(t, "sudo systemctl stop e2e-listener6")
 
-	for port, isOpen := range map[int]bool{22: true, 443: true, 8080: false} {
-		probe := run(t, "sudo ip netns exec e2e-probe nc -z -w 3 10.200.0.1 "+strconv.Itoa(port))
-		isReachable := probe.exitCode == 0
-		if isReachable != isOpen {
-			t.Errorf("port %d reachable from outside = %v, want %v", port, isReachable, isOpen)
+	for _, address := range []string{"10.200.0.1", "fd00:200::1"} {
+		for port, isOpen := range map[int]bool{22: true, 2222: true, 443: true, 8080: false} {
+			probe := run(t, "sudo ip netns exec e2e-probe nc -z -w 3 "+address+" "+strconv.Itoa(port))
+			isReachable := probe.exitCode == 0
+			if isReachable != isOpen {
+				t.Errorf("port %d on %s reachable from outside = %v, want %v", port, address, isReachable, isOpen)
+			}
 		}
 	}
 }
@@ -283,7 +336,7 @@ func testKernelSettings(t *testing.T) {
 
 func testAuditingAndAppArmor(t *testing.T) {
 	must(t, "systemctl is-active auditd")
-	assertContains(t, must(t, "sudo auditctl -l"), "-w /etc/tero -p wa -k tero", "-w /etc/sudoers -p wa -k scope")
+	assertContains(t, must(t, "sudo auditctl -l"), "-w /etc/tero -p wa -k tero", "-w /etc/sudoers -p wa -k scope", "-F arch=b32")
 	if got := must(t, "aa-enabled"); got != "Yes" {
 		t.Errorf("aa-enabled = %q", got)
 	}
