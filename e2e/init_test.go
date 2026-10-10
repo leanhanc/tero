@@ -328,9 +328,11 @@ func testKernelSettings(t *testing.T) {
 		}
 	}
 
-	coreLimit := run(t, `grep -hx '\* hard core 0' /etc/security/limits.conf /etc/security/limits.d/*.conf`)
-	if coreLimit.exitCode != 0 {
-		t.Error("core dumps are not disabled with a hard limit in /etc/security/limits.d")
+	// sudo opens a PAM session, so pam_limits applies root's limits.
+	for _, user := range []string{"root", "nobody"} {
+		if got := must(t, "sudo -u "+user+" bash -c 'ulimit -Hc'"); got != "0" {
+			t.Errorf("hard core dump limit for %s = %s, want 0", user, got)
+		}
 	}
 }
 

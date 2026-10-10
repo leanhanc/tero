@@ -26,11 +26,10 @@ type testedPlatform struct {
 }
 
 // tested lists every OS release and architecture the end-to-end suite runs
-// on. Adding one means adding it here and running the suite on it. amd64
-// joins once the suite runs on amd64 servers.
+// on. Adding one means adding it here and running the suite on it.
 var tested = []testedPlatform{
-	{osID: "ubuntu", versionID: "26.04", name: "Ubuntu 26.04 LTS", arches: []string{"arm64"}},
-	{osID: "ubuntu", versionID: "24.04", name: "Ubuntu 24.04 LTS", arches: []string{"arm64"}},
+	{osID: "ubuntu", versionID: "26.04", name: "Ubuntu 26.04 LTS", arches: []string{"amd64", "arm64"}},
+	{osID: "ubuntu", versionID: "24.04", name: "Ubuntu 24.04 LTS", arches: []string{"amd64", "arm64"}},
 }
 
 // Detect reads the running host's platform.

@@ -34,7 +34,7 @@ Tero is like Vercel, but on your own VPS. Push to GitHub and your app is live wi
 
 ## Supported platforms
 
-Ubuntu 24.04 LTS and Ubuntu 26.04 LTS on arm64. amd64 is added once the end-to-end suite runs on amd64 servers. `tero init` refuses to run anywhere else.
+Ubuntu 24.04 LTS and Ubuntu 26.04 LTS on amd64 and arm64. `tero init` refuses to run anywhere else.
 
 ## Development
 

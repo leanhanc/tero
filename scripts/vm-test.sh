@@ -16,10 +16,16 @@ if [[ ${#releases[@]} -eq 0 ]]; then
 fi
 cd "$repo_root"
 
-make build-e2e
+# The VMs run on the host's architecture.
+arch="$(go env GOHOSTARCH)"
+make build-e2e E2E_ARCH="$arch"
 
-pebble_bin="$(go env GOPATH)/bin/linux_arm64"
-GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go install \
+# go install puts binaries for another platform in a linux_<arch> subdirectory.
+pebble_bin="$(go env GOPATH)/bin"
+if [[ "$(go env GOHOSTOS)" != "linux" ]]; then
+	pebble_bin+="/linux_$arch"
+fi
+GOOS=linux GOARCH="$arch" CGO_ENABLED=0 go install \
 	"github.com/letsencrypt/pebble/v2/cmd/pebble@$pebble_version" \
 	"github.com/letsencrypt/pebble/v2/cmd/pebble-challtestsrv@$pebble_version"
 
@@ -34,10 +40,10 @@ for release in "${releases[@]}"; do
 	fi
 	limactl start --tty=false "$instance"
 
-	limactl copy bin/tero-e2e-linux-arm64 "$pebble_bin/pebble" "$pebble_bin/pebble-challtestsrv" \
+	limactl copy bin/tero-e2e-linux-$arch "$pebble_bin/pebble" "$pebble_bin/pebble-challtestsrv" \
 		scripts/vm-test-ca.sh "$instance:/tmp/"
 	limactl shell --workdir / "$instance" sudo bash /tmp/vm-test-ca.sh
-	limactl shell --workdir / "$instance" sudo install -m 0755 /tmp/tero-e2e-linux-arm64 /usr/local/bin/tero
+	limactl shell --workdir / "$instance" sudo install -m 0755 "/tmp/tero-e2e-linux-$arch" /usr/local/bin/tero
 
 	if ! TERO_VM="$instance" go test -tags e2e -count=1 -v -timeout 60m ./e2e/...; then
 		failed+=("$release")

@@ -10,10 +10,12 @@ build:
 	GOARCH=arm64 $(GOBUILD) -o bin/tero-linux-arm64 ./cmd/tero
 	GOARCH=amd64 $(GOBUILD) -o bin/tero-linux-amd64 ./cmd/tero
 
-# The binary the end-to-end suite installs in the test VM. The e2e tag lets it
-# use the VM's test certificate authority and a fixed public IP.
+# The binary the end-to-end suite installs in the test VM, which runs on the
+# host's architecture. The e2e tag lets it use the VM's test certificate
+# authority and a fixed public IP.
+E2E_ARCH ?= $(shell go env GOHOSTARCH)
 build-e2e:
-	GOARCH=arm64 $(GOBUILD) -tags e2e -o bin/tero-e2e-linux-arm64 ./cmd/tero
+	GOARCH=$(E2E_ARCH) $(GOBUILD) -tags e2e -o bin/tero-e2e-linux-$(E2E_ARCH) ./cmd/tero
 
 test:
 	go test ./...

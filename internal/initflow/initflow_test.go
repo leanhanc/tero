@@ -419,6 +419,17 @@ func TestHardenKernelChecksEffectiveValues(t *testing.T) {
 	}
 }
 
+// Ubuntu 26.04 ships limits.d/10-coredump-debian.conf with "root hard core
+// infinity", and pam_limits never applies "*" to root, so root kept core dumps.
+func TestCoreLimitCoversRoot(t *testing.T) {
+	limits, _ := embedded.ReadFile("files/limits-core.conf")
+	for _, want := range []string{"* - core 0", "root - core 0"} {
+		if !strings.Contains(string(limits), "\n"+want+"\n") {
+			t.Errorf("limits-core.conf is missing %q", want)
+		}
+	}
+}
+
 // Review finding: interrupting init killed dpkg mid-install, and dpkg config
 // file prompts failed without a terminal.
 func TestInstallPackagesSurvivesInterruptsAndKeepsConfigFiles(t *testing.T) {

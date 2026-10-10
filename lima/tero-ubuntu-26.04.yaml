@@ -4,8 +4,8 @@
 minimumLimaVersion: 2.0.0
 base: template:ubuntu-26.04
 
-vmType: vz
-arch: aarch64
+# vmType and arch are left to Lima's defaults: the host's own architecture,
+# with vz on macOS and QEMU (KVM) on Linux.
 cpus: 2
 memory: 4GiB
 disk: 20GiB

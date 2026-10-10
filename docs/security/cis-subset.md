@@ -19,7 +19,7 @@ The end-to-end suite (`e2e/init_test.go`) checks every applied control and repor
 | Firewall | Default deny inbound; allow replies, loopback, essential ICMP, DHCP, the SSH server's ports, 80, 443. Stopping the unit keeps the rules, and the service only starts behind them | 4 (host-based firewall, nftables) | `files/firewall.nft` | `Firewall default deny` |
 | Updates | Security updates installed automatically | 1.2.2 | `files/20auto-upgrades` | `Automatic security updates` |
 | Kernel | ASLR on, no setuid core dumps, ptrace restricted, kernel pointers and dmesg hidden | 1.5 | `files/sysctl-hardening.conf` | `Kernel settings` |
-| Kernel | Core dumps disabled with a hard limit for every user | 1.5 | `files/limits-core.conf` | `Kernel settings` |
+| Kernel | Core dumps disabled with a hard limit for every user, root included | 1.5 | `files/limits-core.conf` | `Kernel settings` |
 | Network | No IP forwarding, redirects or source routing; reverse-path filtering; log martians; SYN cookies; ignore broadcast and bogus ICMP | 3.3 | `files/sysctl-hardening.conf` | `Kernel settings` |
 | Auditing | auditd installed and running | 6.3.1 | `steps.go` | `Auditing and AppArmor` |
 | Auditing | Changes to sudoers, users and groups, network identity, AppArmor policy, kernel modules, logins, SSH config, Tero's config and binary are recorded; syscall rules cover both the 64-bit and 32-bit interfaces | 6.3.3 | `files/audit.rules` | `Auditing and AppArmor` |
