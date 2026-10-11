@@ -22,7 +22,7 @@ var setupLink string
 // breach list.
 var adminPassword = randomLowercase(64)
 
-const breachedPassword = "passwordpassword"
+const breachedPassword = "password123"
 
 // dashboard holds what the admin knows while walking through the dashboard.
 type dashboard struct {
@@ -34,6 +34,7 @@ type dashboard struct {
 func testDashboardAccess(t *testing.T) {
 	admin := &dashboard{token: tokenOf(t, setupLink)}
 
+	t.Run("dashboard: web app served under the strict CSP", testWebApp)
 	t.Run("dashboard-access: No login before setup", admin.testNoLoginBeforeSetup)
 	t.Run("dashboard-access: Password too short (v5.0.0-6.2.1)", admin.testPasswordTooShort)
 	t.Run("dashboard-access: Breached password (v5.0.0-6.2.12)", admin.testBreachedPassword)
@@ -56,6 +57,41 @@ func testDashboardAccess(t *testing.T) {
 	t.Run("dashboard-access: Recovery visible after the fact", admin.testRecoveryVisible)
 }
 
+// testWebApp checks that every page path serves the embedded app, that its
+// script loads as JavaScript, and that the CSP allows no inline code.
+func testWebApp(t *testing.T) {
+	for _, path := range []string{"/", "/setup", "/login"} {
+		page := getDashboard(t, "anonymous", path)
+		if page.status != 200 {
+			t.Errorf("GET %s = %d", path, page.status)
+		}
+		assertContains(t, page.body, `<div id="root">`)
+	}
+
+	page := getDashboard(t, "anonymous", "/")
+	csp := headerValue(page.headers, "content-security-policy")
+	if !strings.Contains(csp, "script-src 'self'") || strings.Contains(csp, "unsafe-inline") {
+		t.Errorf("Content-Security-Policy = %q", csp)
+	}
+
+	_, afterSrc, _ := strings.Cut(page.body, `src="/assets/`)
+	scriptPath, _, _ := strings.Cut(afterSrc, `"`)
+	script := getDashboard(t, "anonymous", "/assets/"+scriptPath)
+	if script.status != 200 || !strings.Contains(headerValue(script.headers, "content-type"), "javascript") {
+		t.Errorf("app script = %d %q", script.status, headerValue(script.headers, "content-type"))
+	}
+}
+
+func headerValue(headers, name string) string {
+	for _, line := range strings.Split(headers, "\n") {
+		key, value, isHeader := strings.Cut(line, ":")
+		if isHeader && strings.EqualFold(strings.TrimSpace(key), name) {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
 func (d *dashboard) testNoLoginBeforeSetup(t *testing.T) {
 	response := postDashboard(t, "anonymous", "/api/login", map[string]string{"password": adminPassword, "code": "123456"})
 	if response.status != 409 {
@@ -65,11 +101,11 @@ func (d *dashboard) testNoLoginBeforeSetup(t *testing.T) {
 }
 
 func (d *dashboard) testPasswordTooShort(t *testing.T) {
-	response := postDashboard(t, "anonymous", "/api/setup/begin", map[string]string{"token": d.token, "password": "fourteen chars"})
+	response := postDashboard(t, "anonymous", "/api/setup/begin", map[string]string{"token": d.token, "password": "7 chars"})
 	if response.status != 422 {
-		t.Errorf("14-character password = %d", response.status)
+		t.Errorf("7-character password = %d", response.status)
 	}
-	assertContains(t, response.body, "15 characters")
+	assertContains(t, response.body, "8 characters")
 }
 
 func (d *dashboard) testBreachedPassword(t *testing.T) {

@@ -50,7 +50,7 @@ func Run(ctx context.Context) error {
 		Journal:   journal.Send,
 	})
 	dashboard.Activate(dashboard.NewHandler(service, cfg.DashboardDomain))
-	go pruneHourly(ctx, service)
+	go prunePeriodically(ctx, service)
 
 	caddyConfig, err := buildCaddyConfig(cfg.DashboardDomain, acmeIssuer())
 	if err != nil {
@@ -124,9 +124,13 @@ func buildCaddyConfig(domain string, issuer map[string]any) (*caddy.Config, erro
 	return &caddyConfig, nil
 }
 
-// pruneHourly keeps the login tables small while the service runs.
-func pruneHourly(ctx context.Context, service *auth.Service) {
-	ticker := time.NewTicker(time.Hour)
+// pruneInterval is how often expired login data is deleted. Expired rows are
+// already refused when used, so this only keeps the tables small.
+const pruneInterval = 12 * time.Hour
+
+// prunePeriodically prunes at start and then every pruneInterval.
+func prunePeriodically(ctx context.Context, service *auth.Service) {
+	ticker := time.NewTicker(pruneInterval)
 	defer ticker.Stop()
 
 	for {

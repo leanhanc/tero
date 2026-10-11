@@ -25,16 +25,16 @@ Implements all of slice 1: the main specs (`installation`, `server-init`, `proce
 
 ## 2. First access to the dashboard
 
-- [ ] 2.0 Set up the dashboard frontend (React + TypeScript with Vite, using Bun for installs and scripts) under `web/`, built from `make build` through `bun run build`, embedded in the binary with `go:embed` and served with a strict Content-Security-Policy; verify `make build` produces a binary that serves the app with no Node or Bun on the server, and that the CSP header has no `unsafe-inline`
+- [x] 2.0 Set up the dashboard frontend (React + TypeScript with Vite, using Bun for installs and scripts) under `web/`, built from `make build` through `bun run build`, embedded in the binary with `go:embed` and served with a strict Content-Security-Policy; verify `make build` produces a binary that serves the app with no Node or Bun on the server, and that the CSP header has no `unsafe-inline`
 - [x] 2.1 Add the SQLite store owned by `tero` with migrations; verify the database file is mode 0600 and owned by `tero`
 - [x] 2.2 Generate the one-time setup token at the end of init and print the link; covers `server-init: Link printed at the end of init`
-- [ ] 2.3 Add the setup page: password policy (15-character minimum, at least 64 accepted, no composition rules, paste allowed, bundled common-password list plus padded HIBP range check), stored as an Argon2id hash. Covers `dashboard-access: Password policy` (all scenarios) and `Password storage`
-- [ ] 2.4 Add TOTP enrolment with a QR code and a confirm step, required to finish setup; covers `dashboard-access: Admin completes setup`, `Setup without TOTP`, `Link reused`, and `No login before setup`
+- [x] 2.3 Add the setup page: password policy (8-character minimum, at least 64 accepted, no composition rules, paste allowed, bundled common-password list plus padded HIBP range check), stored as an Argon2id hash. Covers `dashboard-access: Password policy` (all scenarios) and `Password storage`
+- [x] 2.4 Add TOTP enrolment with a QR code and a confirm step, required to finish setup; covers `dashboard-access: Admin completes setup`, `Setup without TOTP`, `Link reused`, and `No login before setup`
 - [x] 2.5 Add login with password and TOTP, a generic error, and single-use codes; covers `dashboard-access: Correct password and code`, `Correct password, wrong code`, and `Replayed code`
 - [x] 2.6 Add per-IP and per-account rate limiting with backoff, stored in SQLite; covers `dashboard-access: Brute-force protection` (all scenarios), and verify the limits survive a service restart
 - [x] 2.7 Add sessions with a `__Host-` cookie, `SameSite=Strict`, a 30-minute idle timeout and a 12-hour absolute timeout; covers `dashboard-access: Cookie attributes`, `Session cookie flags`, `Idle timeout`, and `Absolute timeout` (with an injectable clock)
 - [x] 2.8 Add `sudo tero reset-login`: clears the password and TOTP, revokes sessions, prints a new link, and records an event. Covers `dashboard-access: Admin loses their authenticator`, `Server settings unaffected by reset`, and `Credential change revokes sessions`
-- [ ] 2.9 Add the security events list on the dashboard home and in the journal; covers `dashboard-access: Events recorded`, `Recovery visible after the fact`, and `No secrets in events`
+- [x] 2.9 Add the security events list on the dashboard home and in the journal; covers `dashboard-access: Events recorded`, `Recovery visible after the fact`, and `No secrets in events`
 - [x] 2.10 Check the single-admin and no-root-from-dashboard rules; covers `dashboard-access: Second account` and `process-isolation: Dashboard cannot trigger root work` (a test that walks every dashboard route and asserts no process with uid 0 is spawned)
 - [ ] 2.11 Write `docs/security/asvs-l2.md` with one row per ASVS 5.0.0 L2 requirement, and document both login paths; verify every ASVS ID in `dashboard-access` has a row and a test whose name includes the ID
 

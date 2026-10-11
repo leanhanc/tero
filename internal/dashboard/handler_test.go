@@ -197,3 +197,35 @@ func TestAPIResponsesAreNotCached(t *testing.T) {
 		t.Errorf("Cache-Control = %q", got)
 	}
 }
+
+func TestAppPagesServeIndexAndAPIStaysJSON(t *testing.T) {
+	d := newTestDashboard(t)
+
+	for _, path := range []string{"/", "/setup", "/login"} {
+		response := d.get(path)
+		if response.Code != http.StatusOK || !strings.HasPrefix(response.Header().Get("Content-Type"), "text/html") {
+			t.Errorf("GET %s = %d %s", path, response.Code, response.Header().Get("Content-Type"))
+		}
+	}
+
+	if response := d.get("/api/nothing-here"); response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), `"error"`) {
+		t.Errorf("unknown API path = %d %s", response.Code, response.Body)
+	}
+	if response := d.get("/assets/missing.js"); response.Code != http.StatusNotFound {
+		t.Errorf("missing asset = %d, want 404 rather than the app page", response.Code)
+	}
+}
+
+func TestSetupReturnsScannableQRCode(t *testing.T) {
+	d := newTestDashboard(t)
+	link, _ := d.service.IssueSetupLink(context.Background(), "")
+	_, token, _ := strings.Cut(link, "#")
+
+	response := d.post("/api/setup/begin", map[string]string{"token": token, "password": adminPassword})
+	var body struct{ Secret, URI, QRCode string }
+	json.Unmarshal(response.Body.Bytes(), &body)
+
+	if !strings.HasPrefix(body.QRCode, "data:image/png;base64,") || body.Secret == "" || body.URI == "" {
+		t.Errorf("setup/begin = %s", response.Body)
+	}
+}

@@ -38,7 +38,7 @@ Ubuntu 24.04 LTS and Ubuntu 26.04 LTS on amd64 and arm64. `tero init` refuses to
 
 ## Development
 
-You need Go and, for the end-to-end tests, [Lima](https://lima-vm.io) 2.0 or later on an Apple silicon Mac.
+You need Go and [Bun](https://bun.sh) (to build the dashboard) and, for the end-to-end tests, [Lima](https://lima-vm.io) 2.0 or later on an Apple silicon Mac.
 
 ```bash
 make build    # Linux binaries for amd64 and arm64 in bin/

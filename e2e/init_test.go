@@ -420,7 +420,7 @@ func assertServesHTTPS(t *testing.T, domain string) {
 
 	must(t, "curl -sSk https://127.0.0.1:15000/roots/0 -o /tmp/pebble-root.pem")
 	got := must(t, fmt.Sprintf(`curl -sS -D - --cacert /tmp/pebble-root.pem --resolve %s:443:127.0.0.1 https://%s/`, domain, domain))
-	assertContains(t, got, "Tero is running", "strict-transport-security: max-age=31536000")
+	assertContains(t, got, `<div id="root">`, `<script type="module" crossorigin src="/assets/`, "strict-transport-security: max-age=31536000")
 }
 
 func testProvidedDomain(t *testing.T) {
@@ -482,7 +482,7 @@ func testReboot(t *testing.T) {
 	// page is served with that certificate is enough here.
 	waitUntil(t, time.Minute, func() bool {
 		page := run(t, "curl -sSk --resolve "+skippedDomain+":443:127.0.0.1 https://"+skippedDomain+"/")
-		return page.exitCode == 0 && strings.Contains(page.output, "Tero is running")
+		return page.exitCode == 0 && strings.Contains(page.output, `<div id="root">`)
 	})
 }
 

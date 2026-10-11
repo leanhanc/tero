@@ -1,11 +1,11 @@
 ## ADDED Requirements
 
 ### Requirement: Password policy
-The admin password SHALL meet OWASP ASVS 5.0.0 V6.2. It SHALL be at least 15 characters (v5.0.0-6.2.1), passwords of at least 64 characters SHALL be accepted (v5.0.0-6.2.9), there SHALL be no composition rules (v5.0.0-6.2.5), and paste and password managers SHALL be allowed (v5.0.0-6.2.7). Passwords found in a bundled list of common passwords or in the Have I Been Pwned range API SHALL be rejected (v5.0.0-6.2.12). The bundled list SHALL hold at least the 3,000 most common passwords that meet the length rule, and SHALL be checked on every new password, whether or not the API is reachable. The range API is queried with a hash prefix only.
+The admin password SHALL meet OWASP ASVS 5.0.0 V6.2. It SHALL be at least 8 characters (v5.0.0-6.2.1, which recommends 15; 8 keeps it memorable, and TOTP is always required too), passwords of at least 64 characters SHALL be accepted (v5.0.0-6.2.9), there SHALL be no composition rules (v5.0.0-6.2.5), and paste and password managers SHALL be allowed (v5.0.0-6.2.7). Passwords found in a bundled list of common passwords or in the Have I Been Pwned range API SHALL be rejected (v5.0.0-6.2.12). The bundled list SHALL hold at least the 3,000 most common passwords that meet the length rule (v5.0.0-6.2.4), and SHALL be checked on every new password, whether or not the API is reachable. The range API is queried with a hash prefix only.
 
 #### Scenario: Password too short
-- **WHEN** the admin chooses a 14-character password during setup
-- **THEN** setup rejects it and states the 15-character minimum
+- **WHEN** the admin chooses a 7-character password during setup
+- **THEN** setup rejects it and states the 8-character minimum
 
 #### Scenario: Long password accepted
 - **WHEN** the admin chooses a 64-character password made only of lowercase letters that is not in any breach list

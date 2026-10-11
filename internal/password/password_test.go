@@ -22,13 +22,19 @@ func (f fakeBreaches) IsBreached(_ context.Context, password string) (bool, erro
 	return f.breached[password], f.err
 }
 
-func TestPolicy_v5_0_0_6_2_1_RejectsFourteenCharacters(t *testing.T) {
-	_, err := Policy{}.Check(context.Background(), strings.Repeat("x", 14))
+func TestPolicy_v5_0_0_6_2_1_RejectsSevenCharacters(t *testing.T) {
+	_, err := Policy{}.Check(context.Background(), strings.Repeat("x", 7))
 	if !errors.Is(err, ErrTooShort) {
 		t.Fatalf("Check() = %v, want ErrTooShort", err)
 	}
-	if !strings.Contains(err.Error(), "15") {
-		t.Errorf("message %q does not state the 15-character minimum", err)
+	if !strings.Contains(err.Error(), "8") {
+		t.Errorf("message %q does not state the 8-character minimum", err)
+	}
+}
+
+func TestPolicy_v5_0_0_6_2_1_AcceptsEightCharacters(t *testing.T) {
+	if _, err := (Policy{Breaches: fakeBreaches{}}).Check(context.Background(), "kq7#vmzt"); err != nil {
+		t.Fatalf("Check(8 characters) = %v", err)
 	}
 }
 
@@ -52,7 +58,7 @@ func TestPolicy_v5_0_0_6_2_5_HasNoCompositionRules(t *testing.T) {
 }
 
 func TestPolicy_v5_0_0_6_2_12_RejectsBundledCommonPassword(t *testing.T) {
-	_, err := Policy{}.Check(context.Background(), "1QAZ2WSX3EDC4RFV")
+	_, err := Policy{}.Check(context.Background(), "PASSWORD123")
 	if !errors.Is(err, ErrBreached) {
 		t.Fatalf("Check() = %v, want ErrBreached", err)
 	}
@@ -161,9 +167,10 @@ func TestHashingIsBoundedToTwoAtOnce(t *testing.T) {
 	}
 }
 
-// ASVS asks for at least the 3,000 most common passwords that meet the
-// policy; shorter entries would be dead weight, since length refuses them.
-func TestBundledListCoversTopThreeThousandPolicyPasswords(t *testing.T) {
+// ASVS v5.0.0-6.2.4 asks for at least the 3,000 most common passwords that
+// meet the policy; shorter entries would be dead weight, since length
+// refuses them.
+func TestBundledList_v5_0_0_6_2_4_CoversTopThreeThousandPolicyPasswords(t *testing.T) {
 	if len(commonPasswords) < 3000 {
 		t.Errorf("the bundled list has %d passwords, want at least 3000", len(commonPasswords))
 	}
@@ -175,7 +182,7 @@ func TestBundledListCoversTopThreeThousandPolicyPasswords(t *testing.T) {
 }
 
 func TestBundledListIsCheckedEvenWhenAPIAnswers(t *testing.T) {
-	_, err := (Policy{Breaches: fakeBreaches{}}).Check(context.Background(), "1qaz2wsx3edc4rfv")
+	_, err := (Policy{Breaches: fakeBreaches{}}).Check(context.Background(), "password123")
 	if !errors.Is(err, ErrBreached) {
 		t.Fatalf("Check() with a reachable API = %v, want ErrBreached", err)
 	}

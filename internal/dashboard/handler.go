@@ -1,14 +1,13 @@
-// Package dashboard serves the dashboard's JSON API under /api and, until the
-// web app exists, a placeholder page everywhere else. All security decisions
-// (login, sessions, throttling) are made here and in package auth, never in
-// the browser.
+// Package dashboard serves the dashboard's JSON API under /api and the web
+// app everywhere else. All security decisions (login, sessions, throttling)
+// are made here and in package auth, never in the browser.
 package dashboard
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"mime"
 	"net"
@@ -16,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"rsc.io/qr"
 
 	"github.com/leanhanc/tero/internal/auth"
 	"github.com/leanhanc/tero/internal/password"
@@ -28,15 +29,6 @@ const (
 	// enforces both timeouts whatever the browser keeps.
 	sessionCookieLifetime = 12 * time.Hour
 )
-
-const placeholderPage = `<!doctype html>
-<html lang="en">
-<meta charset="utf-8">
-<title>Tero</title>
-<h1>Tero is running</h1>
-<p>The dashboard will appear here.</p>
-</html>
-`
 
 // Handler is the dashboard for one domain.
 type Handler struct {
@@ -56,7 +48,7 @@ func NewHandler(service *auth.Service, domain string) *Handler {
 	h.mux.HandleFunc("POST /api/logout", h.logout)
 	h.mux.HandleFunc("GET /api/events", h.requireSession(h.events))
 	h.mux.HandleFunc("/api/", h.notFound)
-	h.mux.HandleFunc("/", h.page)
+	h.mux.Handle("/", newWebApp())
 
 	return h
 }
@@ -99,11 +91,6 @@ func (h *Handler) checkSameOrigin(r *http.Request) error {
 	return nil
 }
 
-func (h *Handler) page(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, placeholderPage)
-}
-
 func (h *Handler) notFound(w http.ResponseWriter, r *http.Request) {
 	writeError(w, http.StatusNotFound, errors.New("Not found"))
 }
@@ -141,7 +128,31 @@ func (h *Handler) beginSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, enrolment)
+	qrCode, err := qrCodeDataURI(enrolment.URI)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, beginSetupResponse{Enrolment: enrolment, QRCode: qrCode})
+}
+
+// beginSetupResponse adds the QR code an authenticator app scans. It is
+// rendered here, so the browser loads no QR library and nothing third-party.
+type beginSetupResponse struct {
+	auth.Enrolment
+	QRCode string `json:"qrCode"`
+}
+
+// qrCodeDataURI encodes text as a PNG QR code in a data: URI, which the
+// Content-Security-Policy allows for images.
+func qrCodeDataURI(text string) (string, error) {
+	code, err := qr.Encode(text, qr.M)
+	if err != nil {
+		return "", err
+	}
+
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(code.PNG()), nil
 }
 
 type finishSetupRequest struct {

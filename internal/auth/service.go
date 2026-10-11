@@ -19,7 +19,7 @@ var (
 	ErrNotSetUp           = errors.New("The dashboard login isn't set up yet. Use the setup link printed on the server, or run `sudo tero reset-login` there for a new one")
 	ErrInvalidLink        = errors.New("This setup link is invalid, already used or expired. Run `sudo tero reset-login` on the server for a new one")
 	ErrInvalidCredentials = errors.New("Wrong password or code")
-	ErrInvalidCode        = errors.New("That code didn't match. Check the time on your phone and try the newest code")
+	ErrInvalidCode        = errors.New("That code didn't match. Please check your authenticator app and try again.")
 	ErrSessionExpired     = errors.New("Your session has ended. Log in again")
 	ErrAlreadySetUp       = errors.New("The dashboard login is already set up")
 )

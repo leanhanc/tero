@@ -13,8 +13,10 @@ import (
 )
 
 const (
-	// MinLength is the shortest password accepted (v5.0.0-6.2.1).
-	MinLength = 15
+	// MinLength is the shortest password accepted. ASVS v5.0.0-6.2.1 asks for
+	// at least 8 and recommends 15; 8 keeps the password memorable, and the
+	// TOTP code that every login also needs covers the difference.
+	MinLength = 8
 	// maxLength is far above the 64 characters ASVS requires accepting
 	// (v5.0.0-6.2.9); it only bounds the work done per request.
 	maxLength = 1024

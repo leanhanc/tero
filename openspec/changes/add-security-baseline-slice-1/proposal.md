@@ -7,7 +7,7 @@ Tero's pitch is security from the first minute, and ADR 0001 defines what that m
 - Install: the tested platforms are Ubuntu 24.04 LTS and Ubuntu 26.04 LTS. Every release carries SLSA Build L3 provenance and an SBOM, and the install docs show how to verify a download with `gh attestation verify`.
 - Init: the host hardening requirement lists the CIS subset by topic (SSH, firewall, automatic updates, kernel settings, auditd, AppArmor, services, file permissions), and init refuses to turn off SSH password login when doing so would lock the admin out.
 - Dashboard first access:
-  - The password policy follows ASVS V6.2: at least 15 characters, at least 64 accepted, no composition rules, paste allowed, and breached passwords rejected.
+  - The password policy follows ASVS V6.2: at least 8 characters (TOTP is always required too), at least 64 accepted, no composition rules, paste allowed, and breached passwords rejected.
   - The password is stored as an Argon2id hash.
   - TOTP codes work only once (6.5.1).
   - Logins are rate limited per IP and per account (6.3.1).

@@ -218,9 +218,9 @@ func TestSetupRejectsShortPassword_v5_0_0_6_2_1(t *testing.T) {
 	ctx := context.Background()
 
 	link, _ := env.service.IssueSetupLink(ctx, "")
-	_, err := env.service.BeginSetup(ctx, adminIP, tokenFromLink(t, link), "fourteen chars")
+	_, err := env.service.BeginSetup(ctx, adminIP, tokenFromLink(t, link), "7 chars")
 	if !errors.Is(err, password.ErrTooShort) {
-		t.Errorf("BeginSetup(14 chars) = %v", err)
+		t.Errorf("BeginSetup(7 chars) = %v", err)
 	}
 }
 
