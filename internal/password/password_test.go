@@ -187,3 +187,26 @@ func TestBundledListIsCheckedEvenWhenAPIAnswers(t *testing.T) {
 		t.Fatalf("Check() with a reachable API = %v, want ErrBreached", err)
 	}
 }
+
+func TestPwnedPasswords_v5_0_0_15_3_2_RefusesRedirects(t *testing.T) {
+	const password = "a password the redirect target would flag"
+	digest := sha1.Sum([]byte(password))
+	hash := strings.ToUpper(hex.EncodeToString(digest[:]))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		isRedirectTarget := strings.HasPrefix(r.URL.Path, "/elsewhere/")
+		if isRedirectTarget {
+			w.Write([]byte(hash[5:] + ":3\r\n"))
+			return
+		}
+		http.Redirect(w, r, "/elsewhere/"+hash[:5], http.StatusFound)
+	}))
+	defer server.Close()
+
+	checker := NewPwnedPasswords()
+	checker.BaseURL = server.URL + "/range/"
+	isBreached, err := checker.IsBreached(context.Background(), password)
+	if err == nil || isBreached {
+		t.Errorf("IsBreached() after a redirect = %v, %v; want an error and no match", isBreached, err)
+	}
+}

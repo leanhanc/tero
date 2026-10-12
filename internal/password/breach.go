@@ -22,9 +22,18 @@ type PwnedPasswords struct {
 	Client  *http.Client
 }
 
-// NewPwnedPasswords returns a checker for the public API.
+// NewPwnedPasswords returns a checker for the public API. Its client doesn't
+// follow redirects: a redirect is answered as an error, so the bundled list
+// decides instead of a host the API pointed to (OWASP ASVS v5.0.0-15.3.2).
 func NewPwnedPasswords() PwnedPasswords {
-	return PwnedPasswords{BaseURL: pwnedPasswordsAPI, Client: &http.Client{Timeout: 5 * time.Second}}
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	return PwnedPasswords{BaseURL: pwnedPasswordsAPI, Client: client}
 }
 
 // IsBreached reports whether password appears in the breach corpus.

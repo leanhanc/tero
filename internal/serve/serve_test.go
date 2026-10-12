@@ -44,3 +44,15 @@ func TestBuildCaddyConfigSetsStrictCSP(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildCaddyConfig_v5_0_0_3_4_1_HSTSCoversSubdomainsForAYear(t *testing.T) {
+	cfg, err := buildCaddyConfig("dash.example.com", map[string]any{"module": "acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	apps, _ := json.Marshal(cfg.AppsRaw)
+	if !strings.Contains(string(apps), "max-age=31536000; includeSubDomains") {
+		t.Error("HSTS is missing a one-year max-age with includeSubDomains")
+	}
+}

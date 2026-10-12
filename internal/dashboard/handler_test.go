@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +28,11 @@ type testDashboard struct {
 	handler *Handler
 	service *auth.Service
 	now     *time.Time
+	// secret is the TOTP secret setUp enrolled.
+	secret *string
+	// refusals holds the TERO_REASON of each refused request sent to the
+	// journal.
+	refusals *[]string
 }
 
 func newTestDashboard(t *testing.T) testDashboard {
@@ -38,13 +44,21 @@ func newTestDashboard(t *testing.T) testDashboard {
 	t.Cleanup(func() { db.Close() })
 
 	now := time.Unix(1_800_000_000, 0)
+	secret := ""
+	refusals := &[]string{}
 	service := auth.New(db, auth.Options{
 		Domain:    "dash.example.com",
 		Passwords: password.Policy{Breaches: noBreaches{}},
 		Now:       func() time.Time { return now },
+		Journal: func(_ int, _ string, fields map[string]string) error {
+			if fields["TERO_EVENT"] == "request_refused" {
+				*refusals = append(*refusals, fields["TERO_REASON"])
+			}
+			return nil
+		},
 	})
 
-	return testDashboard{handler: NewHandler(service, "dash.example.com"), service: service, now: &now}
+	return testDashboard{handler: NewHandler(service, "dash.example.com"), service: service, now: &now, secret: &secret, refusals: refusals}
 }
 
 func (d testDashboard) post(path string, body any, cookies ...*http.Cookie) *httptest.ResponseRecorder {
@@ -89,6 +103,7 @@ func (d testDashboard) setUp(t *testing.T) *http.Cookie {
 	}
 	var enrolment auth.Enrolment
 	json.Unmarshal(begin.Body.Bytes(), &enrolment)
+	*d.secret = enrolment.Secret
 
 	code, _ := totp.Code(enrolment.Secret, *d.now)
 	finish := d.post("/api/setup/finish", map[string]string{"token": token, "code": code})
@@ -227,5 +242,94 @@ func TestSetupReturnsScannableQRCode(t *testing.T) {
 
 	if !strings.HasPrefix(body.QRCode, "data:image/png;base64,") || body.Secret == "" || body.URI == "" {
 		t.Errorf("setup/begin = %s", response.Body)
+	}
+}
+
+// login waits for the next TOTP step, so the code isn't a replay, and logs in
+// with the given cookies.
+func (d testDashboard) login(t *testing.T, cookies ...*http.Cookie) *http.Cookie {
+	t.Helper()
+	*d.now = d.now.Add(30 * time.Second)
+	code, _ := totp.Code(*d.secret, *d.now)
+
+	response := d.post("/api/login", map[string]string{"password": adminPassword, "code": code}, cookies...)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("login = %d %s", response.Code, response.Body)
+	}
+
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == auth.SessionCookie {
+			return cookie
+		}
+	}
+	t.Fatal("login set no session cookie")
+	return nil
+}
+
+func TestLogin_v5_0_0_7_2_4_EndsThePreviousSession(t *testing.T) {
+	d := newTestDashboard(t)
+	previous := d.setUp(t)
+
+	current := d.login(t, previous)
+
+	if response := d.get("/api/events", previous); response.Code != http.StatusUnauthorized {
+		t.Errorf("events with the session from before login = %d", response.Code)
+	}
+	if response := d.get("/api/events", current); response.Code != http.StatusOK {
+		t.Errorf("events with the new session = %d", response.Code)
+	}
+}
+
+func TestLogout_v5_0_0_7_4_1_EndsTheSession(t *testing.T) {
+	d := newTestDashboard(t)
+	cookie := d.setUp(t)
+
+	d.post("/api/logout", map[string]string{}, cookie)
+
+	if response := d.get("/api/events", cookie); response.Code != http.StatusUnauthorized {
+		t.Errorf("events after logout = %d", response.Code)
+	}
+}
+
+func TestLogout_v5_0_0_14_3_1_ClearsSiteDataButKeepsCookies(t *testing.T) {
+	d := newTestDashboard(t)
+	cookie := d.setUp(t)
+
+	response := d.post("/api/logout", map[string]string{}, cookie)
+
+	clearSiteData := response.Header().Get("Clear-Site-Data")
+	if clearSiteData != `"cache", "storage"` {
+		t.Errorf("Clear-Site-Data = %q", clearSiteData)
+	}
+}
+
+func TestRefusedRequests_v5_0_0_16_3_2_MissingSessionIsJournaled(t *testing.T) {
+	d := newTestDashboard(t)
+
+	d.get("/api/events")
+
+	if !slices.Contains(*d.refusals, "no_session") {
+		t.Errorf("refusals = %v, want no_session", *d.refusals)
+	}
+}
+
+func TestRefusedRequests_v5_0_0_16_3_3_BypassAttemptsAreJournaled(t *testing.T) {
+	d := newTestDashboard(t)
+
+	crossSite := httptest.NewRequest(http.MethodPost, "https://dash.example.com/api/login", strings.NewReader(`{}`))
+	crossSite.Header.Set("Content-Type", "application/json")
+	crossSite.Header.Set("Origin", "https://evil.example")
+	d.handler.ServeHTTP(httptest.NewRecorder(), crossSite)
+
+	formPost := httptest.NewRequest(http.MethodPost, "https://dash.example.com/api/login", strings.NewReader("password=x"))
+	formPost.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	d.handler.ServeHTTP(httptest.NewRecorder(), formPost)
+
+	d.post("/api/login", map[string]any{"password": "x", "code": "1", "admin": true})
+
+	for _, want := range []string{"cross_site", "not_json", "malformed_body"} {
+		if !slices.Contains(*d.refusals, want) {
+			t.Errorf("refusals = %v, want %s", *d.refusals, want)
+		}
 	}
 }

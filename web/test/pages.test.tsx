@@ -30,7 +30,7 @@ afterEach(() => {
 });
 
 describe('setup page', () => {
-	it('labels the password field for password managers and sends the token from the fragment', async () => {
+	it('labels the password field for password managers and sends the token from the fragment (v5.0.0-6.2.7)', async () => {
 		openAt('/setup#the-token');
 		const calls = mockAPI({
 			'/api/setup/begin': [{ status: 200, body: { secret: 'ABC', uri: 'otpauth://totp/x', qrCode: 'data:image/png;base64,AA' } }],
@@ -124,5 +124,25 @@ describe('home page', () => {
 		expect(screen.getAllByRole('columnheader').map((header) => header.textContent)).toEqual(['Time', 'Event', 'From']);
 		expect(table.textContent).toContain('Login reset with sudo tero reset-login');
 		expect(table.querySelector('time')?.getAttribute('datetime')).toBe('2026-10-11T10:00:00Z');
+	});
+
+	it('goes back to the login form once an idle session has ended (v5.0.0-14.3.1)', async () => {
+		vi.useFakeTimers({ shouldAdvanceTime: true });
+		openAt('/');
+		mockAPI({
+			'/api/state': [
+				{ status: 200, body: { isSetUp: true, isLoggedIn: true } },
+				{ status: 200, body: { isSetUp: true, isLoggedIn: false } },
+			],
+			'/api/events': [{ status: 200, body: { events: [{ at: '2026-10-11T10:00:00Z', type: 'login_reset' }] } }],
+		});
+		render(<App />);
+		await screen.findByRole('table');
+
+		await vi.advanceTimersByTimeAsync(30 * 60 * 1000 + 5 * 1000);
+
+		expect(await screen.findByRole('heading', { name: 'Log in to Tero' })).toBeTruthy();
+		expect(screen.queryByRole('table')).toBeNull();
+		vi.useRealTimers();
 	});
 });

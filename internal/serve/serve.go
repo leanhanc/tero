@@ -65,12 +65,11 @@ func Run(ctx context.Context) error {
 	return caddy.Stop()
 }
 
-// buildCaddyConfig serves the dashboard domain over HTTPS only. Caddy's
-// automatic HTTPS adds the port 80 listener that answers ACME challenges and
-// redirects everything else to HTTPS.
+// buildCaddyConfig serves the dashboard domain over HTTPS only. Port 80
+// answers ACME challenges, refuses the API, and redirects pages to HTTPS.
 func buildCaddyConfig(domain string, issuer map[string]any) (*caddy.Config, error) {
 	securityHeaders := map[string][]string{
-		"Strict-Transport-Security":    {"max-age=31536000"},
+		"Strict-Transport-Security":    {"max-age=31536000; includeSubDomains"},
 		"X-Content-Type-Options":       {"nosniff"},
 		"Referrer-Policy":              {"no-referrer"},
 		"Content-Security-Policy":      {contentSecurityPolicy},
@@ -88,6 +87,21 @@ func buildCaddyConfig(domain string, issuer map[string]any) (*caddy.Config, erro
 		"terminal": true,
 	}
 
+	// Caddy's automatic HTTPS adds its redirects to this server after the
+	// routes that match a host, so the API refusal wins for /api/ and every
+	// other request is still redirected. An API call sent over plain HTTP fails
+	// loudly instead of being quietly redirected (OWASP ASVS v5.0.0-4.1.2).
+	plainHTTPAPIRoute := map[string]any{
+		"match": []any{map[string]any{"host": []string{domain}, "path": []string{"/api/*"}}},
+		"handle": []any{map[string]any{
+			"handler":     "static_response",
+			"status_code": 403,
+			"headers":     map[string][]string{"Content-Type": {"application/json"}},
+			"body":        `{"error":"The dashboard API is only served over HTTPS"}`,
+		}},
+		"terminal": true,
+	}
+
 	raw := map[string]any{
 		"admin":   map[string]any{"disabled": true},
 		"storage": map[string]any{"module": "file_system", "root": stateDir + "/caddy"},
@@ -97,6 +111,10 @@ func buildCaddyConfig(domain string, issuer map[string]any) (*caddy.Config, erro
 					"dashboard": map[string]any{
 						"listen": []string{":443"},
 						"routes": []any{dashboardRoute},
+					},
+					"plain_http": map[string]any{
+						"listen": []string{":80"},
+						"routes": []any{plainHTTPAPIRoute},
 					},
 				},
 			},

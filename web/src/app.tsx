@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { HomePage } from './features/home/home-page';
 import { LoginPage } from './features/login/login-page';
@@ -8,6 +8,13 @@ import { usePath } from './lib/utils/navigation';
 
 type LoadedState = { state: DashboardState } | { error: string } | null;
 
+// The server ends a session after 30 minutes without a request. The signed-in
+// page makes no requests after it loads, so the state is checked again just
+// after that point, which swaps the page's data for the login form
+// (OWASP ASVS v5.0.0-14.3.1).
+const sessionIdleTimeoutMs = 30 * 60 * 1000;
+const idleCheckMarginMs = 5 * 1000;
+
 /**
  * Shows the page for the current path and login state. The server enforces
  * every rule; this only decides which form to show.
@@ -15,6 +22,8 @@ type LoadedState = { state: DashboardState } | { error: string } | null;
 export function App() {
 	const path = usePath();
 	const [loaded, reload] = useDashboardState(path);
+	const isLoggedIn = loaded !== null && 'state' in loaded && loaded.state.isLoggedIn;
+	useReloadWhenSessionIdles(isLoggedIn, reload);
 
 	if (path === '/setup') {
 		return <SetupPage />;
@@ -28,7 +37,7 @@ export function App() {
 		return <p role="alert">{loaded.error}</p>;
 	}
 
-	if (!loaded.state.isLoggedIn) {
+	if (!isLoggedIn) {
 		return <LoginPage isSetUp={loaded.state.isSetUp} onLogin={reload} />;
 	}
 
@@ -53,6 +62,18 @@ function useDashboardState(path: string): [LoadedState, () => void] {
 		};
 	}, [path, reloadCount]);
 
-	const reload = () => setReloadCount((count) => count + 1);
+	const reload = useCallback(() => setReloadCount((count) => count + 1), []);
 	return [loaded, reload];
+}
+
+/** Checks the login state again once the server would have ended an idle session. */
+function useReloadWhenSessionIdles(isLoggedIn: boolean, reload: () => void): void {
+	useEffect(() => {
+		if (!isLoggedIn) {
+			return;
+		}
+
+		const timer = window.setTimeout(reload, sessionIdleTimeoutMs + idleCheckMarginMs);
+		return () => window.clearTimeout(timer);
+	}, [isLoggedIn, reload]);
 }

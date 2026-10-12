@@ -411,6 +411,12 @@ func testPlainHTTP(t *testing.T) {
 	if strings.Contains(strings.ToLower(got), "set-cookie") {
 		t.Errorf("a cookie was set over plain HTTP:\n%s", got)
 	}
+
+	api := must(t, fmt.Sprintf(`curl -sS -D - --resolve %s:80:127.0.0.1 http://%s/api/state`, skippedDomain, skippedDomain))
+	isRefused := strings.HasPrefix(api, "HTTP/1.1 403") && !strings.Contains(api, "Location:")
+	if !isRefused {
+		t.Errorf("plain HTTP to the API is not refused (v5.0.0-4.1.2):\n%s", api)
+	}
 }
 
 // assertServesHTTPS fetches the dashboard over HTTPS, trusting only the test

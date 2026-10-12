@@ -59,7 +59,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 	}
 
-	if err := h.checkSameOrigin(r); err != nil {
+	if reason, err := h.checkSameOrigin(r); err != nil {
+		h.auth.RecordRefusal(clientIP(r), r.URL.Path, reason)
 		writeError(w, http.StatusForbidden, err)
 		return
 	}
@@ -70,25 +71,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // checkSameOrigin refuses state-changing requests from other sites. Together
 // with the SameSite=Strict cookie and the JSON-only API, it blocks cross-site
 // request forgery: an HTML form can't send application/json.
-func (h *Handler) checkSameOrigin(r *http.Request) error {
+func (h *Handler) checkSameOrigin(r *http.Request) (auth.RefusalReason, error) {
 	isSafeMethod := r.Method == http.MethodGet || r.Method == http.MethodHead
 	if isSafeMethod {
-		return nil
+		return "", nil
 	}
 
 	origin := r.Header.Get("Origin")
 	isCrossOrigin := origin != "" && origin != h.origin
 	isCrossSite := r.Header.Get("Sec-Fetch-Site") == "cross-site"
 	if isCrossOrigin || isCrossSite {
-		return errors.New("Cross-site requests are not allowed")
+		return auth.RefusedCrossSite, errors.New("Cross-site requests are not allowed")
 	}
 
 	mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if mediaType != "application/json" {
-		return errors.New("Requests must be JSON")
+		return auth.RefusedNotJSON, errors.New("Requests must be JSON")
 	}
 
-	return nil
+	return "", nil
 }
 
 func (h *Handler) notFound(w http.ResponseWriter, r *http.Request) {
@@ -118,7 +119,7 @@ type beginSetupRequest struct {
 
 func (h *Handler) beginSetup(w http.ResponseWriter, r *http.Request) {
 	var request beginSetupRequest
-	if !readJSON(w, r, &request) {
+	if !h.readJSON(w, r, &request) {
 		return
 	}
 
@@ -162,7 +163,7 @@ type finishSetupRequest struct {
 
 func (h *Handler) finishSetup(w http.ResponseWriter, r *http.Request) {
 	var request finishSetupRequest
-	if !readJSON(w, r, &request) {
+	if !h.readJSON(w, r, &request) {
 		return
 	}
 
@@ -183,12 +184,19 @@ type loginRequest struct {
 
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	var request loginRequest
-	if !readJSON(w, r, &request) {
+	if !h.readJSON(w, r, &request) {
 		return
 	}
 
 	result, err := h.auth.Login(r.Context(), clientIP(r), cookieValue(r, auth.DeviceCookie), request.Password, request.Code)
 	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+
+	// The session this browser had before logging in ends, so a token set
+	// before authentication can't outlive it (OWASP ASVS v5.0.0-7.2.4).
+	if err := h.auth.Logout(r.Context(), cookieValue(r, auth.SessionCookie)); err != nil {
 		h.fail(w, r, err)
 		return
 	}
@@ -204,6 +212,10 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	clearSessionCookie(w)
+	// Drops anything the browser cached or stored for the dashboard. Cookies
+	// are left alone so the trusted-device cookie survives logout
+	// (OWASP ASVS v5.0.0-14.3.1).
+	w.Header().Set("Clear-Site-Data", `"cache", "storage"`)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -222,6 +234,7 @@ func (h *Handler) requireSession(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		err := h.auth.Authenticate(r.Context(), cookieValue(r, auth.SessionCookie))
 		if errors.Is(err, auth.ErrSessionExpired) {
+			h.auth.RecordRefusal(clientIP(r), r.URL.Path, auth.RefusedNoSession)
 			clearSessionCookie(w)
 			writeError(w, http.StatusUnauthorized, err)
 			return
@@ -321,10 +334,11 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
-func readJSON(w http.ResponseWriter, r *http.Request, target any) bool {
+func (h *Handler) readJSON(w http.ResponseWriter, r *http.Request, target any) bool {
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
+		h.auth.RecordRefusal(clientIP(r), r.URL.Path, auth.RefusedMalformedBody)
 		writeError(w, http.StatusBadRequest, errors.New("The request body is not valid JSON"))
 		return false
 	}

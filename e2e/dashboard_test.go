@@ -50,7 +50,7 @@ func testDashboardAccess(t *testing.T) {
 	t.Run("dashboard-access: Correct password and code", admin.testCorrectLogin)
 	t.Run("dashboard-access: Replayed code (v5.0.0-6.5.1)", admin.testReplayedCode)
 	t.Run("dashboard-access: Correct password, wrong code", admin.testWrongCode)
-	t.Run("dashboard-access: Events recorded / No secrets in events", admin.testEventsRecorded)
+	t.Run("dashboard-access: Events recorded / No secrets in events (v5.0.0-6.3.4, v5.0.0-6.3.5, v5.0.0-6.3.7)", admin.testEventsRecorded)
 	t.Run("process-isolation: Dashboard cannot trigger root work", admin.testNoRootWork)
 	t.Run("dashboard-access: Repeated failures from one IP (v5.0.0-6.3.1)", admin.testRateLimit)
 	t.Run("dashboard-access: Admin loses their authenticator / Credential change revokes sessions / Server settings unaffected by reset", admin.testResetLogin)
