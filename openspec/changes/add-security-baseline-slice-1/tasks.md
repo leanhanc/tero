@@ -36,7 +36,7 @@ Implements all of slice 1: the main specs (`installation`, `server-init`, `proce
 - [x] 2.8 Add `sudo tero reset-login`: clears the password and TOTP, revokes sessions, prints a new link, and records an event. Covers `dashboard-access: Admin loses their authenticator`, `Server settings unaffected by reset`, and `Credential change revokes sessions`
 - [x] 2.9 Add the security events list on the dashboard home and in the journal; covers `dashboard-access: Events recorded`, `Recovery visible after the fact`, and `No secrets in events`
 - [x] 2.10 Check the single-admin and no-root-from-dashboard rules; covers `dashboard-access: Second account` and `process-isolation: Dashboard cannot trigger root work` (a test that walks every dashboard route and asserts no process with uid 0 is spawned)
-- [ ] 2.11 Write `docs/security/asvs-l2.md` with one row per ASVS 5.0.0 L2 requirement, and document both login paths; verify every ASVS ID in `dashboard-access` has a row and a test whose name includes the ID
+- [x] 2.11 Write `docs/security/asvs-l2.md` with one row per ASVS 5.0.0 L2 requirement, and document both login paths; verify every ASVS ID in `dashboard-access` has a row and a test whose name includes the ID
 
 ## 3. Releases and the install script
 
