@@ -90,6 +90,10 @@ Drafts: [app-logs](drafts/app-logs/spec.md)
 
 Drafts: [apps](drafts/apps/spec.md), [build-pipeline](drafts/build-pipeline/spec.md)
 
+## Open decisions
+
+- [ ] Decide what the admin can configure, where (dashboard or `sudo tero ...`), and the defaults. Candidates: log retention (security events, kept one year today, and each app's runtime logs), how many images are kept for rollback, and resource limits per app
+
 ## After v1
 
 - Preview deploys for pull requests
