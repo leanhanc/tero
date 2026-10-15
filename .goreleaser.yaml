@@ -1,0 +1,47 @@
+# Release build, run by .github/workflows/build-release.yml on a version tag.
+# Each release carries a binary per architecture, an SPDX SBOM per binary,
+# install.sh, and checksums.txt covering all of them.
+version: 2
+project_name: tero
+
+before:
+  hooks:
+    - make web
+
+builds:
+  - id: tero
+    main: ./cmd/tero
+    binary: tero
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{ .Tag }}
+    # Timestamps come from the commit so rebuilding a tag gives the same bytes.
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+# Plain binaries, named the way install.sh downloads them.
+archives:
+  - formats: [binary]
+    name_template: tero-linux-{{ .Arch }}
+
+sboms:
+  - artifacts: binary
+    documents:
+      - tero-linux-{{ .Arch }}.sbom.json
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+  extra_files:
+    - glob: install.sh
+
+release:
+  extra_files:
+    - glob: install.sh
+  prerelease: auto
+
+changelog:
+  use: github-native

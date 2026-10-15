@@ -27,10 +27,15 @@ const (
 	capNetBindServiceOnly = "0000000000000400"
 )
 
-// TestSlice1 walks one fresh server through init in order: refusals that must
-// change nothing, the init itself, every post-init check, a second init, and
-// a reboot.
+// TestSlice1 walks one fresh server through install and init in order: the
+// install script, refusals that must change nothing, the init itself, every
+// post-init check, a second init, and a reboot.
 func TestSlice1(t *testing.T) {
+	t.Run("installation", testInstall)
+	if t.Failed() {
+		t.FailNow()
+	}
+
 	t.Run("tero version runs", func(t *testing.T) {
 		must(t, "tero version")
 	})

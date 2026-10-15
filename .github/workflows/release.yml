@@ -1,0 +1,18 @@
+# Publishes a release for every version tag. The build itself runs in the
+# reusable workflow, isolated from this caller, which is what makes the
+# provenance SLSA Build Level 3.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+jobs:
+  release:
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/build-release.yml

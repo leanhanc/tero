@@ -1,7 +1,8 @@
 #!/bin/bash
 # Builds Tero for the test VMs and, for each tested Ubuntu release, recreates a
 # VM from lima/tero-ubuntu-<release>.yaml, sets up a local test certificate
-# authority in it, and runs the end-to-end suite.
+# authority and a fake release server in it, and runs the end-to-end suite,
+# which installs Tero through install.sh.
 #
 #   scripts/vm-test.sh                       full run on fresh VMs, every release
 #   scripts/vm-test.sh 24.04                 full run on one release
@@ -41,9 +42,9 @@ for release in "${releases[@]}"; do
 	limactl start --tty=false "$instance"
 
 	limactl copy bin/tero-e2e-linux-$arch "$pebble_bin/pebble" "$pebble_bin/pebble-challtestsrv" \
-		scripts/vm-test-ca.sh "$instance:/tmp/"
+		scripts/vm-test-ca.sh scripts/vm-test-release.sh install.sh "$instance:/tmp/"
 	limactl shell --workdir / "$instance" sudo bash /tmp/vm-test-ca.sh
-	limactl shell --workdir / "$instance" sudo install -m 0755 "/tmp/tero-e2e-linux-$arch" /usr/local/bin/tero
+	limactl shell --workdir / "$instance" sudo bash /tmp/vm-test-release.sh "$arch"
 
 	if ! TERO_VM="$instance" go test -tags e2e -count=1 -v -timeout 60m ./e2e/...; then
 		failed+=("$release")

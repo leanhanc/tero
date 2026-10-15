@@ -41,7 +41,7 @@ Implements all of slice 1: the main specs (`installation`, `server-init`, `proce
 ## 3. Releases and the install script
 
 - [ ] 3.1 Add the reusable release workflow (GoReleaser, amd64 and arm64, checksums, Syft SBOMs, `actions/attest-build-provenance`); verify a test tag produces binaries, checksums, SBOMs and attestations. Covers `installation: SBOM published`
-- [ ] 3.2 Write `install.sh`: tested-platform check, architecture mapping, download, checksum check, install to `/usr/local/bin`, next-step message, and no other system changes. Covers `installation: Install on supported amd64 host` / `arm64 host`, `Untested OS`, `Untested architecture`, `Fresh install`, `Install script does not configure the server`, and `Checksum mismatch`, verified in the VM with a local fake release server
+- [x] 3.2 Write `install.sh`: tested-platform check, architecture mapping, download, checksum check, install to `/usr/local/bin`, next-step message, and no other system changes. Covers `installation: Install on supported amd64 host` / `arm64 host`, `Untested OS`, `Untested architecture`, `Fresh install`, `Install script does not configure the server`, and `Checksum mismatch`, verified in the VM with a local fake release server
 - [ ] 3.3 Document install and `gh attestation verify`; covers `installation: Verify a release binary` and `Tampered binary`
 - [ ] 3.4 Add `SECURITY.md` with how to report vulnerabilities, and turn on branch protection plus OpenSSF Scorecard in CI; verify Scorecard runs on the default branch
 
