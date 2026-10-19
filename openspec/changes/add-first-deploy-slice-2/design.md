@@ -1,0 +1,67 @@
+## Context
+
+Slice 1 left a host locked down by `sudo tero init`, a `tero` service user with linger and a 1,000,000-id subordinate range, and `tero serve` running Caddy and the dashboard inside a tight systemd sandbox. No containers run yet.
+
+The build spike (`SPIKE.md` on the local branch `spike/railpack-podman-buildkit`) proved the build path on Ubuntu 24.04 arm64 with Podman 4.9.3: Railpack v0.40.1 as a Go library, a rootless `moby/buildkit:v0.33.0-rootless` container started by `tero` with `--security-opt unmask=/proc/*`, Tero's own `Solve` with the `docker` exporter to a tarball, and `podman load`. It has not run on Ubuntu 26.04 (Podman 5.7, pasta networking by default).
+
+ADR 0001's container rules apply from this slice: `--cap-drop=ALL`, `--userns=auto`, and a network per app.
+
+## Goals / Non-Goals
+
+**Goals:**
+- An admin with no container knowledge deploys a Bun, npm, Yarn or pnpm backend from a public GitHub URL and gets an HTTPS address, with every error explained in the dashboard.
+- The internet-facing process gains no new privilege: it still cannot create namespaces or run setuid helpers.
+- The whole flow passes end-to-end on both tested releases and both architectures.
+
+**Non-Goals:**
+- Private repositories, the GitHub App, webhooks and polling (slice 4).
+- Environment variables beyond `PORT` (slice 5).
+- Deploy history beyond what the app page needs, rollback, and image retention (slice 6). This slice keeps only the live image and the one being deployed.
+- Custom domains (slice 7) and runtime logs (slice 8).
+- Workers, the Dockerfile fallback, other languages, and deleting an app (slice 9).
+- The dashboard's visual design. The new pages are plain markup like slice 1's, and the design comes once more features exist.
+- Resource limits per app, which stay an open decision in the roadmap.
+- Closing the outbound allowlist gap (ASVS 13.2.4). Builds reach arbitrary package registries.
+
+## Decisions
+
+- **A separate agent for containers.** The service's sandbox (`NoNewPrivileges`, `RestrictNamespaces`, `ProtectHome`, a bounding set of only `CAP_NET_BIND_SERVICE`) blocks `newuidmap`, so rootless Podman can't run as its child. Instead of loosening the process that faces the internet, the same binary runs a second time as `tero agent`, a systemd user unit under `tero`'s user manager. The agent does every build and every Podman call and listens on nothing. The service does routing and the dashboard and never starts a process that touches containers. The unit file lives in `/etc/systemd/user/` with `ConditionUser=tero`, owned by root, so `tero` can't change it.
+- **The database is the only channel.** The service writes a queued deploy row, the agent claims it, updates its state and writes the build log file, and the service reads both. The agent polls for queued deploys every second, and the service polls for route changes every second and reloads Caddy when they change. Both processes already run as `tero`, and SQLite in WAL mode handles the two writers. This keeps slice 1's rule that processes share state only through the database, and needs no socket or RPC between them.
+- **Podman through its CLI.** The agent runs `podman` with `--format json` where it reads output, as the spike did. The Podman Go bindings would pull a large dependency tree and tie Tero to one Podman API version, while the CLI is stable across 4.9 and 5.7.
+- **The agent keeps containers running.** On start and every 10 seconds the agent compares each app's live deploy with the containers that exist and starts or restarts what is missing. That covers a crashed app, an agent restart and a reboot (linger starts `tero`'s user manager at boot, which starts the agent) with one code path on both Podman versions. Quadlet would do the same through generated units, but its behaviour differs between Podman 4.9 and 5.7.
+- **Fetching the source.** Only `https://github.com/<owner>/<repo>` URLs are accepted, with an optional `.git`. The host is fixed, so the URL can't point the server at an internal address (ASVS v5.0.0-1.3.6). go-git resolves the branch and does a depth-1 clone into the build's working directory, so the server needs no `git` binary. The deploy records the commit SHA and its first message line.
+- **Default branch.** The new-app form suggests the repository's default branch, read from the remote `HEAD`.
+- **Railpack as a library.** `GenerateBuildPlan` then `ConvertPlanToLLB`, and Tero's own `Solve` for the host's platform, as in the spike. A plan with `Success: false` fails the deploy with Railpack's reason in the log. A plan with no start command fails with a fixed message naming the fixes Railpack accepts: a `start` script in `package.json`, a `main` field, or an `index.js` or `index.ts`. Railpack's `mise` download is pointed at the agent's own state directory, not the shared `/tmp/railpack`.
+- **Static sites.** Allowed when Railpack produces an image that serves on `PORT` (Railpack serves static builds with its own Caddy), and not tested beyond one fixture. The roadmap promises backends, so nothing static-specific is added.
+- **Build cache.** BuildKit stays throwaway, but its state directory is a named Podman volume kept between builds, so base images and package layers are reused. The spike measured about 65 seconds per cold build, most of it re-pulling Railpack's images. The volume is pruned when it passes 10 GB. All apps share it; with a single admin, cross-app cache poisoning has no attacker to exploit it.
+- **One build at a time per server.** Builds take a lot of memory and CPU, so the agent runs one deploy at a time across the server, first in, first out. The Redeploy button is disabled while the app has a deploy queued or running, and the API answers 409 if called anyway. Slice 4 adds the "newer commit replaces the queued one" rule.
+- **App containers.** Each app gets its own Podman network `tero-app-<name>`, created with `isolate=true` so apps can't reach each other's containers, and a container per deploy, `tero-app-<name>-<deploy>`, run with `--cap-drop=ALL`, `--security-opt no-new-privileges`, `--userns=auto` and `--log-driver k8s-file` with a size cap. `PORT` is 8080 inside the container, and the agent publishes it on a free `127.0.0.1` port that Caddy proxies to. `--userns=auto` gives each app its own slice of `tero`'s subordinate range, which fixes the spike's finding that every app ran as the same host uid. That still has to be checked next to BuildKit, which maps the whole range (task 1.2).
+- **The start check is an HTTP request.** A TCP connect is not enough: rootless port forwarding accepts connections on the host side before the app listens. The agent sends `GET /` to the published port every second, and any HTTP response, whatever its status, passes. The default timeout is 60 seconds. If the container exits or the timeout passes, the deploy fails and its log ends with the container's last 50 lines of output.
+- **Switching releases.** A redeploy starts the new container next to the live one, switches the route after the start check passes, then stops the old container and removes its image. A failed redeploy therefore never takes the app down. This is the first half of slice 6's "traffic moves only after the start check", brought forward because the per-deploy container makes it nearly free. Slice 6 still owns zero dropped requests during the switch, history and rollback. Each app has a setting, "Run old and new releases together during deploys", on by default. Turning it off is for apps that can't run twice at once (a SQLite file, scheduled jobs) or servers short on memory: the old container stops once the build succeeds and before the new one starts, so the app is briefly down. Either way a failed deploy leaves the old release serving: with the setting off, Tero starts it again from its image, which is kept until the new one is live.
+- **App names.** Lowercase letters, digits and hyphens, 1 to 30 characters, starting with a letter, unique on the server. The name is the first label of the address, so it is fixed after creation. The form suggests the repository name.
+- **The public IP.** Init records the public IP in `/etc/tero/config.json`, whatever dashboard domain was chosen, because app addresses always use `<app>.<public-ip>.sslip.io`. Changing it after init is out of scope (see Risks).
+- **App routes in Caddy.** The service builds its Caddy config from the dashboard domain plus one host per app, and loads it with `caddy.Load` when apps or live deploys change. An app's host exists from creation and serves a "not deployed yet" page until a deploy is live, then proxies to the live container. Each app host gets its own certificate when it is added, from the same issuer as the dashboard (Pebble in the VM, Let's Encrypt in the cloud). App responses get no dashboard headers; the app sets its own.
+- **Build log.** The agent writes the build output, prefixed with Tero's own step lines ("Cloning…", "Planning with Railpack…", "Building…", "Starting…"), to `/var/lib/tero/logs/deploys/<deploy>.log`, capped at 10 MB with a note when truncated. ANSI colour codes are stripped. The dashboard reads it through a Server-Sent Events endpoint that sends what's there and then follows the file until the deploy ends; the CSP's `connect-src 'self'` already allows it. Logs carry no secrets in this slice because apps have no variables yet; slice 5 adds redaction.
+- **Interrupted deploys.** When the agent starts, any deploy it finds in building or starting is marked failed as interrupted, and leftover BuildKit and half-started containers are removed.
+- **Timeouts.** A build that runs longer than 30 minutes is stopped and failed.
+- **Dashboard pages.** The home page becomes the app list, with the security events moving below it. New pages: new app (URL, branch, name), and the app page (address, state, Redeploy, the latest deploys with their state, and the log of the selected deploy). Every failure the agent records has a plain-language message plus the log, for example "Railpack couldn't find how to start your app: add a `start` script to package.json". The router stays path-based without a library.
+- **Root directory.** An app has an optional root directory inside the repository, default the root, for monorepos whose backend lives in a subfolder. Railpack plans from that directory and only it is sent to BuildKit as the build context. The path is checked to be relative, inside the clone after resolving symlinks, and an existing directory.
+- **Test fixtures.** Standalone projects in this repository under `e2e/fixtures/<case>/`: `npm`, `pnpm`, `yarn`, `bun`, `no-start`, `never-listens` and `build-fails`, each with its own lockfile. They are not part of a Bun workspace: a workspace would pull them under one `bun.lock`, and the npm, pnpm and Yarn fixtures exist to test their own lockfiles. In CI the e2e suite creates apps from `https://github.com/leanhanc/tero` at the commit under test with root directory `e2e/fixtures/<case>`, which exercises the real GitHub fetch. Local VM runs use a test-only source compiled only into e2e builds, like the Pebble issuer, that reads the same fixtures from the copy in the VM, so unpushed changes can be tested.
+
+## Risks / Trade-offs
+
+- [The spike hasn't run on Ubuntu 26.04, where Podman 5.7 defaults to pasta] → Task 1.1 reruns the spike in both VMs before any product code, and the slice stops there if 26.04 needs a different design.
+- [The agent runs without `NoNewPrivileges`, because `newuidmap` is setuid] → It listens on nothing, reads only the database and the log directory, and gets the systemd hardening that still lets rootless Podman work, checked in task 1.3. The process that parses untrusted HTTP never gains that privilege.
+- [`--userns=auto` and BuildKit both draw from `tero`'s 1,000,000 ids] → Task 1.2 checks that app containers and BuildKit can run at once, and the range can grow in init if not.
+- [The BuildKit flags `seccomp=unconfined` and `apparmor=unconfined` came from BuildKit's docs and the spike didn't test which are needed] → Task 1.2 removes each one in turn and keeps only what builds need, and `docs/security/` records the rest with the reason.
+- [Builds run code from the repository (install scripts, build scripts)] → They run inside BuildKit's sandbox, inside a rootless container, as a subordinate uid. This is the threat model ADR 0001 accepts for a single-admin server that builds its own admin's code.
+- [The shared build cache volume grows without bound between prunes] → It's capped at 10 GB and pruned after builds; disk-full fails the deploy with a message.
+- [The server's public IP changes, for example after a VPS migration] → App addresses stop resolving to the server. Out of scope for this slice; a `sudo tero` command to update it can come when it's needed.
+- [Let's Encrypt's limits for sslip.io] → Carried over from slice 1. Each app adds one certificate under the server's `<ip>.sslip.io` name.
+- [Builds can exhaust memory and push the kernel's OOM killer onto sshd] → BuildKit runs inside `tero`'s user slice, and the agent's unit sets a memory cap for its own cgroup subtree. The value comes out of task 1.2's measurements.
+
+## Open Questions
+
+- The exact systemd hardening the agent unit can keep while rootless Podman works (task 1.3).
+- Whether `/dev/fuse` and both `unconfined` options are needed on the BuildKit container (task 1.2).
+- The BuildKit memory cap, from the measurements in task 1.2.
