@@ -71,7 +71,7 @@ func assertRefusedWithTestedList(t *testing.T, got result, platform string) {
 	if got.exitCode == 0 {
 		t.Fatalf("install succeeded on %s:\n%s", platform, got.output)
 	}
-	assertContains(t, got.output, platform, "nothing was installed",
+	assertContains(t, got.output, platform, "installation has been aborted",
 		"Ubuntu 26.04 LTS on amd64 or arm64", "Ubuntu 24.04 LTS on amd64 or arm64")
 }
 
@@ -82,7 +82,7 @@ func testInstallChecksumMismatch(t *testing.T) {
 	if got.exitCode == 0 {
 		t.Fatalf("install accepted a tampered binary:\n%s", got.output)
 	}
-	assertContains(t, got.output, "corrupted or tampered with", "Run the install again", "verify the release by hand")
+	assertContains(t, got.output, "corrupted or tampered with", "run the install again", "verify the release by hand")
 
 	if after := etcChecksum(t); after != before {
 		t.Fatal("a refused install changed files under /etc or /usr/local")
