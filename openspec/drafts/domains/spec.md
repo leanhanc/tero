@@ -1,16 +1,9 @@
 # domains Specification
 
 ## Purpose
-Put each web app on a domain with HTTPS handled automatically by the Caddy proxy built into the Tero binary. Every web app gets a working default address; the admin can add custom domains.
+What later slices add to domains: custom domains with automatic HTTPS (slice 7). The default sslip.io address and the HTTP redirect are in the slice 2 change.
 
 ## Requirements
-
-### Requirement: Default app address
-Every web app SHALL get a default HTTPS address under the server's sslip.io name, so it is reachable before any DNS is set up.
-
-#### Scenario: New web app reachable without DNS
-- **WHEN** a web app's first deploy goes live and no custom domain is set
-- **THEN** it answers over HTTPS on `<app>.<public-ip>.sslip.io` with a valid certificate
 
 ### Requirement: Custom domains with automatic HTTPS
 The admin SHALL be able to add custom domains to a web app. Tero SHALL obtain and renew certificates for them automatically.
@@ -30,10 +23,3 @@ The admin SHALL be able to add custom domains to a web app. Tero SHALL obtain an
 #### Scenario: Domain already in use
 - **WHEN** the admin adds a domain already attached to another app or to the dashboard
 - **THEN** Tero rejects it and says which app uses it
-
-### Requirement: HTTP redirects to HTTPS
-Plain HTTP requests to any app domain SHALL redirect to HTTPS.
-
-#### Scenario: HTTP request to an app
-- **WHEN** a client requests an app domain over HTTP
-- **THEN** it receives a redirect to the same URL over HTTPS

@@ -1,0 +1,8 @@
+{
+  "name": "tero-fixture-build-fails",
+  "private": true,
+  "scripts": {
+    "build": "node -e \"console.error('tero fixture: this build fails on purpose'); process.exit(1)\"",
+    "start": "node index.js"
+  }
+}

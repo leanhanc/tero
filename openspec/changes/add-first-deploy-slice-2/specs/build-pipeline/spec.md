@@ -35,7 +35,7 @@ Each build SHALL run in a fresh rootless BuildKit container (`moby/buildkit` roo
 
 #### Scenario: BuildKit container flags
 - **WHEN** Tero starts the BuildKit container
-- **THEN** it runs with `--security-opt unmask=/proc/*` and without `--privileged`, and BuildKit keeps its process sandbox
+- **THEN** it runs with `--security-opt unmask=/proc/*`, its own fixed slice of `tero`'s subordinate ids and a memory cap, without `--privileged`, `/dev/fuse` or `apparmor=unconfined`, and BuildKit keeps its process sandbox
 
 #### Scenario: No published port or socket
 - **WHEN** Tero talks to BuildKit

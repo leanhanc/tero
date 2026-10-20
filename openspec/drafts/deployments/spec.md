@@ -1,7 +1,7 @@
 # deployments Specification
 
 ## Purpose
-A deploy takes one commit of an app through build and release. Pushes trigger deploys automatically, a failed deploy never takes down the running release, and any earlier successful release can be brought back with one click.
+What later slices add to deploys: deploys on push (slice 4), no dropped requests during a switch, history and one-click rollback (slice 6). Manual deploys, deploy states and the start check are in the slice 2 change.
 
 ## Requirements
 
@@ -11,24 +11,6 @@ Tero SHALL start a deploy whenever the app's tracked branch gets a new commit, t
 #### Scenario: Push deploys
 - **WHEN** a commit is pushed to an app's tracked branch
 - **THEN** a deploy for that commit appears in the app's deploy list and starts building
-
-### Requirement: Manual redeploy
-The admin SHALL be able to redeploy the latest commit of the tracked branch from the dashboard.
-
-#### Scenario: Redeploy after changing variables
-- **WHEN** the admin clicks redeploy
-- **THEN** a new deploy of the branch's latest commit starts
-
-### Requirement: Deploy states
-Each deploy SHALL move through the states queued, building, starting, and then live or failed, and the dashboard SHALL show the current state.
-
-#### Scenario: Successful deploy
-- **WHEN** a deploy's build succeeds and the new container passes its start check
-- **THEN** the deploy is marked live and the previously live deploy is marked superseded
-
-#### Scenario: Failed deploy
-- **WHEN** a deploy fails at any step
-- **THEN** it is marked failed with the step that failed, and the previously live deploy is still live
 
 ### Requirement: Old release keeps serving until the new one is ready
 For a web app, the proxy SHALL switch traffic to the new container only after it passes its start check, and only then stop the old container.

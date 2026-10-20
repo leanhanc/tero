@@ -1,0 +1,6 @@
+{
+  "name": "tero-fixture-bun",
+  "private": true,
+  "scripts": { "start": "bun index.ts" },
+  "dependencies": { "ms": "2.1.3" }
+}

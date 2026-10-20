@@ -18,13 +18,16 @@ Change: [add-security-baseline-slice-1](changes/add-security-baseline-slice-1/)
 
 Deploy a JavaScript backend from a public GitHub repository to an HTTPS address, by hand from the dashboard.
 
-- [ ] Create a web app from a public GitHub URL and branch
-- [ ] Build with Railpack as a library in a throwaway rootless BuildKit, load into Podman, no registry
-- [ ] Bun, npm, Yarn and pnpm projects, running on Node or Bun as Railpack detects
-- [ ] Run the app under `tero` with `PORT` set, and fail the deploy if it never listens
-- [ ] Default HTTPS address on `<app>.<public-ip>.sslip.io`
-- [ ] Deploy states (queued, building, starting, live, failed) and a streamed build log
-- [ ] Manual redeploy of the branch's latest commit
+Change: [add-first-deploy-slice-2](changes/add-first-deploy-slice-2/)
+
+- [x] Create a web app from a public GitHub URL and branch
+- [x] Build with Railpack as a library in a throwaway rootless BuildKit, load into Podman, no registry
+- [x] Bun, npm, Yarn and pnpm projects, running on Node or Bun as Railpack detects
+- [x] Run the app under `tero` with `PORT` set, and fail the deploy if it never listens
+- [x] Default HTTPS address on `<app>.<public-ip>.sslip.io`
+- [x] Deploy states (queued, building, starting, live, failed) and a streamed build log
+- [x] Manual redeploy of the branch's latest commit
+- [ ] End-to-end run on cloud servers, once slice 1's cloud CI exists
 
 Drafts: [apps](drafts/apps/spec.md), [build-pipeline](drafts/build-pipeline/spec.md), [deployments](drafts/deployments/spec.md), [domains](drafts/domains/spec.md)
 

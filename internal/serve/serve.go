@@ -6,16 +6,17 @@ package serve
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/caddyserver/caddy/v2"
 	_ "github.com/caddyserver/caddy/v2/modules/standard"
 
+	"github.com/leanhanc/tero/internal/apps"
 	"github.com/leanhanc/tero/internal/auth"
 	"github.com/leanhanc/tero/internal/config"
 	"github.com/leanhanc/tero/internal/dashboard"
+	"github.com/leanhanc/tero/internal/deploylog"
 	"github.com/leanhanc/tero/internal/hostfs"
 	"github.com/leanhanc/tero/internal/journal"
 	"github.com/leanhanc/tero/internal/password"
@@ -49,25 +50,40 @@ func Run(ctx context.Context) error {
 		Passwords: password.Policy{Breaches: password.NewPwnedPasswords()},
 		Journal:   journal.Send,
 	})
-	dashboard.Activate(dashboard.NewHandler(service, cfg.DashboardDomain))
+	appService := apps.NewService(db, cfg.PublicIP, time.Now)
+	dashboard.Activate(dashboard.NewHandler(service, appService, cfg.DashboardDomain, deploylog.Dir))
 	go prunePeriodically(ctx, service)
 
-	caddyConfig, err := buildCaddyConfig(cfg.DashboardDomain, acmeIssuer())
+	settings := caddySettings{Domain: cfg.DashboardDomain, PublicIP: cfg.PublicIP, Issuer: acmeIssuer()}
+	routes, err := loadAppRoutes(ctx, db, settings.PublicIP)
 	if err != nil {
 		return err
 	}
-
-	if err := caddy.Run(caddyConfig); err != nil {
-		return fmt.Errorf("start the web server: %w", err)
+	if err := loadCaddy(settings, routes); err != nil {
+		return err
 	}
+	if err := recordServedRoutes(ctx, db, routes); err != nil {
+		return err
+	}
+	go watchAppRoutes(ctx, db, settings, routes)
 
 	<-ctx.Done()
 	return caddy.Stop()
 }
 
-// buildCaddyConfig serves the dashboard domain over HTTPS only. Port 80
-// answers ACME challenges, refuses the API, and redirects pages to HTTPS.
-func buildCaddyConfig(domain string, issuer map[string]any) (*caddy.Config, error) {
+// caddySettings are the parts of Caddy's config that don't change while the
+// service runs.
+type caddySettings struct {
+	Domain   string
+	PublicIP string
+	Issuer   map[string]any
+}
+
+// buildCaddyConfig serves the dashboard domain and every app's address over
+// HTTPS only. Port 80 answers ACME challenges, refuses the dashboard API, and
+// redirects everything else to HTTPS.
+func buildCaddyConfig(settings caddySettings, appRoutes []appRoute) (*caddy.Config, error) {
+	domain := settings.Domain
 	securityHeaders := map[string][]string{
 		"Strict-Transport-Security":    {"max-age=31536000; includeSubDomains"},
 		"X-Content-Type-Options":       {"nosniff"},
@@ -102,6 +118,13 @@ func buildCaddyConfig(domain string, issuer map[string]any) (*caddy.Config, erro
 		"terminal": true,
 	}
 
+	httpsRoutes := []any{dashboardRoute}
+	subjects := []string{domain}
+	for _, route := range appRoutes {
+		httpsRoutes = append(httpsRoutes, appCaddyRoute(route))
+		subjects = append(subjects, route.Host)
+	}
+
 	raw := map[string]any{
 		"admin":   map[string]any{"disabled": true},
 		"storage": map[string]any{"module": "file_system", "root": stateDir + "/caddy"},
@@ -110,7 +133,7 @@ func buildCaddyConfig(domain string, issuer map[string]any) (*caddy.Config, erro
 				"servers": map[string]any{
 					"dashboard": map[string]any{
 						"listen": []string{":443"},
-						"routes": []any{dashboardRoute},
+						"routes": httpsRoutes,
 					},
 					"plain_http": map[string]any{
 						"listen": []string{":80"},
@@ -121,8 +144,8 @@ func buildCaddyConfig(domain string, issuer map[string]any) (*caddy.Config, erro
 			"tls": map[string]any{
 				"automation": map[string]any{
 					"policies": []any{map[string]any{
-						"subjects": []string{domain},
-						"issuers":  []any{issuer},
+						"subjects": subjects,
+						"issuers":  []any{settings.Issuer},
 					}},
 				},
 			},

@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -64,12 +65,17 @@ func TestSlice1(t *testing.T) {
 	t.Run("server-init: Unneeded services and file permissions", testServicesAndPermissions)
 	t.Run("server-init: Service running after init", testServiceRunning)
 	t.Run("process-isolation: Service process identity", testServiceIdentity)
+	t.Run("server-init: Agent running after init / process-isolation: Agent has no listener", testAgentRunning)
+	t.Run("process-isolation: Agent unit not writable by tero", testAgentUnitOwnership)
+	t.Run("process-isolation: Service can't change the agent's setup", testServiceFencedFromAgent)
+	t.Run("server-init: Public IP recorded for app addresses", testPublicIPRecorded)
 	t.Run("process-isolation: Built-in proxy binds privileged ports", testProxyPorts)
 	t.Run("dashboard-access: Plain HTTP request", testPlainHTTP)
 	t.Run("server-init: Admin skips the domain (serves HTTPS)", func(t *testing.T) { assertServesHTTPS(t, skippedDomain) })
 	t.Run("server-init: Admin provides a domain", testProvidedDomain)
 	t.Run("server-init: Init on an already initialized server", testSecondInit)
 	t.Run("dashboard-access", testDashboardAccess)
+	t.Run("deploys", testDeploys)
 	t.Run("server-init: Lynis score in end-to-end tests", testLynis)
 	t.Run("server-init: Service survives reboot", testReboot)
 }
@@ -167,8 +173,14 @@ func lastLine(output string) string {
 	return strings.TrimSpace(lines[len(lines)-1])
 }
 
+// asTero runs a shell command as tero inside tero's systemd user session,
+// where the agent runs. On Podman 4.9 the first container with networking
+// leaves a helper process in the cgroup it started from, and app networks
+// stop working once that cgroup ends, so containers must start where the
+// agent's would.
 func asTero(command string) string {
-	return `sudo runuser -u tero -- env HOME=/var/lib/tero XDG_RUNTIME_DIR=/run/user/$(id -u tero) ` + command
+	script := base64.StdEncoding.EncodeToString([]byte(command))
+	return "echo " + script + " | base64 -d | sudo systemd-run --machine=tero@.host --user --pipe --wait --quiet bash"
 }
 
 func testPodmanAvailable(t *testing.T) {
@@ -236,7 +248,9 @@ func testNoLogin(t *testing.T) {
 }
 
 func testRootlessContainer(t *testing.T) {
-	must(t, asTero("podman run -d --rm --name e2e-probe quay.io/libpod/alpine:latest sleep 60"))
+	// A scope of its own keeps the container running after this command's
+	// transient unit ends, as the agent does for apps.
+	must(t, asTero("systemd-run --user --scope --quiet podman run -d --rm --name e2e-probe quay.io/libpod/alpine:latest sleep 60"))
 	defer run(t, asTero("podman rm -f e2e-probe"))
 
 	containerOwners := must(t, asTero("podman top e2e-probe huser"))
@@ -397,6 +411,48 @@ func testServiceIdentity(t *testing.T) {
 	}
 }
 
+// agentSystemctl talks to tero's systemd user manager, where the agent runs.
+const agentSystemctl = "sudo systemctl --user --machine=tero@.host"
+
+func testAgentRunning(t *testing.T) {
+	must(t, agentSystemctl+" is-active tero-agent")
+	agentPID := must(t, agentSystemctl+" show tero-agent --property=MainPID --value")
+
+	owner := must(t, "ps -o user= -p "+agentPID)
+	if owner != "tero" {
+		t.Errorf("agent runs as %q, want tero", owner)
+	}
+
+	listeners := run(t, "sudo ss -Hlnp -A inet,unix | grep 'pid="+agentPID+",'")
+	if listeners.exitCode == 0 {
+		t.Errorf("agent has listening sockets:\n%s", listeners.output)
+	}
+}
+
+func testAgentUnitOwnership(t *testing.T) {
+	ownership := must(t, "stat -c '%U %a' /etc/systemd/user/tero-agent.service")
+	if ownership != "root 644" {
+		t.Errorf("agent unit is %q, want root 644", ownership)
+	}
+}
+
+// testServiceFencedFromAgent writes as tero from inside the service's mount
+// namespace, which is what a compromised service could do.
+func testServiceFencedFromAgent(t *testing.T) {
+	servicePID := must(t, "systemctl show tero --property=MainPID --value")
+	asServiceUser := "sudo nsenter -t " + servicePID + " -m -S $(id -u tero) -G $(id -g tero) "
+
+	for _, dir := range []string{"/var/lib/tero/.config", "/var/lib/tero/.local", "/var/lib/tero/.cache"} {
+		if got := run(t, asServiceUser+"touch "+dir+"/tero-e2e-probe"); got.exitCode == 0 {
+			t.Errorf("the service can write to %s", dir)
+		}
+	}
+}
+
+func testPublicIPRecorded(t *testing.T) {
+	assertContains(t, must(t, "cat /etc/tero/config.json"), `"publicIP": "`+publicIP+`"`)
+}
+
 func testProxyPorts(t *testing.T) {
 	listeners := must(t, `sudo ss -Hltnp '( sport = :80 or sport = :443 )'`)
 	assertContains(t, listeners, `"tero"`)
@@ -436,7 +492,8 @@ func assertServesHTTPS(t *testing.T, domain string) {
 
 func testProvidedDomain(t *testing.T) {
 	setDomain := func(domain string) {
-		must(t, fmt.Sprintf(`echo '{"dashboardDomain": "%s"}' | sudo tee /etc/tero/config.json >/dev/null && sudo systemctl restart tero`, domain))
+		config := fmt.Sprintf(`{"dashboardDomain": "%s", "publicIP": "%s"}`, domain, publicIP)
+		must(t, fmt.Sprintf(`echo '%s' | sudo tee /etc/tero/config.json >/dev/null && sudo systemctl restart tero`, config))
 	}
 	defer setDomain(skippedDomain)
 
@@ -486,6 +543,11 @@ func testReboot(t *testing.T) {
 
 	waitUntil(t, 2*time.Minute, func() bool { return run(t, "systemctl is-active tero").exitCode == 0 })
 	testServiceIdentity(t)
+	waitUntil(t, time.Minute, func() bool { return run(t, agentSystemctl+" is-active tero-agent").exitCode == 0 })
+	// apps: Reboot
+	waitUntil(t, 2*time.Minute, func() bool {
+		return strings.Contains(fetchApp(t, fixtureApp("npm"), "/").output, "tero fixture npm")
+	})
 	testKernelSettings(t)
 	assertContains(t, must(t, "sudo nft list table inet tero"), "policy drop")
 	// Pebble creates a new root on every start, so after a reboot the stored

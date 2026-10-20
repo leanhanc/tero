@@ -1,0 +1,7 @@
+{
+  "name": "tero-fixture-pnpm",
+  "private": true,
+  "packageManager": "pnpm@10.18.0",
+  "scripts": { "start": "node index.js" },
+  "dependencies": { "ms": "2.1.3" }
+}

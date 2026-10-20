@@ -1,0 +1,6 @@
+{
+  "name": "tero-fixture-npm",
+  "private": true,
+  "scripts": { "start": "node index.js" },
+  "dependencies": { "ms": "2.1.3" }
+}

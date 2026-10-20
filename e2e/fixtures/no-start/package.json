@@ -1,0 +1,5 @@
+{
+  "name": "tero-fixture-no-start",
+  "private": true,
+  "scripts": { "build": "node -e \"console.log('nothing to build')\"" }
+}

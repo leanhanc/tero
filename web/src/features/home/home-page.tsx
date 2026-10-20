@@ -1,25 +1,14 @@
-import type { SubmitEvent } from 'react';
-
-import { logout } from '../../lib/utils/api';
+import { PageHeader } from '../../components/page-header';
+import { AppList } from './components/app-list';
 import { SecurityEvents } from './components/security-events';
 
 export function HomePage({ onLogout }: { onLogout: () => void }) {
-	const submitLogout = async (event: SubmitEvent<HTMLFormElement>) => {
-		event.preventDefault();
-		await logout().catch(() => undefined);
-		onLogout();
-	};
-
 	return (
 		<>
-			<header>
-				<p>Tero</p>
-				<form onSubmit={submitLogout}>
-					<button type="submit">Log out</button>
-				</form>
-			</header>
+			<PageHeader onLogout={onLogout} />
 			<main>
-				<h1>Dashboard</h1>
+				<h1>Apps</h1>
+				<AppList />
 				<SecurityEvents />
 			</main>
 		</>

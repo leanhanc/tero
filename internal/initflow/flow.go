@@ -51,7 +51,11 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 
-	domain, err := resolveDomain(ctx, opts)
+	publicIP, err := detectPublicIP(ctx)
+	if err != nil {
+		return err
+	}
+	domain, err := resolveDomain(opts, publicIP)
 	if err != nil {
 		return err
 	}
@@ -59,7 +63,7 @@ func Run(ctx context.Context, opts Options) error {
 	// see or decide belongs there. Step titles only appear when a step fails.
 	fmt.Fprintln(h.out, "Setting up this server. This takes a few minutes...")
 
-	for _, s := range steps(domain) {
+	for _, s := range steps(config.Config{DashboardDomain: domain, PublicIP: publicIP.String()}) {
 		if err := s.apply(ctx, h); err != nil {
 			return fmt.Errorf("Setup stopped while %s.\n\n%s\n\nFix the problem above and run `sudo tero init` again. Finished steps are skipped", s.title, capitalize(err.Error()))
 		}

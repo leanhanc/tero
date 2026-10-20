@@ -11,15 +11,20 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/leanhanc/tero/internal/agent"
 	"github.com/leanhanc/tero/internal/config"
+	"github.com/leanhanc/tero/internal/deployer"
+	"github.com/leanhanc/tero/internal/deploylog"
 	"github.com/leanhanc/tero/internal/hostfs"
 	"github.com/leanhanc/tero/internal/initflow"
 	"github.com/leanhanc/tero/internal/loginlink"
 	"github.com/leanhanc/tero/internal/rootcheck"
 	"github.com/leanhanc/tero/internal/serve"
+	"github.com/leanhanc/tero/internal/store"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
@@ -29,6 +34,7 @@ const usage = `Usage:
   sudo tero init [--domain DOMAIN]   Set up this server as a Tero host
   sudo tero reset-login              Reset the dashboard login
   tero serve                         Run the Tero service (started by systemd)
+  tero agent                         Build and run apps (started by systemd for tero)
   tero version                       Print the version
 `
 
@@ -54,6 +60,8 @@ func run(ctx context.Context, args []string) error {
 		return runInit(ctx, commandArgs)
 	case "serve":
 		return serve.Run(ctx)
+	case "agent":
+		return runAgent(ctx)
 	case "reset-login":
 		return runResetLogin(ctx)
 	case loginlink.Command:
@@ -101,6 +109,17 @@ func runResetLogin(ctx context.Context) error {
 
 	fmt.Printf("The dashboard login was reset. Open this link to set it up again:\n\n  %s\n", link)
 	return nil
+}
+
+func runAgent(ctx context.Context) error {
+	db, err := store.Open(ctx, store.Path)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	pipeline := deployer.Pipeline{DB: db, LogDir: deploylog.Dir, WorkDir: deployer.WorkDir, Now: time.Now}
+	return agent.Run(ctx, agent.Options{DB: db, Pipeline: pipeline})
 }
 
 func isTerminal(file *os.File) bool {

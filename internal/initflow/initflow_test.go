@@ -273,7 +273,7 @@ func TestNormalizeDomain(t *testing.T) {
 func TestResolveDomainUsesTheFlag(t *testing.T) {
 	opts := Options{Domain: "Dash.Example.com"}
 
-	got, err := resolveDomain(context.Background(), opts)
+	got, err := resolveDomain(opts, netip.MustParseAddr("203.0.113.10"))
 	if err != nil || got != "dash.example.com" {
 		t.Fatalf("resolveDomain() = %q, %v", got, err)
 	}
@@ -283,9 +283,9 @@ func TestResolveDomainPromptFallsBackOnEmptyAnswer(t *testing.T) {
 	var out strings.Builder
 	opts := Options{IsInteractive: true, In: strings.NewReader("\n"), Out: &out}
 
-	got, err := resolveDomainWithIP(opts, netip.MustParseAddr("203.0.113.10"))
+	got, err := resolveDomain(opts, netip.MustParseAddr("203.0.113.10"))
 	if err != nil || got != "203.0.113.10.sslip.io" {
-		t.Fatalf("resolveDomainWithIP() = %q, %v", got, err)
+		t.Fatalf("resolveDomain() = %q, %v", got, err)
 	}
 	if !strings.Contains(out.String(), "press Enter to use 203.0.113.10.sslip.io") {
 		t.Fatalf("prompt = %q", out.String())
@@ -295,9 +295,9 @@ func TestResolveDomainPromptFallsBackOnEmptyAnswer(t *testing.T) {
 func TestResolveDomainPromptUsesTheAnswer(t *testing.T) {
 	opts := Options{IsInteractive: true, In: strings.NewReader("Dash.Example.com\n"), Out: &strings.Builder{}}
 
-	got, err := resolveDomainWithIP(opts, netip.MustParseAddr("203.0.113.10"))
+	got, err := resolveDomain(opts, netip.MustParseAddr("203.0.113.10"))
 	if err != nil || got != "dash.example.com" {
-		t.Fatalf("resolveDomainWithIP() = %q, %v", got, err)
+		t.Fatalf("resolveDomain() = %q, %v", got, err)
 	}
 }
 

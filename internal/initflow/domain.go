@@ -10,24 +10,24 @@ import (
 	"github.com/leanhanc/tero/internal/publicip"
 )
 
+// detectPublicIP finds the address app addresses are built on, so init
+// needs it even when the dashboard has its own domain.
+func detectPublicIP(ctx context.Context) (netip.Addr, error) {
+	ip, err := publicip.Detect(ctx)
+	if err != nil {
+		return netip.Addr{}, fmt.Errorf("couldn't find this server's public IP address, which app addresses use: %w", err)
+	}
+
+	return ip, nil
+}
+
 // resolveDomain picks the dashboard domain: --domain if given, otherwise the
 // admin's answer at the prompt, otherwise <public-ip>.sslip.io.
-func resolveDomain(ctx context.Context, opts Options) (string, error) {
+func resolveDomain(opts Options, ip netip.Addr) (string, error) {
 	if opts.Domain != "" {
 		return normalizeDomain(opts.Domain)
 	}
 
-	ip, err := publicip.Detect(ctx)
-	if err != nil {
-		return "", fmt.Errorf("%w\nPass a domain instead: sudo tero init --domain dashboard.example.com", err)
-	}
-
-	return resolveDomainWithIP(opts, ip)
-}
-
-// resolveDomainWithIP asks for a domain when attached to a terminal and
-// falls back to the server's sslip.io name.
-func resolveDomainWithIP(opts Options, ip netip.Addr) (string, error) {
 	fallback := sslipDomain(ip)
 
 	if !opts.IsInteractive {

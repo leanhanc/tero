@@ -21,6 +21,10 @@ NoNewPrivileges=yes
 
 StateDirectory=tero
 StateDirectoryMode=0750
+# tero's home is the state directory. Podman's storage and configuration and
+# tero's user units live under it and belong to the agent, so the service
+# can't plant anything the agent would run.
+InaccessiblePaths=/var/lib/tero/.config /var/lib/tero/.local /var/lib/tero/.cache
 Environment=XDG_DATA_HOME=/var/lib/tero/data XDG_CONFIG_HOME=/var/lib/tero/config
 UMask=0077
 

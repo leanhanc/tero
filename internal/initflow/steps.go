@@ -27,7 +27,7 @@ var packages = []string{
 	"nftables", "auditd", "apparmor", "apparmor-utils", "unattended-upgrades",
 }
 
-func steps(domain string) []step {
+func steps(cfg config.Config) []step {
 	return []step{
 		{"installing Podman, nftables, auditd and automatic updates", installPackages},
 		{"creating the tero system user", createTeroUser},
@@ -38,8 +38,9 @@ func steps(domain string) []step {
 		{"turning on auditing and checking AppArmor", enableAuditing},
 		{"disabling unneeded services", disableUnneededServices},
 		{"setting permissions on sensitive files", setSensitivePermissions},
-		{"saving Tero's configuration", saveConfig(domain)},
+		{"saving Tero's configuration", saveConfig(cfg)},
 		{"starting the Tero service", startService},
+		{"starting the Tero agent", startAgent},
 	}
 }
 
@@ -280,21 +281,46 @@ func enableAuditing(ctx context.Context, h host) error {
 	return nil
 }
 
-func saveConfig(domain string) func(context.Context, host) error {
+func saveConfig(cfg config.Config) func(context.Context, host) error {
 	return func(_ context.Context, h host) error {
-		return config.Save(h.files, config.Config{DashboardDomain: domain})
+		return config.Save(h.files, cfg)
 	}
 }
+
+// agentOnlyDirs are the parts of tero's home the service unit makes
+// inaccessible. They must exist before the service starts, or systemd
+// skips them and the service could create them itself.
+var agentOnlyDirs = []string{teroHome + "/.config", teroHome + "/.local", teroHome + "/.cache"}
 
 func startService(ctx context.Context, h host) error {
 	if _, err := writeEmbedded(h, "tero.service", "/etc/systemd/system/tero.service", 0o644); err != nil {
 		return err
 	}
 
+	makeAgentDirs := append([]string{"install", "-d", "-o", teroUser, "-g", teroUser, "-m", "0700"}, agentOnlyDirs...)
+
 	return runAll(ctx, h,
+		makeAgentDirs,
 		[]string{"systemctl", "daemon-reload"},
 		[]string{"systemctl", "enable", "tero.service"},
 		[]string{"systemctl", "restart", "tero.service"},
+	)
+}
+
+// startAgent installs the agent as a user unit that only tero's user manager
+// runs, enables it for boot, and starts it now. The unit file stays owned by
+// root, so tero can't change what the agent runs.
+func startAgent(ctx context.Context, h host) error {
+	if _, err := writeEmbedded(h, "tero-agent.service", "/etc/systemd/user/tero-agent.service", 0o644); err != nil {
+		return err
+	}
+
+	const teroManager = "--machine=" + teroUser + "@.host"
+
+	return runAll(ctx, h,
+		[]string{"systemctl", "--global", "enable", "tero-agent.service"},
+		[]string{"systemctl", "--user", teroManager, "daemon-reload"},
+		[]string{"systemctl", "--user", teroManager, "restart", "tero-agent.service"},
 	)
 }
 

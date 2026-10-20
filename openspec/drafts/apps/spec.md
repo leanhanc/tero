@@ -1,31 +1,20 @@
 # apps Specification
 
 ## Purpose
-An app is one repository and branch deployed as one long-running container on the server. v1 has two kinds: web apps, which receive HTTP traffic through the built-in proxy, and workers, which receive none. Each app has its own environment variables.
+What later slices add to apps: workers (slice 9), which receive no traffic, environment variables (slice 5), and deleting an app (slice 9). Web apps from public GitHub URLs are in the slice 2 change.
 
 ## Requirements
 
 ### Requirement: Create an app from a repository
-The admin SHALL be able to create an app from a repository connected through the GitHub App or from a public GitHub URL, choosing the branch to track and the app type.
+The admin SHALL be able to create an app from a repository connected through the GitHub App (slice 4) as well as from a public GitHub URL, and SHALL choose the app type: web or worker.
 
-#### Scenario: Create a web app
-- **WHEN** the admin creates a web app from a repository and branch
+#### Scenario: Create from a connected repository
+- **WHEN** the admin creates an app from a private repository the GitHub App can read
 - **THEN** the app is listed in the dashboard and its first deploy starts
 
 #### Scenario: Create a worker
 - **WHEN** the admin creates a worker app
 - **THEN** the app is listed with type worker and its first deploy starts
-
-### Requirement: Web apps
-A web app SHALL receive HTTP traffic from the built-in proxy on the port given to it through the `PORT` environment variable.
-
-#### Scenario: Web app reachable
-- **WHEN** a web app's deploy succeeds
-- **THEN** HTTPS requests to its domain reach the app's container
-
-#### Scenario: Web app never listens
-- **WHEN** a web app's container does not accept connections on `PORT` within the startup timeout
-- **THEN** the deploy is marked failed and the previous release keeps serving
 
 ### Requirement: Worker apps
 A worker app SHALL run as a long-lived container with no domain and no inbound traffic from the proxy.

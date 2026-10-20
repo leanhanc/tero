@@ -19,13 +19,58 @@ export type SecurityEvent = {
 	detail?: string;
 };
 
+export type DeployState = 'queued' | 'building' | 'starting' | 'live' | 'failed' | 'superseded';
+
+export type AppSummary = {
+	name: string;
+	address: string;
+	latestState: DeployState | '';
+};
+
+export type Deploy = {
+	id: number;
+	state: DeployState;
+	failedStep: string;
+	reason: string;
+	commitSha: string;
+	commitMessage: string;
+	queuedAt: number;
+	finishedAt: number;
+};
+
+export type AppDetail = {
+	name: string;
+	address: string;
+	repository: string;
+	branch: string;
+	rootDirectory: string;
+	runTogether: boolean;
+	deploys: Deploy[];
+};
+
+export type RepositoryLookup = {
+	repository: string;
+	defaultBranch: string;
+	suggestedName: string;
+};
+
+export type NewApp = {
+	repository: string;
+	branch: string;
+	name: string;
+	rootDirectory: string;
+};
+
 /** An error the server explained, safe to show as is. */
 export class ApiError extends Error {
 	readonly status: number;
+	/** The form field the error is about, when the server names one. */
+	readonly field: string;
 
-	constructor(status: number, message: string) {
+	constructor(status: number, message: string, field = '') {
 		super(message);
 		this.status = status;
+		this.field = field;
 	}
 }
 
@@ -54,6 +99,37 @@ export async function getEvents(): Promise<SecurityEvent[]> {
 	return response.events;
 }
 
+export function lookUpRepository(url: string): Promise<RepositoryLookup> {
+	return request<RepositoryLookup>('POST', '/api/repositories/lookup', { url });
+}
+
+export async function createApp(newApp: NewApp): Promise<string> {
+	const response = await request<{ name: string }>('POST', '/api/apps', newApp);
+	return response.name;
+}
+
+export async function listApps(): Promise<AppSummary[]> {
+	const response = await request<{ apps: AppSummary[] }>('GET', '/api/apps');
+	return response.apps;
+}
+
+export function getApp(name: string): Promise<AppDetail> {
+	return request<AppDetail>('GET', `/api/apps/${encodeURIComponent(name)}`);
+}
+
+export function redeploy(name: string): Promise<void> {
+	return request<void>('POST', `/api/apps/${encodeURIComponent(name)}/deploys`, {});
+}
+
+export function setRunTogether(name: string, runTogether: boolean): Promise<void> {
+	return request<void>('POST', `/api/apps/${encodeURIComponent(name)}/settings`, { runTogether });
+}
+
+/** The address of a deploy's build log, streamed as Server-Sent Events. */
+export function deployLogURL(deployID: number): string {
+	return `/api/deploys/${deployID}/log`;
+}
+
 async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
 	const hasBody = body !== undefined;
 	const response = await fetch(path, {
@@ -64,7 +140,8 @@ async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown):
 	});
 
 	if (!response.ok) {
-		throw new ApiError(response.status, await readErrorMessage(response));
+		const { message, field } = await readError(response);
+		throw new ApiError(response.status, message, field);
 	}
 
 	const hasNoContent = response.status === 204;
@@ -75,12 +152,13 @@ async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown):
 	return (await response.json()) as T;
 }
 
-async function readErrorMessage(response: Response): Promise<string> {
+async function readError(response: Response): Promise<{ message: string; field: string }> {
+	const fallback = 'Something went wrong. Try again.';
 	try {
-		const body = (await response.json()) as { error?: string };
-		return body.error ?? 'Something went wrong. Try again.';
+		const body = (await response.json()) as { error?: string; field?: string };
+		return { message: body.error ?? fallback, field: body.field ?? '' };
 	} catch {
-		return 'Something went wrong. Try again.';
+		return { message: fallback, field: '' };
 	}
 }
 

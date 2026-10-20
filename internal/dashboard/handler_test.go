@@ -3,6 +3,7 @@ package dashboard
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leanhanc/tero/internal/apps"
 	"github.com/leanhanc/tero/internal/auth"
 	"github.com/leanhanc/tero/internal/password"
 	"github.com/leanhanc/tero/internal/store"
@@ -33,6 +35,8 @@ type testDashboard struct {
 	// refusals holds the TERO_REASON of each refused request sent to the
 	// journal.
 	refusals *[]string
+	db       *sql.DB
+	logDir   string
 }
 
 func newTestDashboard(t *testing.T) testDashboard {
@@ -58,7 +62,11 @@ func newTestDashboard(t *testing.T) testDashboard {
 		},
 	})
 
-	return testDashboard{handler: NewHandler(service, "dash.example.com"), service: service, now: &now, secret: &secret, refusals: refusals}
+	logDir := t.TempDir()
+	appService := apps.NewService(db, "203.0.113.10", func() time.Time { return now })
+	handler := NewHandler(service, appService, "dash.example.com", logDir)
+
+	return testDashboard{handler: handler, service: service, db: db, logDir: logDir, now: &now, secret: &secret, refusals: refusals}
 }
 
 func (d testDashboard) post(path string, body any, cookies ...*http.Cookie) *httptest.ResponseRecorder {

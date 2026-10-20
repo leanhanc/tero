@@ -18,6 +18,7 @@ import (
 
 	"rsc.io/qr"
 
+	"github.com/leanhanc/tero/internal/apps"
 	"github.com/leanhanc/tero/internal/auth"
 	"github.com/leanhanc/tero/internal/password"
 )
@@ -33,13 +34,16 @@ const (
 // Handler is the dashboard for one domain.
 type Handler struct {
 	auth   *auth.Service
+	apps   *apps.Service
+	logDir string
 	origin string
 	mux    *http.ServeMux
 }
 
-// NewHandler returns the dashboard served at https://domain.
-func NewHandler(service *auth.Service, domain string) *Handler {
-	h := &Handler{auth: service, origin: "https://" + domain, mux: http.NewServeMux()}
+// NewHandler returns the dashboard served at https://domain. logDir holds
+// the deploy logs the agent writes.
+func NewHandler(service *auth.Service, appService *apps.Service, domain, logDir string) *Handler {
+	h := &Handler{auth: service, apps: appService, logDir: logDir, origin: "https://" + domain, mux: http.NewServeMux()}
 
 	h.mux.HandleFunc("GET /api/state", h.state)
 	h.mux.HandleFunc("POST /api/setup/begin", h.beginSetup)
@@ -47,6 +51,7 @@ func NewHandler(service *auth.Service, domain string) *Handler {
 	h.mux.HandleFunc("POST /api/login", h.login)
 	h.mux.HandleFunc("POST /api/logout", h.logout)
 	h.mux.HandleFunc("GET /api/events", h.requireSession(h.events))
+	h.registerAppRoutes()
 	h.mux.HandleFunc("/api/", h.notFound)
 	h.mux.Handle("/", newWebApp())
 

@@ -20,7 +20,7 @@ The [sections before the matrix](#documentation-asvs-asks-for) are the documenta
 
 ## Summary
 
-253 requirements: 138 Met, 3 Gap, 6 Planned, 1 Deviation, 3 Open, 12 Later, 90 N/A.
+253 requirements: 140 Met, 3 Gap, 6 Planned, 1 Deviation, 3 Open, 7 Later, 93 N/A.
 
 Planned for slice 3, Account security:
 
@@ -34,7 +34,7 @@ Gaps, in the order they matter most:
 
 | ID | Gap |
 |---|---|
-| 13.2.4, 13.2.5 | Outbound connections aren't limited to an allowlist. |
+| 13.2.4, 13.2.5 | Outbound connections aren't limited to an allowlist. App builds reach whatever package registries the app's build uses. |
 | 16.4.3 | Logs stay on the server. Nothing ships them to a separate system. |
 
 Deviation: TOTP codes from the previous and next 30-second step are accepted for clock drift (6.5.5), as explained in its row.
@@ -145,15 +145,18 @@ ASVS 13.1.1.
 
 | Direction | Peer | Purpose |
 |---|---|---|
-| Inbound 443 | Browsers | Dashboard over HTTPS |
+| Inbound 443 | Browsers | Dashboard over HTTPS, and each app on `<app>.<public-ip>.sslip.io` |
 | Inbound 80 | Browsers, the ACME CA | Redirect to HTTPS, ACME HTTP-01 challenges |
 | Inbound SSH | The admin | Server administration, `sudo tero ...` |
 | Outbound HTTPS | Let's Encrypt | Certificates |
 | Outbound HTTPS | `api.pwnedpasswords.com` | Breached-password check |
 | Outbound HTTPS | `1.1.1.1` | Public IP lookup during `sudo tero init` |
 | Outbound HTTP(S) | Ubuntu archive mirrors | Packages during init and automatic security updates |
+| Outbound HTTPS | `github.com` | Branches and source of apps' public repositories |
+| Outbound HTTPS | `ghcr.io`, `docker.io` | Railpack's builder and runtime images, and the pinned BuildKit image |
+| Outbound HTTP(S) | Whatever each app's build uses | Package registries (npm, for example) and runtime downloads during builds |
 
-The admin can't make Tero contact any other address yet. Repository URLs arrive in slice 2, with the SSRF check from ADR 0001.
+Repository URLs are the only addresses that come from input. Only `https://github.com/<owner>/<repo>` is accepted, and Tero builds every URL it fetches from the owner and name on that fixed host (1.3.6).
 
 ### Logging
 
@@ -181,7 +184,7 @@ Events never contain a password, TOTP code, TOTP secret or token. The journal is
 | 1.2.2 | 1 | Encode data in built URLs | Met | Setup tokens are base64url; the `otpauth://` URI uses `url.PathEscape` and `url.Values` | `TestURIIsScannable` |
 | 1.2.3 | 1 | Encode data in JavaScript and JSON | Met | `encoding/json` | — |
 | 1.2.4 | 1 | Parameterized database queries | Met | Every query in `internal/auth` and `internal/store` uses placeholders | — |
-| 1.2.5 | 1 | No OS command injection | Met | The dashboard runs no commands. Root CLI commands run fixed programs from system directories with argument lists and no shell (`internal/sysexec`) | `TestHostRefusesCommandsOutsideSystemDirs`, e2e `Dashboard cannot trigger root work` |
+| 1.2.5 | 1 | No OS command injection | Met | The dashboard runs no commands. Root CLI commands run fixed programs from system directories with argument lists and no shell (`internal/sysexec`). The agent runs `podman` with argument lists and no shell (`internal/podman`), after checking app names, branches and folders again | `TestHostRefusesCommandsOutsideSystemDirs`, `TestCheckName`, e2e `Dashboard cannot trigger root work` |
 | 1.2.6 | 2 | LDAP injection | N/A | No LDAP | — |
 | 1.2.7 | 2 | XPath injection | N/A | No XML | — |
 | 1.2.8 | 2 | LaTeX injection | N/A | No LaTeX | — |
@@ -191,7 +194,7 @@ Events never contain a password, TOTP code, TOTP secret or token. The journal is
 | 1.3.3 | 2 | Sanitize input for dangerous contexts | Met | Input reaches only SQL placeholders, Argon2id and TOTP checks, and is length-bounded ([Inputs and limits](#inputs-and-limits)) | — |
 | 1.3.4 | 2 | Sanitize user SVG | N/A | No uploads | — |
 | 1.3.5 | 2 | Sanitize Markdown, CSS and similar | N/A | No user markup is rendered | — |
-| 1.3.6 | 2 | SSRF protection | Later | No outbound address comes from input today. Slice 2 adds repository URLs with the SSRF check from ADR 0001 | — |
+| 1.3.6 | 2 | SSRF protection | Met | Repository URLs must be `https://github.com/<owner>/<repo>`; every fetched URL is rebuilt from the owner and name on that fixed host (`internal/source`) | `TestParseRepository_v5_0_0_1_3_6_OnlyGitHub`, `TestLookupRefusesOtherHosts_v5_0_0_1_3_6`, e2e `apps: Not a GitHub URL (v5.0.0-1.3.6)` |
 | 1.3.7 | 2 | Template injection | N/A | No server-side templates | — |
 | 1.3.8 | 2 | JNDI injection | N/A | Not Java | — |
 | 1.3.9 | 2 | Memcache injection | N/A | No memcache | — |
@@ -210,7 +213,7 @@ Events never contain a password, TOTP code, TOTP secret or token. The journal is
 | 2.1.1 | 1 | Input rules documented | Met | [Inputs and limits](#inputs-and-limits) | — |
 | 2.1.2 | 2 | Rules for combined items documented | N/A | No inputs depend on each other | — |
 | 2.1.3 | 2 | Business limits documented | Met | [Brute-force protection](#brute-force-protection), [Inputs and limits](#inputs-and-limits) | — |
-| 2.2.1 | 1 | Positive input validation | Met | Codes must be 6 digits, passwords 8 to 1024 characters, tokens must match a stored hash | `TestVerifyRefusesMalformedCodes`, `TestPolicy_v5_0_0_6_2_1_RejectsSevenCharacters` |
+| 2.2.1 | 1 | Positive input validation | Met | Codes must be 6 digits, passwords 8 to 1024 characters, tokens must match a stored hash. App names, repository URLs, branches and folders are checked against allow patterns | `TestVerifyRefusesMalformedCodes`, `TestPolicy_v5_0_0_6_2_1_RejectsSevenCharacters` |
 | 2.2.2 | 1 | Validation at a trusted layer | Met | All checks run in the Go API; the web app's `minlength` is only a hint | `TestSetupRejectsShortPassword_v5_0_0_6_2_1` |
 | 2.2.3 | 2 | Combinations of items are reasonable | N/A | No combined items | — |
 | 2.3.1 | 1 | Steps happen in order | Met | Finishing setup needs the pending credentials from its first step; nothing is created before | `TestSetupWithoutTOTPCreatesNoAccount` |
@@ -253,10 +256,10 @@ Events never contain a password, TOTP code, TOTP secret or token. The journal is
 | 4.2.1 | 2 | No request smuggling | Met | One server parses each request and handles it in the same process | — |
 | 4.3.1 | 2 | GraphQL query limits | N/A | No GraphQL | — |
 | 4.3.2 | 2 | GraphQL introspection off | N/A | No GraphQL | — |
-| 4.4.1 | 1 | WebSockets over TLS | Later | No WebSockets yet. Applies if live logs (slices 2 and 8) use them | — |
-| 4.4.2 | 2 | WebSocket `Origin` checked | Later | As 4.4.1 | — |
-| 4.4.3 | 2 | WebSocket session tokens | Later | As 4.4.1 | — |
-| 4.4.4 | 2 | WebSocket tokens from the HTTPS session | Later | As 4.4.1 | — |
+| 4.4.1 | 1 | WebSockets over TLS | N/A | No WebSockets. Live build logs use Server-Sent Events on the dashboard's HTTPS session | — |
+| 4.4.2 | 2 | WebSocket `Origin` checked | N/A | No WebSockets. Live build logs use Server-Sent Events on the dashboard's HTTPS session | — |
+| 4.4.3 | 2 | WebSocket session tokens | N/A | No WebSockets. Live build logs use Server-Sent Events on the dashboard's HTTPS session | — |
+| 4.4.4 | 2 | WebSocket tokens from the HTTPS session | N/A | No WebSockets. Live build logs use Server-Sent Events on the dashboard's HTTPS session | — |
 
 ### V5 File Handling
 
@@ -269,7 +272,7 @@ Tero accepts no file uploads and serves no user-supplied files.
 | 5.2.2 | 1 | Upload type checks | N/A | No uploads | — |
 | 5.2.3 | 2 | Archive limits | N/A | No uploads | — |
 | 5.3.1 | 1 | Uploads not executed | N/A | No uploads | — |
-| 5.3.2 | 1 | File paths not from user input | N/A | No file paths come from input | — |
+| 5.3.2 | 1 | File paths not from user input | Met | An app's folder is the only path from input. It must be relative, can't leave the repository, and is resolved through symlinks inside the checkout (`source.BuildDirectory`) | `TestBuildDirectoryRefusesSymlinkOutOfCheckout`, `TestCleanRootDirectory` |
 | 5.4.1 | 2 | Download file names | N/A | No downloads | — |
 | 5.4.2 | 2 | File names encoded | N/A | No downloads | — |
 | 5.4.3 | 2 | Antivirus scan | N/A | No user files are served | — |

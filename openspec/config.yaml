@@ -10,15 +10,17 @@ context: |
   Runtime: the service runs as the unprivileged `tero` user with only CAP_NET_BIND_SERVICE;
   Caddy is built into the binary and serves 80/443; every container is rootless Podman under `tero`.
   Root is used only by `sudo tero init` and other `sudo tero ...` CLI commands, never from the dashboard.
-  Work is planned in vertical slices. Current slice (slice 1): onboarding with the security lockdown,
-  meaning the install script, `sudo tero init` with host hardening, the `tero` service user, and first
-  access to the dashboard (one-time link, password + TOTP, `sudo tero reset-login`).
-  openspec/specs holds only the current slice's capabilities. openspec/drafts holds rough specs for later
-  slices (apps, deployments, domains, app logs, build pipeline, GitHub connection); they are not commitments.
+  Work is planned in vertical slices. Slice 1 (onboarding and lockdown) is built. Current slice (slice 2):
+  the first deploy of a JavaScript backend from a public GitHub URL, by hand from the dashboard. A
+  `tero agent` process under tero's systemd user manager builds with Railpack in a throwaway rootless
+  BuildKit and runs each app in a hardened rootless container; the service routes
+  `<app>.<public-ip>.sslip.io` to it.
+  openspec/specs holds only the current slice's capabilities. openspec/drafts holds rough specs for what later
+  slices still own (apps, deployments, domains, app logs, build pipeline, GitHub connection); they are not commitments.
   Security standards (ADR 0001): OWASP ASVS 5.0.0 Level 2 for the dashboard and HTTP endpoints, citing
   requirement IDs like v5.0.0-6.5.1; a documented subset of the CIS Benchmark Level 1 Server per distro for
   the host, checked with a minimum Lynis score in e2e CI; SLSA v1.1 Build L3 for release binaries.
-  Secrets requirements arrive with the slice that adds apps.
+  Secrets requirements arrive with slice 5 (environment variables).
 
 rules:
   specs:
