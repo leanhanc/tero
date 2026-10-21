@@ -87,7 +87,6 @@ describe('apps', () => {
 		mockAPI({
 			'/api/state': [loggedIn],
 			'/api/apps': [{ status: 200, body: { apps: [{ name: 'api', displayName: 'Shop API', address: 'https://api.203.0.113.10.nip.io', latestState: 'live' }] } }],
-			'/api/events': [{ status: 200, body: { events: [] } }],
 		});
 		render(<App />);
 
@@ -107,7 +106,6 @@ describe('apps', () => {
 		mockAPI({
 			'/api/state': [loggedIn],
 			'/api/apps': [{ status: 200, body: { apps: [{ name: 'api', displayName: 'Shop API', address: 'https://api.localhost', latestState: 'live' }] } }],
-			'/api/events': [{ status: 200, body: { events: [] } }],
 		});
 		render(<App />);
 

@@ -112,20 +112,6 @@ describe('login page', () => {
 });
 
 describe('home page', () => {
-	it('lists security events in a table with column headers', async () => {
-		openAt('/');
-		mockAPI({
-			'/api/state': [{ status: 200, body: { isSetUp: true, isLoggedIn: true } }],
-			'/api/events': [{ status: 200, body: { events: [{ at: '2026-10-11T10:00:00Z', type: 'login_reset' }] } }],
-		});
-		render(<App />);
-
-		const table = await screen.findByRole('table');
-		expect(screen.getAllByRole('columnheader').map((header) => header.textContent)).toEqual(['Time', 'Event', 'From']);
-		expect(table.textContent).toContain('Login reset with sudo tero reset-login');
-		expect(table.querySelector('time')?.getAttribute('datetime')).toBe('2026-10-11T10:00:00Z');
-	});
-
 	it('goes back to the login form once an idle session has ended (v5.0.0-14.3.1)', async () => {
 		vi.useFakeTimers({ shouldAdvanceTime: true });
 		openAt('/');
@@ -134,15 +120,15 @@ describe('home page', () => {
 				{ status: 200, body: { isSetUp: true, isLoggedIn: true } },
 				{ status: 200, body: { isSetUp: true, isLoggedIn: false } },
 			],
-			'/api/events': [{ status: 200, body: { events: [{ at: '2026-10-11T10:00:00Z', type: 'login_reset' }] } }],
+			'/api/apps': [{ status: 200, body: { apps: [] } }],
 		});
 		render(<App />);
-		await screen.findByRole('table');
+		await screen.findByRole('heading', { name: 'Apps' });
 
 		await vi.advanceTimersByTimeAsync(30 * 60 * 1000 + 5 * 1000);
 
 		expect(await screen.findByRole('heading', { name: 'Log in to Tero' })).toBeTruthy();
-		expect(screen.queryByRole('table')).toBeNull();
+		expect(screen.queryByRole('heading', { name: 'Apps' })).toBeNull();
 		vi.useRealTimers();
 	});
 });

@@ -12,13 +12,6 @@ export type Enrolment = {
 	qrCode: string;
 };
 
-export type SecurityEvent = {
-	at: string;
-	type: string;
-	ip?: string;
-	detail?: string;
-};
-
 export type DeployState = 'queued' | 'building' | 'starting' | 'live' | 'failed' | 'superseded';
 
 export type AppSummary = {
@@ -98,11 +91,6 @@ export function login(password: string, code: string): Promise<void> {
 
 export function logout(): Promise<void> {
 	return request<void>('POST', '/api/logout', {});
-}
-
-export async function getEvents(): Promise<SecurityEvent[]> {
-	const response = await request<{ events: SecurityEvent[] }>('GET', '/api/events');
-	return response.events;
 }
 
 export function lookUpRepository(url: string): Promise<RepositoryLookup> {
