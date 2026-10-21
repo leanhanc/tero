@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Dashboard domain at init
-Init SHALL ask for a dashboard domain, and SHALL fall back to `<public-ip>.sslip.io` when none is given. Init SHALL record the server's public IP in Tero's configuration whichever domain is chosen, for app addresses.
+Init SHALL ask for a dashboard domain, and SHALL fall back to `<public-ip>.nip.io` when none is given. Init SHALL record the server's public IP in Tero's configuration whichever domain is chosen, for app addresses.
 
 #### Scenario: Admin provides a domain
 - **WHEN** the admin enters a domain at the init prompt
@@ -10,7 +10,7 @@ Init SHALL ask for a dashboard domain, and SHALL fall back to `<public-ip>.sslip
 
 #### Scenario: Admin skips the domain
 - **WHEN** the admin leaves the domain prompt empty
-- **THEN** the dashboard is served over HTTPS on `<public-ip>.sslip.io`
+- **THEN** the dashboard is served over HTTPS on `<public-ip>.nip.io`
 - **AND** the server's public IP is recorded in `/etc/tero/config.json`
 
 ## ADDED Requirements

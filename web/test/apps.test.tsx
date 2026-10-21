@@ -61,7 +61,8 @@ const buildFailedReason = 'A build step failed. The build log above shows which 
 
 const failedApp = {
 	name: 'api',
-	address: 'https://api.203.0.113.10.sslip.io',
+	displayName: 'Shop API',
+	address: 'https://api.203.0.113.10.nip.io',
 	repository: 'https://github.com/leanhanc/api',
 	branch: 'main',
 	rootDirectory: '',
@@ -85,24 +86,51 @@ describe('apps', () => {
 		openAt('/');
 		mockAPI({
 			'/api/state': [loggedIn],
-			'/api/apps': [{ status: 200, body: { apps: [{ name: 'api', address: 'https://api.203.0.113.10.sslip.io', latestState: 'live' }] } }],
+			'/api/apps': [{ status: 200, body: { apps: [{ name: 'api', displayName: 'Shop API', address: 'https://api.203.0.113.10.nip.io', latestState: 'live' }] } }],
 			'/api/events': [{ status: 200, body: { events: [] } }],
 		});
 		render(<App />);
 
-		expect((await screen.findByRole('link', { name: 'api' })).getAttribute('href')).toBe('/apps/api');
-		expect(screen.getByRole('link', { name: 'https://api.203.0.113.10.sslip.io' })).toBeTruthy();
+		expect((await screen.findByRole('link', { name: 'Shop API' })).getAttribute('href')).toBe('/apps/api');
+		expect(screen.getByRole('link', { name: 'https://api.203.0.113.10.nip.io' })).toBeTruthy();
 		expect(screen.getByText('Live')).toBeTruthy();
+
+		const help = screen.getByRole('button', { name: 'What is nip.io?' });
+		expect(help.getAttribute('aria-expanded')).toBe('false');
+		await userEvent.click(help);
+		expect(help.getAttribute('aria-expanded')).toBe('true');
+		expect(screen.getByText(/no traffic goes through nip\.io/)).toBeTruthy();
 	});
 
-	it('fills branch and name from the repository and ties errors to their field', async () => {
+	it('leaves out the nip.io help for local addresses', async () => {
+		openAt('/');
+		mockAPI({
+			'/api/state': [loggedIn],
+			'/api/apps': [{ status: 200, body: { apps: [{ name: 'api', displayName: 'Shop API', address: 'https://api.localhost', latestState: 'live' }] } }],
+			'/api/events': [{ status: 200, body: { events: [] } }],
+		});
+		render(<App />);
+
+		await screen.findByRole('link', { name: 'Shop API' });
+		expect(screen.queryByRole('button', { name: 'What is nip.io?' })).toBeNull();
+	});
+
+	it('fills branch, name and address from the repository and ties errors to their field', async () => {
 		openAt('/apps/new');
 		const calls = mockAPI({
 			'/api/state': [loggedIn],
 			'/api/repositories/lookup': [
-				{ status: 200, body: { repository: 'https://github.com/leanhanc/tero', defaultBranch: 'main', suggestedName: 'tero' } },
+				{
+					status: 200,
+					body: {
+						repository: 'https://github.com/leanhanc/tero',
+						defaultBranch: 'main',
+						repositoryName: 'Tero',
+						appDomain: '203.0.113.10.nip.io',
+					},
+				},
 			],
-			'/api/apps': [{ status: 422, body: { error: 'Another app already uses this name', field: 'name' } }],
+			'/api/apps': [{ status: 422, body: { error: 'Another app already uses this address', field: 'name' } }],
 		});
 		render(<App />);
 
@@ -110,21 +138,68 @@ describe('apps', () => {
 		await userEvent.tab();
 
 		await waitFor(() => expect(screen.getByLabelText<HTMLInputElement>('Branch').value).toBe('main'));
-		expect(screen.getByLabelText<HTMLInputElement>('App name').value).toBe('tero');
+		expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe('Tero');
+		expect(screen.getByLabelText<HTMLInputElement>('Address').value).toBe('tero');
+		expect(screen.getByText(/It will be https:\/\/tero\.203\.0\.113\.10\.nip\.io\./)).toBeTruthy();
 
 		await userEvent.click(screen.getByRole('button', { name: 'Create and deploy' }));
 
-		const name = screen.getByLabelText('App name');
+		const address = screen.getByLabelText('Address');
 		const error = await screen.findByRole('alert');
-		expect(error.textContent).toBe('Another app already uses this name');
-		expect(name.getAttribute('aria-invalid')).toBe('true');
-		expect(name.getAttribute('aria-describedby')).toContain(error.id);
+		expect(error.textContent).toBe('Another app already uses this address');
+		expect(address.getAttribute('aria-invalid')).toBe('true');
+		expect(address.getAttribute('aria-describedby')).toContain(error.id);
 		expect(calls.find((call) => call.path === '/api/apps')?.body).toEqual({
 			repository: 'https://github.com/leanhanc/tero',
 			branch: 'main',
+			displayName: 'Tero',
 			name: 'tero',
 			rootDirectory: '',
 		});
+	});
+
+	it('derives the address from the name until the address is edited', async () => {
+		openAt('/apps/new');
+		mockAPI({ '/api/state': [loggedIn] });
+		render(<App />);
+
+		const displayName = await screen.findByLabelText<HTMLInputElement>('Name');
+		const address = screen.getByLabelText<HTMLInputElement>('Address');
+
+		await userEvent.type(displayName, 'Tienda Café 2');
+		expect(address.value).toBe('tienda-cafe-2');
+
+		await userEvent.clear(address);
+		await userEvent.type(address, 'shop');
+		await userEvent.type(displayName, '!');
+		expect(address.value).toBe('shop');
+
+		await userEvent.clear(address);
+		await userEvent.type(displayName, ' Norte');
+		expect(address.value).toBe('tienda-cafe-2-norte');
+	});
+
+	it('renames an app without changing its address', async () => {
+		openAt('/apps/api');
+		const renamedApp = { ...failedApp, displayName: 'Storefront API' };
+		const calls = mockAPI({
+			'/api/state': [loggedIn],
+			'/api/apps/api': [
+				{ status: 200, body: failedApp },
+				{ status: 200, body: renamedApp },
+			],
+			'/api/apps/api/display-name': [{ status: 204 }],
+		});
+		mockEventSource([]);
+		render(<App />);
+
+		const name = await screen.findByLabelText<HTMLInputElement>('Name');
+		await userEvent.clear(name);
+		await userEvent.type(name, 'Storefront API');
+		await userEvent.click(screen.getByRole('button', { name: 'Save name' }));
+
+		expect(await screen.findByRole('heading', { name: 'Storefront API' })).toBeTruthy();
+		expect(calls.find((call) => call.path === '/api/apps/api/display-name')?.body).toEqual({ displayName: 'Storefront API' });
 	});
 
 	it('shows why a deploy failed and its log as plain text', async () => {

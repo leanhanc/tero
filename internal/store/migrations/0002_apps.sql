@@ -1,8 +1,10 @@
 -- Apps the admin created. The name is the first label of the app's address,
--- so it never changes.
+-- so it never changes; the display name is what the dashboard shows, and can
+-- change at any time.
 CREATE TABLE apps (
 	id             INTEGER PRIMARY KEY AUTOINCREMENT,
 	name           TEXT    NOT NULL UNIQUE,
+	display_name   TEXT    NOT NULL DEFAULT '',
 	repository     TEXT    NOT NULL,
 	branch         TEXT    NOT NULL,
 	root_directory TEXT    NOT NULL DEFAULT '',

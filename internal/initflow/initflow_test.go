@@ -252,9 +252,9 @@ func TestNextFreeSubIDStartOnEmptyFile(t *testing.T) {
 
 func TestNormalizeDomain(t *testing.T) {
 	valid := map[string]string{
-		"Dash.Example.com":      "dash.example.com",
-		"dash.example.com.":     "dash.example.com",
-		"203.0.113.10.sslip.io": "203.0.113.10.sslip.io",
+		"Dash.Example.com":    "dash.example.com",
+		"dash.example.com.":   "dash.example.com",
+		"203.0.113.10.nip.io": "203.0.113.10.nip.io",
 	}
 	for input, want := range valid {
 		got, err := normalizeDomain(input)
@@ -284,10 +284,10 @@ func TestResolveDomainPromptFallsBackOnEmptyAnswer(t *testing.T) {
 	opts := Options{IsInteractive: true, In: strings.NewReader("\n"), Out: &out}
 
 	got, err := resolveDomain(opts, netip.MustParseAddr("203.0.113.10"))
-	if err != nil || got != "203.0.113.10.sslip.io" {
+	if err != nil || got != "203.0.113.10.nip.io" {
 		t.Fatalf("resolveDomain() = %q, %v", got, err)
 	}
-	if !strings.Contains(out.String(), "press Enter to use 203.0.113.10.sslip.io") {
+	if !strings.Contains(out.String(), "press Enter to use 203.0.113.10.nip.io") {
 		t.Fatalf("prompt = %q", out.String())
 	}
 }

@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Create a web app from a public GitHub repository
-The admin SHALL be able to create a web app from the dashboard by giving a public GitHub repository URL, a branch, a name and optionally a root directory inside the repository. Creating the app SHALL start its first deploy.
+The admin SHALL be able to create a web app from the dashboard by giving a public GitHub repository URL, a branch, a display name, an app name for its address and optionally a root directory inside the repository. Creating the app SHALL start its first deploy.
 
 #### Scenario: Create a web app
 - **WHEN** the admin creates an app from `https://github.com/<owner>/<repo>` with an existing branch and a free name
@@ -9,7 +9,11 @@ The admin SHALL be able to create a web app from the dashboard by giving a publi
 
 #### Scenario: Default branch suggested
 - **WHEN** the admin enters a repository URL in the new-app form
-- **THEN** the branch field is filled with the repository's default branch and the name field with the repository name
+- **THEN** the branch field is filled with the repository's default branch, the display name with the repository name, and the address with an app name made from the display name
+
+#### Scenario: Address follows the display name
+- **WHEN** the admin types a display name such as `Tienda Café` and hasn't edited the address
+- **THEN** the address field shows `tienda-cafe` and the form previews the app's full address
 
 #### Scenario: Not a GitHub URL
 - **WHEN** the admin enters a URL whose host is not `github.com`, or that is not of the form `https://github.com/<owner>/<repo>`
@@ -32,7 +36,7 @@ An app's root directory SHALL default to the repository root. When set, Tero SHA
 - **THEN** the app is not created and the form says the folder wasn't found in the repository
 
 ### Requirement: App names
-An app name SHALL be 1 to 30 characters of lowercase letters, digits and hyphens, start with a letter, not end with a hyphen, and be unique on the server. It SHALL NOT change after creation.
+An app name SHALL be 1 to 30 characters of lowercase letters, digits and hyphens, start with a letter, not end with a hyphen, and be unique on the server. It is the first label of the app's address, which the dashboard calls the address, and it SHALL NOT change after creation.
 
 #### Scenario: Invalid name
 - **WHEN** the admin enters a name with uppercase letters, dots, or more than 30 characters
@@ -40,7 +44,18 @@ An app name SHALL be 1 to 30 characters of lowercase letters, digits and hyphens
 
 #### Scenario: Name taken
 - **WHEN** the admin enters the name of an existing app
-- **THEN** the app is not created and the form says the name is in use
+- **THEN** the app is not created and the form says the address is in use
+
+### Requirement: Display names
+Every app SHALL have a display name of 1 to 60 characters on one line, trimmed of surrounding spaces, which the dashboard shows instead of the app name. Display names need not be unique, and the admin SHALL be able to change one at any time without changing the app's address.
+
+#### Scenario: Invalid display name
+- **WHEN** the admin enters an empty display name, one longer than 60 characters, or one with a line break
+- **THEN** the app is not created, or not renamed, and the form says what a valid display name looks like
+
+#### Scenario: Rename an app
+- **WHEN** the admin changes an app's display name on its page
+- **THEN** the dashboard shows the new display name and the app keeps its address
 
 ### Requirement: Web apps listen on PORT
 A web app SHALL receive HTTP traffic from the built-in proxy on the port given to it in the `PORT` environment variable.
@@ -50,11 +65,11 @@ A web app SHALL receive HTTP traffic from the built-in proxy on the port given t
 - **THEN** its process sees `PORT` set, and HTTPS requests to the app's address reach that port
 
 ### Requirement: App list and app page
-The dashboard SHALL list every app with its name, address and the state of its latest deploy, and each app SHALL have a page with its repository, branch, address, live commit, recent deploys and a Redeploy button.
+The dashboard SHALL list every app with its display name, address and the state of its latest deploy, and each app SHALL have a page with its display name, repository, branch, address, live commit, recent deploys and a Redeploy button.
 
 #### Scenario: App list
 - **WHEN** the admin opens the dashboard home with two apps created
-- **THEN** both are listed with name, address and latest deploy state
+- **THEN** both are listed with display name, address and latest deploy state
 
 #### Scenario: App page
 - **WHEN** the admin opens an app

@@ -1,7 +1,7 @@
 # domains Specification
 
 ## Purpose
-What later slices add to domains: custom domains with automatic HTTPS (slice 7). The default sslip.io address and the HTTP redirect are in the slice 2 change.
+What later slices add to domains: custom domains with automatic HTTPS (slice 7). The default nip.io address and the HTTP redirect are in the slice 2 change.
 
 ## Requirements
 

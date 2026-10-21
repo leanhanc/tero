@@ -24,7 +24,7 @@ Change: [add-first-deploy-slice-2](changes/add-first-deploy-slice-2/)
 - [x] Build with Railpack as a library in a throwaway rootless BuildKit, load into Podman, no registry
 - [x] Bun, npm, Yarn and pnpm projects, running on Node or Bun as Railpack detects
 - [x] Run the app under `tero` with `PORT` set, and fail the deploy if it never listens
-- [x] Default HTTPS address on `<app>.<public-ip>.sslip.io`
+- [x] Default HTTPS address on `<app>.<public-ip>.nip.io`
 - [x] Deploy states (queued, building, starting, live, failed) and a streamed build log
 - [x] Manual redeploy of the branch's latest commit
 - [ ] End-to-end run on cloud servers, once slice 1's cloud CI exists
@@ -100,3 +100,12 @@ Drafts: [apps](drafts/apps/spec.md), [build-pipeline](drafts/build-pipeline/spec
 ## After v1
 
 - Preview deploys for pull requests
+
+### Tero addresses
+
+Default addresses under a domain Tero owns, instead of a third-party wildcard DNS whose name means nothing to the admin or their visitors.
+
+- [ ] Run an open-source wildcard DNS server (sslip.io's) for a Tero domain, on two small servers, answering names like `shop.5-6-7-8.<tero-domain>` with the IP inside them; no signup and nothing stored about servers
+- [ ] Add the domain to the Public Suffix List, so each server gets its own Let's Encrypt limits and one server's abuse doesn't taint the others
+- [ ] Switch new app and dashboard addresses to it, falling back to nip.io while it's unreachable
+- [ ] Plan for abuse reports and uptime, since every server's default address depends on it

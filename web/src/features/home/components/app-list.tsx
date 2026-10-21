@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 
+import { AddressHelp } from '../../../components/address-help';
 import { InternalLink } from '../../../components/internal-link';
 import { type AppSummary, errorMessage, listApps } from '../../../lib/utils/api';
 import { describeState } from '../../../lib/utils/deploy-states';
@@ -43,12 +44,16 @@ function AppListContent({ loaded }: { loaded: LoadedApps }) {
 		return <p>No apps yet. Deploy one from a public GitHub repository to get started.</p>;
 	}
 
+	const firstAddress = loaded.apps[0]?.address ?? '';
+
 	return (
 		<table>
 			<thead>
 				<tr>
 					<th scope="col">App</th>
-					<th scope="col">Address</th>
+					<th scope="col">
+						Address <AddressHelp address={firstAddress} />
+					</th>
 					<th scope="col">Latest deploy</th>
 				</tr>
 			</thead>
@@ -56,7 +61,7 @@ function AppListContent({ loaded }: { loaded: LoadedApps }) {
 				{loaded.apps.map((app) => (
 					<tr key={app.name}>
 						<td>
-							<InternalLink to={`/apps/${app.name}`}>{app.name}</InternalLink>
+							<InternalLink to={`/apps/${app.name}`}>{app.displayName}</InternalLink>
 						</td>
 						<td>
 							<a href={app.address} rel="noreferrer" target="_blank">

@@ -10,7 +10,7 @@ Tero is like Vercel, but on your own VPS. Push to GitHub and your app is live wi
 
 - 🪄 **No Dockerfile needed.** Tero detects your language and framework and builds the app for you, with [Railpack](https://railpack.com). Already have a Dockerfile? Tero uses it.
 - 🚀 **Deploy on push.** Connect a GitHub repo and every push to your branch builds and goes live.
-- 🌐 **Automatic HTTPS.** Every app gets a free sslip.io address, or use your own domain. Certificates come from Let's Encrypt.
+- 🌐 **Automatic HTTPS.** Every app gets a free nip.io address, or use your own domain. Certificates come from Let's Encrypt.
 - 🔑 **Environment variables and secrets,** set from the dashboard.
 - 📜 **Live logs** for builds and running apps.
 - ⏪ **One-click rollback** to any earlier deploy.

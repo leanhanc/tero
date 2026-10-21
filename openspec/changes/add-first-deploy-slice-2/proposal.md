@@ -7,7 +7,7 @@ Slice 1 leaves a locked-down server with a dashboard that does nothing yet. Slic
 - Apps: the admin creates a web app from a public GitHub URL, a branch, a name and an optional root directory for monorepos. The dashboard lists apps and shows each app's address, state and deploys.
 - Builds: Railpack plans the build, a fresh rootless BuildKit container runs it, and the image is loaded into `tero`'s Podman store. Bun, npm, Yarn and pnpm projects build and run on Node or Bun, as Railpack detects. A project with no start command fails with a message that says what to add.
 - Running: each app runs in its own rootless container under `tero` with `PORT` set, in a network namespace of its own that can't reach other apps, with all capabilities dropped and its own user namespace. A deploy that never answers HTTP on `PORT` fails, and the app's last output is shown.
-- Addresses: every web app answers on `https://<app>.<public-ip>.sslip.io` with a Let's Encrypt certificate, and HTTP redirects to HTTPS.
+- Addresses: every web app answers on `https://<app>.<public-ip>.nip.io` with a Let's Encrypt certificate, and HTTP redirects to HTTPS.
 - Deploys: states queued, building, starting, live and failed, a build log streamed live and kept afterwards, and a Redeploy button that deploys the branch's latest commit. Old and new releases run together during a deploy by default, a per-app setting turns that off, and either way a failed redeploy leaves the old release serving.
 - A new `tero agent` process runs under `tero`'s systemd user manager and does all builds and container work. The internet-facing service keeps its slice 1 sandbox and starts no containers.
 - Init records the server's public IP and installs the agent's user unit.
@@ -19,7 +19,7 @@ Slice 1 leaves a locked-down server with a dashboard that does nothing yet. Slic
 - `apps`: create a web app from a public GitHub URL and branch, app names, the app list and app page.
 - `build-pipeline`: Railpack planning, the throwaway rootless BuildKit, loading into Podman, the build log.
 - `deployments`: deploy states, manual deploy and redeploy, the start check, one deploy at a time.
-- `domains`: the default `<app>.<public-ip>.sslip.io` address with HTTPS and the HTTP redirect.
+- `domains`: the default `<app>.<public-ip>.nip.io` address with HTTPS and the HTTP redirect.
 
 ### Modified Capabilities
 

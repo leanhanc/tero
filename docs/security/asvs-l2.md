@@ -145,7 +145,7 @@ ASVS 13.1.1.
 
 | Direction | Peer | Purpose |
 |---|---|---|
-| Inbound 443 | Browsers | Dashboard over HTTPS, and each app on `<app>.<public-ip>.sslip.io` |
+| Inbound 443 | Browsers | Dashboard over HTTPS, and each app on `<app>.<public-ip>.nip.io` |
 | Inbound 80 | Browsers, the ACME CA | Redirect to HTTPS, ACME HTTP-01 challenges |
 | Inbound SSH | The admin | Server administration, `sudo tero ...` |
 | Outbound HTTPS | Let's Encrypt | Certificates |

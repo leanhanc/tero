@@ -82,14 +82,14 @@ func fixtureApp(name string) string {
 }
 
 func appAddress(app string) string {
-	return app + "." + publicIP + ".sslip.io"
+	return app + "." + publicIP + ".nip.io"
 }
 
 // createApp creates an app through the dashboard API as the logged-in admin.
 func createApp(t *testing.T, name, branch, rootDirectory string) dashboardResponse {
 	t.Helper()
 	return postDashboard(t, "admin", "/api/apps", map[string]string{
-		"repository": fixtureRepository, "branch": branch, "name": name, "rootDirectory": rootDirectory,
+		"repository": fixtureRepository, "branch": branch, "displayName": "Fixture " + name, "name": name, "rootDirectory": rootDirectory,
 	})
 }
 
@@ -140,19 +140,19 @@ func testNotGitHubURL(t *testing.T) {
 	// refuses it before any request is built.
 	for _, url := range []string{"http://169.254.169.254/latest/meta-data", "https://gitlab.com/leanhanc/tero", "file:///etc/passwd"} {
 		expectField(t, postDashboard(t, "admin", "/api/repositories/lookup", map[string]string{"url": url}), "repository")
-		expectField(t, postDashboard(t, "admin", "/api/apps", map[string]string{"repository": url, "branch": "main", "name": "nope"}), "repository")
+		expectField(t, postDashboard(t, "admin", "/api/apps", map[string]string{"repository": url, "branch": "main", "displayName": "Nope", "name": "nope"}), "repository")
 	}
 }
 
 func testDefaultBranchSuggested(t *testing.T) {
 	response := postDashboard(t, "admin", "/api/repositories/lookup", map[string]string{"url": fixtureRepository + ".git"})
-	assertContains(t, response.body, `"repository":"`+fixtureRepository+`"`, `"defaultBranch":"main"`, `"suggestedName":"tero"`)
+	assertContains(t, response.body, `"repository":"`+fixtureRepository+`"`, `"defaultBranch":"main"`, `"repositoryName":"tero"`)
 }
 
 func testCreateRefusals(t *testing.T) {
 	expectField(t, createApp(t, "nope", "no-such-branch", ""), "branch")
 	expectField(t, postDashboard(t, "admin", "/api/apps", map[string]string{
-		"repository": "https://github.com/leanhanc/no-such-repository-for-tero", "branch": "main", "name": "nope",
+		"repository": "https://github.com/leanhanc/no-such-repository-for-tero", "branch": "main", "displayName": "Nope", "name": "nope",
 	}), "repository")
 	for _, folder := range []string{"../", "/etc", "e2e/fixtures/missing"} {
 		expectField(t, createApp(t, "nope", "main", folder), "rootDirectory")

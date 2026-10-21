@@ -1,15 +1,15 @@
 ## ADDED Requirements
 
 ### Requirement: Default app address
-Every web app SHALL get the HTTPS address `<app>.<public-ip>.sslip.io`, using the public IP recorded at init, so it is reachable without any DNS setup and whatever dashboard domain was chosen.
+Every web app SHALL get the HTTPS address `<app>.<public-ip>.nip.io`, using the public IP recorded at init, so it is reachable without any DNS setup and whatever dashboard domain was chosen.
 
 #### Scenario: New web app reachable without DNS
 - **WHEN** a web app's first deploy goes live
-- **THEN** it answers over HTTPS on `<app>.<public-ip>.sslip.io` with a certificate from the server's ACME issuer
+- **THEN** it answers over HTTPS on `<app>.<public-ip>.nip.io` with a certificate from the server's ACME issuer
 
 #### Scenario: Dashboard on a custom domain
 - **WHEN** the dashboard was set up on a custom domain and a web app goes live
-- **THEN** the app still answers on `<app>.<public-ip>.sslip.io`
+- **THEN** the app still answers on `<app>.<public-ip>.nip.io`
 
 #### Scenario: No route before live
 - **WHEN** an app has no live deploy

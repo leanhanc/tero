@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
@@ -13,8 +12,8 @@ import (
 	"github.com/leanhanc/tero/internal/source"
 )
 
-// ErrNameTaken means another app already uses the name.
-var ErrNameTaken = errors.New("Another app already uses this name")
+// ErrNameTaken means another app already uses the name, and so the address.
+var ErrNameTaken = errors.New("Another app already uses this address")
 
 // ErrNotFound means no app or deploy matches.
 var ErrNotFound = errors.New("Not found")
@@ -35,11 +34,13 @@ func NewService(db *sql.DB, publicIP string, now func() time.Time) *Service {
 	return &Service{db: db, publicIP: publicIP, now: now}
 }
 
-// Lookup is what the new-app form fills in from a repository URL.
+// Lookup is what the new-app form fills in from a repository URL. The form
+// suggests the repository name as the display name, and an address from that.
 type Lookup struct {
-	Repository    string `json:"repository"`
-	DefaultBranch string `json:"defaultBranch"`
-	SuggestedName string `json:"suggestedName"`
+	Repository     string `json:"repository"`
+	DefaultBranch  string `json:"defaultBranch"`
+	RepositoryName string `json:"repositoryName"`
+	AppDomain      string `json:"appDomain"`
 }
 
 // LookUpRepository checks a repository URL and reads its default branch.
@@ -54,13 +55,21 @@ func (s *Service) LookUpRepository(ctx context.Context, rawURL string) (Lookup, 
 		return Lookup{}, err
 	}
 
-	return Lookup{Repository: repository.URL(), DefaultBranch: defaultBranch, SuggestedName: suggestName(repository.Name)}, nil
+	lookup := Lookup{
+		Repository:     repository.URL(),
+		DefaultBranch:  defaultBranch,
+		RepositoryName: repository.Name,
+		AppDomain:      Domain(s.publicIP),
+	}
+	return lookup, nil
 }
 
-// NewApp is what the admin enters to create an app.
+// NewApp is what the admin enters to create an app. Name is the first label
+// of the app's address; DisplayName is what the dashboard shows.
 type NewApp struct {
 	Repository    string `json:"repository"`
 	Branch        string `json:"branch"`
+	DisplayName   string `json:"displayName"`
 	Name          string `json:"name"`
 	RootDirectory string `json:"rootDirectory"`
 }
@@ -69,6 +78,10 @@ type NewApp struct {
 // deploy.
 func (s *Service) Create(ctx context.Context, newApp NewApp) (string, error) {
 	repository, err := source.ParseRepository(newApp.Repository)
+	if err != nil {
+		return "", err
+	}
+	displayName, err := CleanDisplayName(newApp.DisplayName)
 	if err != nil {
 		return "", err
 	}
@@ -92,7 +105,14 @@ func (s *Service) Create(ctx context.Context, newApp NewApp) (string, error) {
 		return "", err
 	}
 
-	appID, err := s.insertApp(ctx, newApp.Name, repository.URL(), newApp.Branch, rootDirectory)
+	stored := storedApp{
+		name:          newApp.Name,
+		displayName:   displayName,
+		repositoryURL: repository.URL(),
+		branch:        newApp.Branch,
+		rootDirectory: rootDirectory,
+	}
+	appID, err := s.insertApp(ctx, stored)
 	if err != nil {
 		return "", err
 	}
@@ -115,6 +135,21 @@ func (s *Service) Redeploy(ctx context.Context, name string) error {
 	return err
 }
 
+// SetDisplayName changes the name the dashboard shows for the app.
+func (s *Service) SetDisplayName(ctx context.Context, name, displayName string) error {
+	cleaned, err := CleanDisplayName(displayName)
+	if err != nil {
+		return err
+	}
+
+	result, err := s.db.ExecContext(ctx, "UPDATE apps SET display_name = ? WHERE name = ?", cleaned, name)
+	if err != nil {
+		return err
+	}
+
+	return requireChanged(result)
+}
+
 // SetRunTogether changes whether a deploy starts next to the live release.
 func (s *Service) SetRunTogether(ctx context.Context, name string, runTogether bool) error {
 	result, err := s.db.ExecContext(ctx, "UPDATE apps SET run_together = ? WHERE name = ?", runTogether, name)
@@ -122,6 +157,11 @@ func (s *Service) SetRunTogether(ctx context.Context, name string, runTogether b
 		return err
 	}
 
+	return requireChanged(result)
+}
+
+// requireChanged returns ErrNotFound when an update matched no app.
+func requireChanged(result sql.Result) error {
 	changed, err := result.RowsAffected()
 	if err != nil {
 		return err
@@ -136,6 +176,7 @@ func (s *Service) SetRunTogether(ctx context.Context, name string, runTogether b
 // Summary is one row of the app list.
 type Summary struct {
 	Name        string `json:"name"`
+	DisplayName string `json:"displayName"`
 	Address     string `json:"address"`
 	LatestState string `json:"latestState"`
 }
@@ -143,8 +184,9 @@ type Summary struct {
 // List returns every app with the state of its latest deploy.
 func (s *Service) List(ctx context.Context) ([]Summary, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT apps.name, COALESCE((SELECT state FROM deploys WHERE app_id = apps.id ORDER BY id DESC LIMIT 1), '')
-		FROM apps ORDER BY apps.name`)
+		SELECT apps.name, apps.display_name,
+			COALESCE((SELECT state FROM deploys WHERE app_id = apps.id ORDER BY id DESC LIMIT 1), '')
+		FROM apps ORDER BY apps.display_name COLLATE NOCASE, apps.name`)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +195,7 @@ func (s *Service) List(ctx context.Context) ([]Summary, error) {
 	summaries := []Summary{}
 	for rows.Next() {
 		var summary Summary
-		if err := rows.Scan(&summary.Name, &summary.LatestState); err != nil {
+		if err := rows.Scan(&summary.Name, &summary.DisplayName, &summary.LatestState); err != nil {
 			return nil, err
 		}
 		summary.Address = s.address(summary.Name)
@@ -178,6 +220,7 @@ type Deploy struct {
 // Detail is everything the app page shows.
 type Detail struct {
 	Name          string   `json:"name"`
+	DisplayName   string   `json:"displayName"`
 	Address       string   `json:"address"`
 	Repository    string   `json:"repository"`
 	Branch        string   `json:"branch"`
@@ -191,8 +234,8 @@ func (s *Service) Get(ctx context.Context, name string) (Detail, error) {
 	var appID int64
 	detail := Detail{Name: name, Address: s.address(name)}
 	err := s.db.QueryRowContext(ctx,
-		"SELECT id, repository, branch, root_directory, run_together FROM apps WHERE name = ?", name).
-		Scan(&appID, &detail.Repository, &detail.Branch, &detail.RootDirectory, &detail.RunTogether)
+		"SELECT id, display_name, repository, branch, root_directory, run_together FROM apps WHERE name = ?", name).
+		Scan(&appID, &detail.DisplayName, &detail.Repository, &detail.Branch, &detail.RootDirectory, &detail.RunTogether)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Detail{}, ErrNotFound
 	}
@@ -238,10 +281,19 @@ func (s *Service) recentDeploys(ctx context.Context, appID int64) ([]Deploy, err
 	return recent, rows.Err()
 }
 
-func (s *Service) insertApp(ctx context.Context, name, repositoryURL, branch, rootDirectory string) (int64, error) {
+// storedApp is a checked new app, ready to insert.
+type storedApp struct {
+	name          string
+	displayName   string
+	repositoryURL string
+	branch        string
+	rootDirectory string
+}
+
+func (s *Service) insertApp(ctx context.Context, app storedApp) (int64, error) {
 	result, err := s.db.ExecContext(ctx,
-		"INSERT INTO apps (name, repository, branch, root_directory, created_at) VALUES (?, ?, ?, ?, ?)",
-		name, repositoryURL, branch, rootDirectory, s.now().Unix())
+		"INSERT INTO apps (name, display_name, repository, branch, root_directory, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+		app.name, app.displayName, app.repositoryURL, app.branch, app.rootDirectory, s.now().Unix())
 	if err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed: apps.name") {
 		return 0, ErrNameTaken
 	}
@@ -263,22 +315,5 @@ func (s *Service) appID(ctx context.Context, name string) (int64, error) {
 }
 
 func (s *Service) address(name string) string {
-	return "https://" + name + "." + s.publicIP + ".sslip.io"
-}
-
-var nameDisallowed = regexp.MustCompile(`[^a-z0-9-]+`)
-
-// suggestName turns a repository name into a valid app name where it can.
-func suggestName(repositoryName string) string {
-	lowered := strings.ToLower(repositoryName)
-	hyphenated := nameDisallowed.ReplaceAllString(lowered, "-")
-	trimmed := strings.Trim(hyphenated, "-")
-	if trimmed == "" {
-		return ""
-	}
-	if trimmed[0] < 'a' || trimmed[0] > 'z' {
-		trimmed = "app-" + trimmed
-	}
-
-	return strings.TrimRight(trimmed[:min(len(trimmed), 30)], "-")
+	return "https://" + Host(name, s.publicIP)
 }

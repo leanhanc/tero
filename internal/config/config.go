@@ -25,7 +25,7 @@ const (
 type Config struct {
 	DashboardDomain string `json:"dashboardDomain"`
 	// PublicIP is the server's public IPv4 address. App addresses are
-	// <app>.<PublicIP>.sslip.io whatever the dashboard domain is.
+	// <app>.<PublicIP>.nip.io whatever the dashboard domain is.
 	PublicIP string `json:"publicIP"`
 }
 

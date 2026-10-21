@@ -80,7 +80,7 @@ func run(ctx context.Context, args []string) error {
 
 func runInit(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("init", flag.ContinueOnError)
-	domain := flags.String("domain", "", "dashboard domain; defaults to <public-ip>.sslip.io")
+	domain := flags.String("domain", "", "dashboard domain; defaults to <public-ip>.nip.io")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}

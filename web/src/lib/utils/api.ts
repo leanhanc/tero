@@ -22,7 +22,9 @@ export type SecurityEvent = {
 export type DeployState = 'queued' | 'building' | 'starting' | 'live' | 'failed' | 'superseded';
 
 export type AppSummary = {
+	/** The first label of the app's address. It never changes. */
 	name: string;
+	displayName: string;
 	address: string;
 	latestState: DeployState | '';
 };
@@ -40,6 +42,7 @@ export type Deploy = {
 
 export type AppDetail = {
 	name: string;
+	displayName: string;
 	address: string;
 	repository: string;
 	branch: string;
@@ -51,12 +54,15 @@ export type AppDetail = {
 export type RepositoryLookup = {
 	repository: string;
 	defaultBranch: string;
-	suggestedName: string;
+	repositoryName: string;
+	/** What every app's address ends in, such as 203.0.113.10.nip.io. */
+	appDomain: string;
 };
 
 export type NewApp = {
 	repository: string;
 	branch: string;
+	displayName: string;
 	name: string;
 	rootDirectory: string;
 };
@@ -119,6 +125,10 @@ export function getApp(name: string): Promise<AppDetail> {
 
 export function redeploy(name: string): Promise<void> {
 	return request<void>('POST', `/api/apps/${encodeURIComponent(name)}/deploys`, {});
+}
+
+export function setDisplayName(name: string, displayName: string): Promise<void> {
+	return request<void>('POST', `/api/apps/${encodeURIComponent(name)}/display-name`, { displayName });
 }
 
 export function setRunTogether(name: string, runTogether: boolean): Promise<void> {

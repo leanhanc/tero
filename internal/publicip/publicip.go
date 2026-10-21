@@ -1,5 +1,5 @@
 // Package publicip finds the server's public IPv4 address, used to build the
-// default <ip>.sslip.io dashboard domain.
+// default <ip>.nip.io dashboard domain.
 package publicip
 
 import (

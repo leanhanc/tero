@@ -22,13 +22,13 @@ func detectPublicIP(ctx context.Context) (netip.Addr, error) {
 }
 
 // resolveDomain picks the dashboard domain: --domain if given, otherwise the
-// admin's answer at the prompt, otherwise <public-ip>.sslip.io.
+// admin's answer at the prompt, otherwise <public-ip>.nip.io.
 func resolveDomain(opts Options, ip netip.Addr) (string, error) {
 	if opts.Domain != "" {
 		return normalizeDomain(opts.Domain)
 	}
 
-	fallback := sslipDomain(ip)
+	fallback := nipDomain(ip)
 
 	if !opts.IsInteractive {
 		return fallback, nil
@@ -48,8 +48,8 @@ func resolveDomain(opts Options, ip netip.Addr) (string, error) {
 	return normalizeDomain(trimmedAnswer)
 }
 
-func sslipDomain(ip netip.Addr) string {
-	return ip.String() + ".sslip.io"
+func nipDomain(ip netip.Addr) string {
+	return ip.String() + ".nip.io"
 }
 
 // normalizeDomain lowercases a domain and checks it is a hostname Let's
@@ -58,7 +58,7 @@ func normalizeDomain(raw string) (string, error) {
 	domain := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(raw)), ".")
 
 	if _, err := netip.ParseAddr(domain); err == nil {
-		return "", fmt.Errorf("%q is an IP address; the dashboard needs a domain name (or leave it empty to use %s.sslip.io)", raw, domain)
+		return "", fmt.Errorf("%q is an IP address; the dashboard needs a domain name (or leave it empty to use %s.nip.io)", raw, domain)
 	}
 
 	labels := strings.Split(domain, ".")

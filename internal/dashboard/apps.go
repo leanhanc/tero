@@ -31,6 +31,7 @@ var fieldErrors = map[error]string{
 	source.ErrBranchNotFound:     "branch",
 	source.ErrInvalidBranch:      "branch",
 	source.ErrFolderNotFound:     "rootDirectory",
+	apps.ErrInvalidDisplayName:   "displayName",
 	apps.ErrInvalidName:          "name",
 	apps.ErrNameTaken:            "name",
 }
@@ -42,6 +43,7 @@ func (h *Handler) registerAppRoutes() {
 	h.mux.HandleFunc("GET /api/apps/{name}", h.requireSession(h.getApp))
 	h.mux.HandleFunc("POST /api/apps/{name}/deploys", h.requireSession(h.redeploy))
 	h.mux.HandleFunc("POST /api/apps/{name}/settings", h.requireSession(h.changeSettings))
+	h.mux.HandleFunc("POST /api/apps/{name}/display-name", h.requireSession(h.changeDisplayName))
 	h.mux.HandleFunc("GET /api/deploys/{id}/log", h.requireSession(h.streamLog))
 }
 
@@ -119,6 +121,24 @@ func (h *Handler) changeSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.apps.SetRunTogether(r.Context(), r.PathValue("name"), request.RunTogether); err != nil {
+		h.failApps(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type displayNameRequest struct {
+	DisplayName string `json:"displayName"`
+}
+
+func (h *Handler) changeDisplayName(w http.ResponseWriter, r *http.Request) {
+	var request displayNameRequest
+	if !h.readJSON(w, r, &request) {
+		return
+	}
+
+	if err := h.apps.SetDisplayName(r.Context(), r.PathValue("name"), request.DisplayName); err != nil {
 		h.failApps(w, r, err)
 		return
 	}

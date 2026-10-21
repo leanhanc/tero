@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/caddyserver/caddy/v2"
+
+	"github.com/leanhanc/tero/internal/apps"
 )
 
 // routePollInterval is how often the service checks for new apps and newly
@@ -29,12 +31,6 @@ type appRoute struct {
 	Host     string
 	HostPort int
 	Upstream string
-}
-
-// appHost is an app's default address, which never depends on the
-// dashboard domain.
-func appHost(appName, publicIP string) string {
-	return appName + "." + publicIP + ".sslip.io"
 }
 
 // loadAppRoutes returns every app's route, sorted by host so that two loads
@@ -61,7 +57,7 @@ func loadAppRoutes(ctx context.Context, db *sql.DB, publicIP string) ([]appRoute
 			return nil, err
 		}
 
-		route := appRoute{AppName: name, Host: appHost(name, publicIP), HostPort: hostPort}
+		route := appRoute{AppName: name, Host: apps.Host(name, publicIP), HostPort: hostPort}
 		if hostPort > 0 {
 			route.Upstream = "127.0.0.1:" + strconv.Itoa(hostPort)
 		}

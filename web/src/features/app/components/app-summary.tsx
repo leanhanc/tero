@@ -1,3 +1,4 @@
+import { AddressHelp } from '../../../components/address-help';
 import type { AppDetail } from '../../../lib/utils/api';
 
 export function AppSummary({ app }: { app: AppDetail }) {
@@ -6,7 +7,9 @@ export function AppSummary({ app }: { app: AppDetail }) {
 
 	return (
 		<dl>
-			<dt>Address</dt>
+			<dt>
+				Address <AddressHelp address={app.address} />
+			</dt>
 			<dd>
 				<a href={app.address} rel="noreferrer" target="_blank">
 					{app.address}

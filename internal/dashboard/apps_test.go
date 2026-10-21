@@ -13,7 +13,7 @@ import (
 func (d testDashboard) insertApp(t *testing.T, name, deployState string) {
 	t.Helper()
 
-	result, err := d.db.Exec("INSERT INTO apps (name, repository, branch, created_at) VALUES (?, 'https://github.com/o/r', 'main', 1)", name)
+	result, err := d.db.Exec("INSERT INTO apps (name, display_name, repository, branch, created_at) VALUES (?, ?, 'https://github.com/o/r', 'main', 1)", name, "The "+name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,6 +30,7 @@ func TestAppRoutesNeedSession(t *testing.T) {
 		d.get("/api/apps").Code,
 		d.post("/api/apps", map[string]string{"name": "api"}).Code,
 		d.post("/api/apps/api/deploys", map[string]string{}).Code,
+		d.post("/api/apps/api/display-name", map[string]string{"displayName": "x"}).Code,
 		d.get("/api/deploys/1/log").Code,
 	} {
 		if response != http.StatusUnauthorized {
@@ -38,17 +39,44 @@ func TestAppRoutesNeedSession(t *testing.T) {
 	}
 }
 
-// apps: Invalid name. The name is checked before anything is fetched.
+// apps: Invalid name, Invalid display name. Both are checked before
+// anything is fetched.
 func TestCreateAppPointsAtTheInvalidField(t *testing.T) {
 	d := newTestDashboard(t)
 	session := d.setUp(t)
 
-	response := d.post("/api/apps", map[string]string{"repository": "https://github.com/o/r", "branch": "main", "name": "My.App"}, session)
+	cases := map[string]map[string]string{
+		"name":        {"repository": "https://github.com/o/r", "branch": "main", "displayName": "My App", "name": "My.App"},
+		"displayName": {"repository": "https://github.com/o/r", "branch": "main", "displayName": " ", "name": "my-app"},
+	}
+	for field, newApp := range cases {
+		response := d.post("/api/apps", newApp, session)
 
-	var body struct{ Error, Field string }
-	json.Unmarshal(response.Body.Bytes(), &body)
-	if response.Code != http.StatusUnprocessableEntity || body.Field != "name" {
-		t.Fatalf("response = %d %s, want 422 on name", response.Code, response.Body)
+		var body struct{ Error, Field string }
+		json.Unmarshal(response.Body.Bytes(), &body)
+		if response.Code != http.StatusUnprocessableEntity || body.Field != field {
+			t.Errorf("response = %d %s, want 422 on %s", response.Code, response.Body, field)
+		}
+	}
+}
+
+// apps: Rename an app
+func TestChangeDisplayName(t *testing.T) {
+	d := newTestDashboard(t)
+	session := d.setUp(t)
+	d.insertApp(t, "api", "live")
+
+	renamed := d.post("/api/apps/api/display-name", map[string]string{"displayName": "  Shop API "}, session)
+	if renamed.Code != http.StatusNoContent {
+		t.Fatalf("rename = %d %s, want 204", renamed.Code, renamed.Body)
+	}
+	detail := d.get("/api/apps/api", session)
+	if !strings.Contains(detail.Body.String(), `"name":"api","displayName":"Shop API"`) {
+		t.Fatalf("detail = %s", detail.Body)
+	}
+
+	if missing := d.post("/api/apps/nope/display-name", map[string]string{"displayName": "x"}, session); missing.Code != http.StatusNotFound {
+		t.Fatalf("rename unknown app = %d, want 404", missing.Code)
 	}
 }
 
@@ -84,7 +112,7 @@ func TestListAndGetApps(t *testing.T) {
 	d.insertApp(t, "api", "live")
 
 	list := d.get("/api/apps", session)
-	if !strings.Contains(list.Body.String(), `"address":"https://api.203.0.113.10.sslip.io"`) ||
+	if !strings.Contains(list.Body.String(), `"displayName":"The api","address":"https://api.203.0.113.10.nip.io"`) ||
 		!strings.Contains(list.Body.String(), `"latestState":"live"`) {
 		t.Fatalf("list = %s", list.Body)
 	}

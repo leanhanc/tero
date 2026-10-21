@@ -16,7 +16,7 @@ const (
 	// publicIP stands in for the VM's public address; the VM sits behind NAT.
 	publicIP = "203.0.113.10"
 	// skippedDomain is what init picks when the admin gives no domain.
-	skippedDomain = publicIP + ".sslip.io"
+	skippedDomain = publicIP + ".nip.io"
 	// providedDomain is a domain the admin brings. In the VM, Pebble's DNS
 	// helper resolves every name to the VM itself.
 	providedDomain = "dash.example.com"

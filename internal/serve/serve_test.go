@@ -61,8 +61,8 @@ func TestBuildCaddyConfig_v5_0_0_3_4_1_HSTSCoversSubdomainsForAYear(t *testing.T
 // domains: Dashboard API on an app host / No route before live
 func TestBuildCaddyConfigRoutesAppsApartFromTheDashboard(t *testing.T) {
 	routes := []appRoute{
-		{Host: "api.203.0.113.10.sslip.io", Upstream: "127.0.0.1:41000"},
-		{Host: "web.203.0.113.10.sslip.io"},
+		{Host: "api.203.0.113.10.nip.io", Upstream: "127.0.0.1:41000"},
+		{Host: "web.203.0.113.10.nip.io"},
 	}
 	cfg, err := buildCaddyConfig(caddySettings{Domain: "dash.example.com", Issuer: map[string]any{"module": "acme"}}, routes)
 	if err != nil {
@@ -91,13 +91,13 @@ func TestBuildCaddyConfigRoutesAppsApartFromTheDashboard(t *testing.T) {
 		}
 	}
 
-	if got := handlers["api.203.0.113.10.sslip.io"]; !slices.Equal(got, []string{"reverse_proxy"}) {
+	if got := handlers["api.203.0.113.10.nip.io"]; !slices.Equal(got, []string{"reverse_proxy"}) {
 		t.Errorf("live app handlers = %v, want only reverse_proxy", got)
 	}
-	if got := handlers["web.203.0.113.10.sslip.io"]; !slices.Equal(got, []string{"static_response"}) {
+	if got := handlers["web.203.0.113.10.nip.io"]; !slices.Equal(got, []string{"static_response"}) {
 		t.Errorf("undeployed app handlers = %v, want only the not-deployed page", got)
 	}
-	if !strings.Contains(string(encoded), `"api.203.0.113.10.sslip.io","web.203.0.113.10.sslip.io"`) {
+	if !strings.Contains(string(encoded), `"api.203.0.113.10.nip.io","web.203.0.113.10.nip.io"`) {
 		t.Error("app hosts are missing from the certificate subjects")
 	}
 }

@@ -34,9 +34,10 @@ Implements all of slice 2: the new capabilities `apps`, `build-pipeline`, `deplo
 - [x] 4.3 Build the new-app page with the URL lookup filling branch and name, and field errors from the API. Covers `apps: Default branch suggested`
 - [x] 4.4 Build the app page: address link, live commit, Redeploy, the old-and-new-together setting, deploys newest first with live state, the log of the selected deploy streamed as plain text, and each failure's step and reason. Covers `apps: App page`, `build-pipeline: Watch a build`, `Log rendered as text`, and `deployments: Redeploy picks up a new commit`
 - [x] 4.5 Update `docs/security/asvs-l2.md` (1.3.6 met, rows for the new endpoints, 13.2.4 still a gap with builds listed in the outbound table) and `cis-subset.md` if the agent unit changes anything there; verify every ASVS ID cited in this change has a row and a test
+- [x] 4.6 Add display names: a `display_name` column, the name and address fields on the new-app page with the address built from the name, the display name in the app list and on the app page, and renaming from the app page. Covers `apps: Address follows the display name`, `Invalid display name`, `Rename an app`
 
 ## 5. End to end and housekeeping
 
 - [x] 5.1 Add e2e tests that deploy every fixture through the dashboard API in both VMs (local source) and from GitHub in CI, check each answers on its address with the expected runtime, and check the failing fixtures fail at the expected step with the expected message
-- [ ] 5.2 Once slice 1's part 4 exists, run the slice 2 suite on the cloud servers (amd64 and arm64) with real Let's Encrypt certificates on sslip.io, and check the Lynis score has not dropped
+- [ ] 5.2 Once slice 1's part 4 exists, run the slice 2 suite on the cloud servers (amd64 and arm64) with real Let's Encrypt certificates on nip.io, and check the Lynis score has not dropped
 - [x] 5.3 Move `openspec/config.yaml`'s context to slice 2, trim the four drafts to what later slices still own, and tick slice 2 in `openspec/roadmap.md`

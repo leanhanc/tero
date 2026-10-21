@@ -25,7 +25,7 @@ type Options struct {
 	Version string
 
 	// Domain is the dashboard domain from --domain. When empty, init asks for
-	// one if it is attached to a terminal, and otherwise uses <ip>.sslip.io.
+	// one if it is attached to a terminal, and otherwise uses <ip>.nip.io.
 	Domain        string
 	IsInteractive bool
 	In            io.Reader

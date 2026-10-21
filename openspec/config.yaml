@@ -14,7 +14,7 @@ context: |
   the first deploy of a JavaScript backend from a public GitHub URL, by hand from the dashboard. A
   `tero agent` process under tero's systemd user manager builds with Railpack in a throwaway rootless
   BuildKit and runs each app in a hardened rootless container; the service routes
-  `<app>.<public-ip>.sslip.io` to it.
+  `<app>.<public-ip>.nip.io` to it.
   openspec/specs holds only the current slice's capabilities. openspec/drafts holds rough specs for what later
   slices still own (apps, deployments, domains, app logs, build pipeline, GitHub connection); they are not commitments.
   Security standards (ADR 0001): OWASP ASVS 5.0.0 Level 2 for the dashboard and HTTP endpoints, citing

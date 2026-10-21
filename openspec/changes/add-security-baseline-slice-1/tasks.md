@@ -48,5 +48,5 @@ Implements all of slice 1: the main specs (`installation`, `server-init`, `proce
 ## 4. End-to-end CI on a cloud provider
 
 - [ ] 4.1 Pick the e2e cloud provider (it needs an API to create and destroy servers, Ubuntu 24.04 and 26.04 images, and ideally arm64), then set up CI credentials limited to e2e servers, a budget alert, and a cleanup job for stray servers; verify the credentials cannot touch anything else
-- [ ] 4.2 Add a CI job that launches fresh servers on each tested release (amd64, plus arm64 where the provider offers it) with public IPs, installs through `install.sh` from the release under test, runs `sudo tero init`, and runs the whole e2e suite with real Let's Encrypt certificates on sslip.io; verify every scenario in the four slice-1 specs passes on both architectures
+- [ ] 4.2 Add a CI job that launches fresh servers on each tested release (amd64, plus arm64 where the provider offers it) with public IPs, installs through `install.sh` from the release under test, runs `sudo tero init`, and runs the whole e2e suite with real Let's Encrypt certificates on nip.io; verify every scenario in the four slice-1 specs passes on both architectures
 - [ ] 4.3 Enforce the Lynis minimum in CI; verify the job fails when a hardening step is skipped on purpose

@@ -1,6 +1,9 @@
 package apps
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // apps: Invalid name
 func TestCheckName(t *testing.T) {
@@ -16,17 +19,22 @@ func TestCheckName(t *testing.T) {
 	}
 }
 
-func TestSuggestName(t *testing.T) {
+// apps: Display names
+func TestCleanDisplayName(t *testing.T) {
 	cases := map[string]string{
-		"tero":        "tero",
-		"My_Cool.API": "my-cool-api",
-		"2048-game":   "app-2048-game",
-		"___":         "",
-		"a-very-long-repository-name-that-goes-on": "a-very-long-repository-name-th",
+		"My Shop API":           "My Shop API",
+		"  Tienda  ":            "Tienda",
+		"Café ☕":                "Café ☕",
+		strings.Repeat("é", 60): strings.Repeat("é", 60),
 	}
 	for input, want := range cases {
-		if got := suggestName(input); got != want {
-			t.Errorf("suggestName(%q) = %q, want %q", input, got, want)
+		if got, err := CleanDisplayName(input); err != nil || got != want {
+			t.Errorf("CleanDisplayName(%q) = %q, %v, want %q", input, got, err, want)
+		}
+	}
+	for _, displayName := range []string{"", "   ", "two\nlines", "tab\there", "line\u2028separator", "\u202eipa-pohs", strings.Repeat("a", 61)} {
+		if _, err := CleanDisplayName(displayName); err == nil {
+			t.Errorf("CleanDisplayName(%q) accepted", displayName)
 		}
 	}
 }

@@ -1,0 +1,7 @@
+{
+	"name": "tero",
+	"private": true,
+	"scripts": {
+		"dev": "scripts/dev-vm.sh up"
+	}
+}
