@@ -229,4 +229,27 @@ describe('apps', () => {
 		expect(button).toHaveProperty('disabled', true);
 		expect(screen.getByText('A deploy is in progress.')).toBeTruthy();
 	});
+
+	it('shows how long a deploy has run and says so when its log goes quiet', async () => {
+		vi.useFakeTimers({ shouldAdvanceTime: true });
+		vi.setSystemTime(new Date('2026-10-21T22:00:00Z'));
+		openAt('/apps/api');
+		const queuedAt = Date.parse('2026-10-21T21:56:48Z') / 1000;
+		const building = {
+			...failedApp,
+			deploys: failedApp.deploys.map((deploy) => ({ ...deploy, state: 'building', reason: '', failedStep: '', queuedAt })),
+		};
+		mockAPI({ '/api/state': [loggedIn], '/api/apps/api': [{ status: 200, body: building }] });
+		mockEventSource([{ type: 'log', data: JSON.stringify('#15 npm install\n') }]);
+		render(<App />);
+
+		expect(await screen.findByText('Running for 3m 12s.')).toBeTruthy();
+		expect(screen.queryByText(/No new output/)).toBeNull();
+
+		await vi.advanceTimersByTimeAsync(31_000);
+
+		expect(screen.getByText('Running for 3m 43s.')).toBeTruthy();
+		expect(screen.getByText(/^No new output for 31s\. The deploy is still running/)).toBeTruthy();
+		vi.useRealTimers();
+	});
 });

@@ -18,6 +18,19 @@ func Run(ctx context.Context, args ...string) (string, error) {
 	return run(exec.CommandContext(ctx, "podman", args...), args)
 }
 
+// RunCombined runs podman and returns its stdout and stderr together, in the
+// order they were written. podman logs replays a container's stderr on its
+// own stderr, so Run would drop it.
+func RunCombined(ctx context.Context, args ...string) (string, error) {
+	output, err := exec.CommandContext(ctx, "podman", args...).CombinedOutput()
+	if err != nil {
+		subcommand := strings.Join(args[:min(len(args), 2)], " ")
+		return "", fmt.Errorf("podman %s: %w: %s", subcommand, err, strings.TrimSpace(string(output)))
+	}
+
+	return strings.TrimSpace(string(output)), nil
+}
+
 // RunInOwnScope runs podman in a transient systemd scope of its own, so the
 // conmon and port-forwarding processes it leaves behind for a container don't
 // belong to the agent's unit. Otherwise restarting the agent would kill them

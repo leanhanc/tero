@@ -118,9 +118,10 @@ func WaitReady(ctx context.Context, container string, hostPort int, timeout time
 	}
 }
 
-// LastOutput returns the container's last lines of output.
+// LastOutput returns the container's last lines of output, from both stdout
+// and stderr, where crashes usually print.
 func LastOutput(ctx context.Context, container string, lines int) string {
-	output, err := podman.Run(ctx, "logs", "--tail", strconv.Itoa(lines), container)
+	output, err := podman.RunCombined(ctx, "logs", "--tail", strconv.Itoa(lines), container)
 	if err != nil {
 		return ""
 	}

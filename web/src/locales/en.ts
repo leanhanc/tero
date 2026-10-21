@@ -133,6 +133,9 @@ export const en = {
 			streaming: 'Following the build as it runs…',
 			unavailable: "The log couldn't be read.",
 			empty: 'No output yet.',
+			running: (elapsed: string) => `Running for ${elapsed}.`,
+			quiet: (quietFor: string) =>
+				`No new output for ${quietFor}. The deploy is still running: some steps, such as installing packages, print nothing until they finish.`,
 		},
 	},
 	deployStates: {

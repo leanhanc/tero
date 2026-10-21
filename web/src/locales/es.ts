@@ -128,6 +128,9 @@ export const es: Messages = {
 			streaming: 'Siguiendo la construcción mientras corre…',
 			unavailable: 'No se pudo leer el registro.',
 			empty: 'Todavía no hay salida.',
+			running: (elapsed) => `En curso desde hace ${elapsed}.`,
+			quiet: (quietFor) =>
+				`Sin salida nueva desde hace ${quietFor}. El despliegue sigue en curso: algunos pasos, como instalar paquetes, no muestran nada hasta terminar.`,
 		},
 	},
 	deployStates: {

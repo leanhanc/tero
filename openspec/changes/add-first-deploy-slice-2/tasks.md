@@ -35,6 +35,7 @@ Implements all of slice 2: the new capabilities `apps`, `build-pipeline`, `deplo
 - [x] 4.4 Build the app page: address link, live commit, Redeploy, the old-and-new-together setting, deploys newest first with live state, the log of the selected deploy streamed as plain text, and each failure's step and reason. Covers `apps: App page`, `build-pipeline: Watch a build`, `Log rendered as text`, and `deployments: Redeploy picks up a new commit`
 - [x] 4.5 Update `docs/security/asvs-l2.md` (1.3.6 met, rows for the new endpoints, 13.2.4 still a gap with builds listed in the outbound table) and `cis-subset.md` if the agent unit changes anything there; verify every ASVS ID cited in this change has a row and a test
 - [x] 4.6 Add display names: a `display_name` column, the name and address fields on the new-app page with the address built from the name, the display name in the app list and on the app page, and renaming from the app page. Covers `apps: Address follows the display name`, `Invalid display name`, `Rename an app`
+- [x] 4.7 Remove the security events list from the dashboard home. Events stay in the database, the events API and the journal, and ASVS 6.3.5 and 6.3.7 (Level 3 extras) move to Later in `docs/security/asvs-l2.md`
 
 ## 5. End to end and housekeeping
 

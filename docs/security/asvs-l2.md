@@ -135,7 +135,7 @@ ASVS 14.1.1 and 14.1.2.
 | TOTP secret | Shown once during setup; never returned again or logged; database readable only by `tero` |
 | Session, device and setup tokens | Only in `HttpOnly` cookies or the URL fragment; only hashes stored; never logged |
 | TLS private key | Readable only by `tero` |
-| Source IPs in security events | Shown to the admin; kept for one year, then deleted |
+| Source IPs in security events | Kept for the admin; kept for one year, then deleted |
 
 API responses carry `Cache-Control: no-store`, and logout sends `Clear-Site-Data: "cache", "storage"`. Nothing is kept in browser storage other than the two cookies.
 
@@ -164,7 +164,7 @@ ASVS 16.1.1.
 
 | Log | Contents | Where | Retention |
 |---|---|---|---|
-| Security events | Time (UTC), type, source IP | `security_events` table in SQLite, shown on the dashboard home | One year |
+| Security events | Time (UTC), type, source IP | `security_events` table in SQLite, readable through `GET /api/events` | One year |
 | Journal copy of each event | Same, with `TERO_EVENT` and `TERO_SOURCE_IP` fields; failures, rate limits and resets at warning priority | systemd journal | journald settings |
 | Refused requests | Time, reason (`no_session`, `cross_site`, `not_json`, `malformed_body`), path (first 256 bytes) and source IP, at warning priority with `TERO_EVENT=request_refused`. Anyone can cause these, so they stay out of the security events table | systemd journal | journald settings |
 | Service errors | Unexpected errors, without request bodies | systemd journal (stdout of `tero.service`) | journald settings |
@@ -526,8 +526,8 @@ ADR 0001 adopts a few Level 3 requirements because they are cheap.
 
 | ID | Requirement | Status | How | Test |
 |---|---|---|---|---|
-| 6.3.5 | Tell the user about suspicious logins | Met | Failed logins, rate limits and resets are on the dashboard home and in the journal; v1 has no email | `TestEventsRecordedWithoutSecrets`, e2e `Events recorded / No secrets in events (v5.0.0-6.3.4, v5.0.0-6.3.5, v5.0.0-6.3.7)` |
-| 6.3.7 | Tell the user after a credential change | Met | The reset event is shown at the next login | e2e `Recovery visible after the fact` |
+| 6.3.5 | Tell the user about suspicious logins | Later | Failed logins, rate limits and resets are recorded in the database and the journal, but the dashboard doesn't show them until it has more to show; v1 has no email | `TestEventsRecordedWithoutSecrets`, e2e `Events recorded / No secrets in events (v5.0.0-6.3.4, v5.0.0-6.3.5, v5.0.0-6.3.7)` |
+| 6.3.7 | Tell the user after a credential change | Later | The reset event is recorded, but not shown at the next login until the dashboard lists events again | e2e `Recovery visible after the fact` checks the event is recorded |
 | 6.3.3 | A phishing-resistant factor | Later | Passkeys, right after v1 | — |
 | 13.3.3 | Keys in an isolated module | Later | Slice 5: the key is sealed with `systemd-creds` | — |
 | 13.3.4 | Secret rotation | Later | Slice 5: `sudo tero rotate-key` | — |

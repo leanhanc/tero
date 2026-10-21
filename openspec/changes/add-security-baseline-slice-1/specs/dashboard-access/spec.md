@@ -76,15 +76,15 @@ Dashboard sessions SHALL follow OWASP ASVS 5.0.0 V7. The session cookie SHALL us
 - **THEN** every existing session stops working
 
 ### Requirement: Security events
-Tero SHALL record security events and show the most recent on the dashboard home, and SHALL also write them to the system journal (v5.0.0-6.3.5, v5.0.0-6.3.7). Every login path SHALL be documented and SHALL produce an event (v5.0.0-6.3.4).
+Tero SHALL record security events in its database, readable through the dashboard API, and SHALL also write them to the system journal. The dashboard home does not list them yet. Every login path SHALL be documented and SHALL produce an event (v5.0.0-6.3.4).
 
 #### Scenario: Events recorded
 - **WHEN** any of these happen: setup completed, successful login, failed login, rate limit triggered, `sudo tero reset-login` used
-- **THEN** an event with the time, type and source IP (when there is one) appears in the dashboard's security events list and in the journal
+- **THEN** an event with the time, type and source IP (when there is one) is listed by the events API and appears in the journal
 
 #### Scenario: Recovery visible after the fact
 - **WHEN** the admin logs in after `sudo tero reset-login` was used
-- **THEN** the dashboard home shows the reset event
+- **THEN** the events API lists the reset event
 
 #### Scenario: No secrets in events
 - **WHEN** any security event is recorded
