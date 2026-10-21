@@ -1,5 +1,6 @@
 import type { Deploy } from '../../../lib/utils/api';
 import { describeFailedStep, describeState } from '../../../lib/utils/deploy-states';
+import { useFormatTime, useMessages } from '../../../lib/utils/locale';
 
 type DeployListProps = {
 	deploys: Deploy[];
@@ -8,19 +9,21 @@ type DeployListProps = {
 };
 
 export function DeployList({ deploys, shownDeployID, onSelect }: DeployListProps) {
+	const messages = useMessages().app.deploys;
+
 	if (deploys.length === 0) {
-		return <p>No deploys yet.</p>;
+		return <p>{messages.empty}</p>;
 	}
 
 	return (
 		<table>
-			<caption>Deploys, newest first</caption>
+			<caption>{messages.caption}</caption>
 			<thead>
 				<tr>
-					<th scope="col">Started</th>
-					<th scope="col">Commit</th>
-					<th scope="col">State</th>
-					<th scope="col">Log</th>
+					<th scope="col">{messages.startedColumn}</th>
+					<th scope="col">{messages.commitColumn}</th>
+					<th scope="col">{messages.stateColumn}</th>
+					<th scope="col">{messages.logColumn}</th>
 				</tr>
 			</thead>
 			<tbody>
@@ -39,17 +42,19 @@ type DeployRowProps = {
 };
 
 function DeployRow({ deploy, isShown, onSelect }: DeployRowProps) {
+	const messages = useMessages();
+	const formatTime = useFormatTime();
 	const queuedAt = new Date(deploy.queuedAt * 1000);
-	const commit = deploy.commitSha ? `${deploy.commitSha.slice(0, 12)} ${deploy.commitMessage}` : 'Not fetched yet';
+	const commit = deploy.commitSha ? `${deploy.commitSha.slice(0, 12)} ${deploy.commitMessage}` : messages.app.deploys.commitNotFetched;
 	const isFailed = deploy.state === 'failed';
 	const stateText = isFailed
-		? `${describeState(deploy.state)} ${describeFailedStep(deploy.failedStep)}`.trim()
-		: describeState(deploy.state);
+		? `${describeState(deploy.state, messages.deployStates)} ${describeFailedStep(deploy.failedStep, messages.deployStates)}`.trim()
+		: describeState(deploy.state, messages.deployStates);
 
 	return (
 		<tr>
 			<td>
-				<time dateTime={queuedAt.toISOString()}>{queuedAt.toLocaleString()}</time>
+				<time dateTime={queuedAt.toISOString()}>{formatTime(queuedAt)}</time>
 			</td>
 			<td>{commit}</td>
 			<td>
@@ -58,7 +63,7 @@ function DeployRow({ deploy, isShown, onSelect }: DeployRowProps) {
 			</td>
 			<td>
 				<button type="button" onClick={() => onSelect(deploy.id)} aria-pressed={isShown}>
-					Show log
+					{messages.app.deploys.showLog}
 				</button>
 			</td>
 		</tr>

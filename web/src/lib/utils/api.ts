@@ -1,3 +1,5 @@
+import type { Messages } from '../../locales/en';
+
 // The dashboard's JSON API. Every call is same-origin and sends JSON, which
 // the server requires to block cross-site requests.
 
@@ -150,21 +152,22 @@ async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown):
 	return (await response.json()) as T;
 }
 
+// An empty message means the server gave no explanation; errorMessage turns
+// it into a generic one in the dashboard's language.
 async function readError(response: Response): Promise<{ message: string; field: string }> {
-	const fallback = 'Something went wrong. Try again.';
 	try {
 		const body = (await response.json()) as { error?: string; field?: string };
-		return { message: body.error ?? fallback, field: body.field ?? '' };
+		return { message: body.error ?? '', field: body.field ?? '' };
 	} catch {
-		return { message: fallback, field: '' };
+		return { message: '', field: '' };
 	}
 }
 
 /** The message to show for a failed call, whatever was thrown. */
-export function errorMessage(error: unknown): string {
-	if (error instanceof ApiError) {
-		return error.message;
+export function errorMessage(error: unknown, messages: Messages['errors']): string {
+	if (!(error instanceof ApiError)) {
+		return messages.unreachable;
 	}
 
-	return 'The server could not be reached. Check your connection and try again.';
+	return error.message || messages.generic;
 }

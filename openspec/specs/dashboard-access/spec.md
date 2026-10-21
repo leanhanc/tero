@@ -63,3 +63,14 @@ Tero v1 SHALL have exactly one admin account.
 #### Scenario: Server settings unaffected by reset
 - **WHEN** `sudo tero reset-login` runs
 - **THEN** the dashboard domain, its certificate, and the host hardening are unchanged
+
+### Requirement: Dashboard language
+The dashboard SHALL show its own text in English or Spanish, picking the first of the browser's preferred languages it supports and falling back to English. Both languages SHALL ship inside the binary, so no language file is fetched at runtime. Messages written by the server, such as form errors, stay as the server sends them.
+
+#### Scenario: Spanish browser
+- **WHEN** the admin opens the dashboard in a browser whose preferred languages start with `es-AR`
+- **THEN** the login page reads "Iniciá sesión en Tero" and the page's `lang` is `es`
+
+#### Scenario: Unsupported language
+- **WHEN** the browser prefers only French
+- **THEN** the dashboard is in English

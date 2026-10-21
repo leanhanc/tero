@@ -2,6 +2,7 @@ import { type SubmitEvent, useState } from 'react';
 
 import { TextField } from '../../../components/text-field';
 import { errorMessage, setDisplayName } from '../../../lib/utils/api';
+import { useMessages } from '../../../lib/utils/locale';
 
 type DisplayNameSettingProps = {
 	appName: string;
@@ -11,6 +12,7 @@ type DisplayNameSettingProps = {
 
 /** Renames the app in the dashboard. Its address stays the same. */
 export function DisplayNameSetting({ appName, displayName, onChange }: DisplayNameSettingProps) {
+	const messages = useMessages();
 	const [draft, setDraft] = useState(displayName);
 	const [error, setError] = useState('');
 	const [isSaving, setIsSaving] = useState(false);
@@ -26,25 +28,25 @@ export function DisplayNameSetting({ appName, displayName, onChange }: DisplayNa
 			await setDisplayName(appName, draft);
 			onChange();
 		} catch (saveError) {
-			setError(errorMessage(saveError));
+			setError(errorMessage(saveError, messages.errors));
 		} finally {
 			setIsSaving(false);
 		}
 	};
 
 	return (
-		<form aria-label="App name" onSubmit={save}>
+		<form aria-label={messages.app.displayName.formLabel} onSubmit={save}>
 			<TextField
 				id="display-name"
-				label="Name"
-				hint="What the dashboard calls the app. Changing it doesn't change the address."
+				label={messages.app.displayName.label}
+				hint={messages.app.displayName.hint}
 				isRequired
 				value={draft}
 				onChange={setDraft}
 				error={error}
 			/>
 			<button type="submit" disabled={isSaving || isUnchanged}>
-				{isSaving ? 'Saving…' : 'Save name'}
+				{isSaving ? messages.common.saving : messages.app.displayName.submit}
 			</button>
 		</form>
 	);

@@ -3,6 +3,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { PageHeader } from '../../components/page-header';
 import { type AppDetail, errorMessage, getApp } from '../../lib/utils/api';
 import { isInProgress } from '../../lib/utils/deploy-states';
+import { useMessages } from '../../lib/utils/locale';
+import type { Messages } from '../../locales/en';
 import { AppSummary } from './components/app-summary';
 import { BuildLog } from './components/build-log';
 import { DeployList } from './components/deploy-list';
@@ -16,7 +18,8 @@ const refreshIntervalMs = 2000;
 type LoadedApp = { app: AppDetail } | { error: string } | null;
 
 export function AppPage({ name, onLogout }: { name: string; onLogout: () => void }) {
-	const [loaded, reload] = useApp(name);
+	const messages = useMessages();
+	const [loaded, reload] = useApp(name, messages.errors);
 	const [selectedDeployID, setSelectedDeployID] = useState<number | null>(null);
 	const heading = loaded !== null && 'app' in loaded ? loaded.app.displayName : name;
 
@@ -44,8 +47,10 @@ type AppPageContentProps = {
 };
 
 function AppPageContent({ loaded, selectedDeployID, onSelectDeploy, onChange }: AppPageContentProps) {
+	const messages = useMessages();
+
 	if (loaded === null) {
-		return <p>Loading…</p>;
+		return <p>{messages.common.loading}</p>;
 	}
 
 	if ('error' in loaded) {
@@ -70,7 +75,7 @@ function AppPageContent({ loaded, selectedDeployID, onSelectDeploy, onChange }: 
 }
 
 /** Loads the app, and keeps reloading it while a deploy is in progress. */
-function useApp(name: string): [LoadedApp, () => void] {
+function useApp(name: string, errorMessages: Messages['errors']): [LoadedApp, () => void] {
 	const [loaded, setLoaded] = useState<LoadedApp>(null);
 	const [reloadCount, setReloadCount] = useState(0);
 
@@ -78,12 +83,12 @@ function useApp(name: string): [LoadedApp, () => void] {
 		let isCurrent = true;
 		getApp(name)
 			.then((app) => isCurrent && setLoaded({ app }))
-			.catch((error: unknown) => isCurrent && setLoaded({ error: errorMessage(error) }));
+			.catch((error: unknown) => isCurrent && setLoaded({ error: errorMessage(error, errorMessages) }));
 
 		return () => {
 			isCurrent = false;
 		};
-	}, [name, reloadCount]);
+	}, [name, reloadCount, errorMessages]);
 
 	const reload = useCallback(() => setReloadCount((count) => count + 1), []);
 

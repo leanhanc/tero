@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
 import { errorMessage, redeploy } from '../../../lib/utils/api';
+import { useMessages } from '../../../lib/utils/locale';
 
 type RedeployButtonProps = {
 	appName: string;
@@ -10,6 +11,7 @@ type RedeployButtonProps = {
 
 /** Deploys the branch's latest commit. One deploy at a time per app. */
 export function RedeployButton({ appName, hasDeployInProgress, onRedeploy }: RedeployButtonProps) {
+	const messages = useMessages();
 	const [error, setError] = useState('');
 	const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -21,19 +23,19 @@ export function RedeployButton({ appName, hasDeployInProgress, onRedeploy }: Red
 			await redeploy(appName);
 			onRedeploy();
 		} catch (redeployError) {
-			setError(errorMessage(redeployError));
+			setError(errorMessage(redeployError, messages.errors));
 		} finally {
 			setIsSubmitting(false);
 		}
 	};
 
 	return (
-		<section aria-label="Redeploy">
+		<section aria-label={messages.app.redeploy.label}>
 			<button type="button" onClick={startRedeploy} disabled={hasDeployInProgress || isSubmitting} aria-describedby="redeploy-hint">
-				Redeploy
+				{messages.app.redeploy.submit}
 			</button>
 			<p id="redeploy-hint">
-				{hasDeployInProgress ? 'A deploy is in progress.' : "Builds and deploys the branch's latest commit."}
+				{hasDeployInProgress ? messages.app.redeploy.inProgress : messages.app.redeploy.hint}
 			</p>
 			{error && <p role="alert">{error}</p>}
 		</section>

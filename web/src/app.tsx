@@ -5,7 +5,9 @@ import { HomePage } from './features/home/home-page';
 import { LoginPage } from './features/login/login-page';
 import { NewAppPage } from './features/new-app/new-app-page';
 import { SetupPage } from './features/setup/setup-page';
+import type { Messages } from './locales/en';
 import { type DashboardState, errorMessage, getState } from './lib/utils/api';
+import { useMessages } from './lib/utils/locale';
 import { usePath } from './lib/utils/navigation';
 
 type LoadedState = { state: DashboardState } | { error: string } | null;
@@ -22,8 +24,9 @@ const idleCheckMarginMs = 5 * 1000;
  * every rule; this only decides which form to show.
  */
 export function App() {
+	const messages = useMessages();
 	const path = usePath();
-	const [loaded, reload] = useDashboardState(path);
+	const [loaded, reload] = useDashboardState(path, messages.errors);
 	const isLoggedIn = loaded !== null && 'state' in loaded && loaded.state.isLoggedIn;
 	useReloadWhenSessionIdles(isLoggedIn, reload);
 
@@ -32,7 +35,7 @@ export function App() {
 	}
 
 	if (loaded === null) {
-		return <p>Loading…</p>;
+		return <p>{messages.common.loading}</p>;
 	}
 
 	if ('error' in loaded) {
@@ -63,7 +66,7 @@ function SignedInPage({ path, onLogout }: { path: string; onLogout: () => void }
 }
 
 /** Loads the login state, again whenever the path changes or reload is called. */
-function useDashboardState(path: string): [LoadedState, () => void] {
+function useDashboardState(path: string, errorMessages: Messages['errors']): [LoadedState, () => void] {
 	const [loaded, setLoaded] = useState<LoadedState>(null);
 	const [reloadCount, setReloadCount] = useState(0);
 
@@ -73,12 +76,12 @@ function useDashboardState(path: string): [LoadedState, () => void] {
 
 		getState()
 			.then((state) => isCurrent && setLoaded({ state }))
-			.catch((error: unknown) => isCurrent && setLoaded({ error: errorMessage(error) }));
+			.catch((error: unknown) => isCurrent && setLoaded({ error: errorMessage(error, errorMessages) }));
 
 		return () => {
 			isCurrent = false;
 		};
-	}, [path, reloadCount]);
+	}, [path, reloadCount, errorMessages]);
 
 	const reload = useCallback(() => setReloadCount((count) => count + 1), []);
 	return [loaded, reload];

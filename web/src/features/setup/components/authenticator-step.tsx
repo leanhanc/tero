@@ -1,6 +1,7 @@
 import { type SubmitEvent, useEffect, useRef, useState } from 'react';
 
 import { ApiError, type Enrolment, errorMessage, finishSetup } from '../../../lib/utils/api';
+import { useMessages } from '../../../lib/utils/locale';
 import { navigate } from '../../../lib/utils/navigation';
 
 type AuthenticatorStepProps = {
@@ -10,6 +11,7 @@ type AuthenticatorStepProps = {
 };
 
 export function AuthenticatorStep({ token, enrolment, onLinkError }: AuthenticatorStepProps) {
+	const messages = useMessages();
 	const [code, setCode] = useState('');
 	const [codeError, setCodeError] = useState('');
 	const [isSubmitting, setIsSubmitting] = useState(false);
@@ -30,9 +32,9 @@ export function AuthenticatorStep({ token, enrolment, onLinkError }: Authenticat
 		} catch (error) {
 			const isCodeProblem = error instanceof ApiError && (error.status === 422 || error.status === 429);
 			if (isCodeProblem) {
-				setCodeError(error.message);
+				setCodeError(errorMessage(error, messages.errors));
 			} else {
-				onLinkError(errorMessage(error));
+				onLinkError(errorMessage(error, messages.errors));
 			}
 		} finally {
 			setIsSubmitting(false);
@@ -44,14 +46,14 @@ export function AuthenticatorStep({ token, enrolment, onLinkError }: Authenticat
 	return (
 		<form onSubmit={submit}>
 			<h2 ref={headingRef} tabIndex={-1}>
-				Add Tero to your authenticator app
+				{messages.setup.authenticator.heading}
 			</h2>
-			<p>Scan this QR code with an authenticator app, such as 1Password, Bitwarden or Google Authenticator.</p>
-			<img src={enrolment.qrCode} alt="QR code that adds Tero to an authenticator app" width={256} height={256} />
+			<p>{messages.setup.authenticator.scanInstructions}</p>
+			<img src={enrolment.qrCode} alt={messages.setup.authenticator.qrCodeAlt} width={256} height={256} />
 			<p>
-				Can't scan it? Enter this key in the app instead: <code>{enrolment.secret}</code>
+				{messages.setup.authenticator.manualKey} <code>{enrolment.secret}</code>
 			</p>
-			<label htmlFor="code">6-digit code from the app</label>
+			<label htmlFor="code">{messages.setup.authenticator.codeLabel}</label>
 			<input
 				id="code"
 				name="code"
@@ -72,7 +74,7 @@ export function AuthenticatorStep({ token, enrolment, onLinkError }: Authenticat
 				</p>
 			)}
 			<button type="submit" disabled={isSubmitting}>
-				Finish setup
+				{messages.setup.authenticator.submit}
 			</button>
 		</form>
 	);

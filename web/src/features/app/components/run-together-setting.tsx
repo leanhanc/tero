@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
 import { errorMessage, setRunTogether } from '../../../lib/utils/api';
+import { useMessages } from '../../../lib/utils/locale';
 
 type RunTogetherSettingProps = {
 	appName: string;
@@ -9,6 +10,7 @@ type RunTogetherSettingProps = {
 };
 
 export function RunTogetherSetting({ appName, runTogether, onChange }: RunTogetherSettingProps) {
+	const messages = useMessages();
 	const [error, setError] = useState('');
 
 	const toggle = async (isChecked: boolean) => {
@@ -17,12 +19,12 @@ export function RunTogetherSetting({ appName, runTogether, onChange }: RunTogeth
 			await setRunTogether(appName, isChecked);
 			onChange();
 		} catch (settingError) {
-			setError(errorMessage(settingError));
+			setError(errorMessage(settingError, messages.errors));
 		}
 	};
 
 	return (
-		<section aria-label="Deploy settings">
+		<section aria-label={messages.app.runTogether.sectionLabel}>
 			<input
 				id="run-together"
 				type="checkbox"
@@ -30,12 +32,8 @@ export function RunTogetherSetting({ appName, runTogether, onChange }: RunTogeth
 				onChange={(event) => toggle(event.target.checked)}
 				aria-describedby="run-together-hint"
 			/>
-			<label htmlFor="run-together">Run old and new releases together during deploys</label>
-			<p id="run-together-hint">
-				When on, the new release starts next to the old one and takes over once it answers. Turn it off for apps
-				that can't run twice at once: the old release then stops first, so the app is briefly down. Either way, if
-				the new release fails, the old one keeps serving.
-			</p>
+			<label htmlFor="run-together">{messages.app.runTogether.label}</label>
+			<p id="run-together-hint">{messages.app.runTogether.hint}</p>
 			{error && <p role="alert">{error}</p>}
 		</section>
 	);

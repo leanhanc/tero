@@ -3,6 +3,7 @@ import { type SubmitEvent, useState } from 'react';
 import { AddressHelp } from '../../../components/address-help';
 import { ApiError, createApp, errorMessage, lookUpRepository, type NewApp } from '../../../lib/utils/api';
 import { toAddressLabel } from '../../../lib/utils/app-address';
+import { useMessages } from '../../../lib/utils/locale';
 import { TextField } from '../../../components/text-field';
 
 type Field = keyof NewApp;
@@ -17,6 +18,8 @@ const emptyApp: NewApp = { repository: '', branch: '', displayName: '', name: ''
  * server checks every field again.
  */
 export function NewAppForm({ onCreated }: { onCreated: (name: string) => void }) {
+	const messages = useMessages();
+	const formMessages = messages.newApp;
 	const [newApp, setNewApp] = useState<NewApp>(emptyApp);
 	const [isAddressEdited, setIsAddressEdited] = useState(false);
 	const [appDomain, setAppDomain] = useState('');
@@ -62,11 +65,11 @@ export function NewAppForm({ onCreated }: { onCreated: (name: string) => void })
 	const showError = (error: unknown) => {
 		const isFieldError = error instanceof ApiError && error.field !== '';
 		if (isFieldError) {
-			setFieldErrors({ [error.field]: error.message });
+			setFieldErrors({ [error.field]: errorMessage(error, messages.errors) });
 			return;
 		}
 
-		setFormError(errorMessage(error));
+		setFormError(errorMessage(error, messages.errors));
 	};
 
 	const submit = async (event: SubmitEvent<HTMLFormElement>) => {
@@ -84,16 +87,17 @@ export function NewAppForm({ onCreated }: { onCreated: (name: string) => void })
 		}
 	};
 
-	const addressPreview = appDomain && newApp.name ? `It will be https://${newApp.name}.${appDomain}. ` : '';
-	const addressHint = `${addressPreview}Lowercase letters, digits and hyphens. It can't be changed later.`;
+	const hasAddressPreview = appDomain !== '' && newApp.name !== '';
+	const addressPreview = hasAddressPreview ? formMessages.address.preview(`https://${newApp.name}.${appDomain}`) : '';
+	const addressHint = `${addressPreview}${formMessages.address.hint}`;
 
 	return (
 		<form onSubmit={submit}>
 			<TextField
 				id="repository"
-				label="GitHub repository"
-				placeholder="https://github.com/owner/repository"
-				hint="Only public repositories for now."
+				label={formMessages.repository.label}
+				placeholder={formMessages.repository.placeholder}
+				hint={formMessages.repository.hint}
 				isRequired
 				value={newApp.repository}
 				onChange={setField('repository')}
@@ -102,8 +106,8 @@ export function NewAppForm({ onCreated }: { onCreated: (name: string) => void })
 			/>
 			<TextField
 				id="branch"
-				label="Branch"
-				hint="Tero deploys the latest commit of this branch."
+				label={formMessages.branch.label}
+				hint={formMessages.branch.hint}
 				isRequired
 				value={newApp.branch}
 				onChange={setField('branch')}
@@ -111,8 +115,8 @@ export function NewAppForm({ onCreated }: { onCreated: (name: string) => void })
 			/>
 			<TextField
 				id="displayName"
-				label="Name"
-				hint="What the dashboard calls the app. You can change it later."
+				label={formMessages.displayName.label}
+				hint={formMessages.displayName.hint}
 				isRequired
 				value={newApp.displayName}
 				onChange={setDisplayName}
@@ -120,7 +124,7 @@ export function NewAppForm({ onCreated }: { onCreated: (name: string) => void })
 			/>
 			<TextField
 				id="name"
-				label="Address"
+				label={formMessages.address.label}
 				hint={addressHint}
 				isRequired
 				value={newApp.name}
@@ -130,15 +134,15 @@ export function NewAppForm({ onCreated }: { onCreated: (name: string) => void })
 			<AddressHelp address={appDomain} />
 			<TextField
 				id="rootDirectory"
-				label="Folder in the repository (optional)"
-				hint="Leave empty unless the app lives in a subfolder, such as apps/api."
+				label={formMessages.rootDirectory.label}
+				hint={formMessages.rootDirectory.hint}
 				value={newApp.rootDirectory}
 				onChange={setField('rootDirectory')}
 				error={fieldErrors.rootDirectory ?? ''}
 			/>
 			{formError && <p role="alert">{formError}</p>}
 			<button type="submit" disabled={isSubmitting}>
-				{isSubmitting ? 'Checking the repository…' : 'Create and deploy'}
+				{isSubmitting ? formMessages.submitting : formMessages.submit}
 			</button>
 		</form>
 	);

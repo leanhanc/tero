@@ -2,12 +2,14 @@ import { type SubmitEvent, useState } from 'react';
 
 import { AccountNameField } from '../../../components/account-name-field';
 import { errorMessage, login } from '../../../lib/utils/api';
+import { useMessages } from '../../../lib/utils/locale';
 
 /**
  * The server never says which factor was wrong, so the error belongs to the
  * whole form rather than to one field.
  */
 export function LoginForm({ onLogin }: { onLogin: () => void }) {
+	const messages = useMessages();
 	const [password, setPassword] = useState('');
 	const [code, setCode] = useState('');
 	const [formError, setFormError] = useState('');
@@ -22,7 +24,7 @@ export function LoginForm({ onLogin }: { onLogin: () => void }) {
 			await login(password, code);
 			onLogin();
 		} catch (error) {
-			setFormError(errorMessage(error));
+			setFormError(errorMessage(error, messages.errors));
 			setCode('');
 		} finally {
 			setIsSubmitting(false);
@@ -32,7 +34,7 @@ export function LoginForm({ onLogin }: { onLogin: () => void }) {
 	return (
 		<form onSubmit={submit} aria-describedby={formError ? 'login-error' : undefined}>
 			<AccountNameField />
-			<label htmlFor="password">Password</label>
+			<label htmlFor="password">{messages.login.passwordLabel}</label>
 			<input
 				id="password"
 				name="password"
@@ -42,7 +44,7 @@ export function LoginForm({ onLogin }: { onLogin: () => void }) {
 				value={password}
 				onChange={(event) => setPassword(event.target.value)}
 			/>
-			<label htmlFor="code">6-digit code from your authenticator app</label>
+			<label htmlFor="code">{messages.login.codeLabel}</label>
 			<input
 				id="code"
 				name="code"
@@ -61,7 +63,7 @@ export function LoginForm({ onLogin }: { onLogin: () => void }) {
 				</p>
 			)}
 			<button type="submit" disabled={isSubmitting}>
-				Log in
+				{messages.login.submit}
 			</button>
 		</form>
 	);

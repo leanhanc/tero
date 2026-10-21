@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { type Deploy, deployLogURL } from '../../../lib/utils/api';
+import { useMessages } from '../../../lib/utils/locale';
 
 type LogStatus = 'streaming' | 'finished' | 'unavailable';
 
@@ -9,6 +10,7 @@ type LogStatus = 'streaming' | 'finished' | 'unavailable';
  * React escapes it, so build output can never become markup.
  */
 export function BuildLog({ deploy }: { deploy: Deploy }) {
+	const messages = useMessages().app.buildLog;
 	const [log, setLog] = useState('');
 	const [status, setStatus] = useState<LogStatus>('streaming');
 
@@ -33,10 +35,10 @@ export function BuildLog({ deploy }: { deploy: Deploy }) {
 
 	return (
 		<section aria-labelledby="build-log-heading">
-			<h2 id="build-log-heading">Build log of deploy {deploy.id}</h2>
-			{status === 'streaming' && <p aria-live="polite">Following the build as it runs…</p>}
-			{status === 'unavailable' && <p role="alert">The log couldn't be read.</p>}
-			<pre>{log || 'No output yet.'}</pre>
+			<h2 id="build-log-heading">{messages.heading(deploy.id)}</h2>
+			{status === 'streaming' && <p aria-live="polite">{messages.streaming}</p>}
+			{status === 'unavailable' && <p role="alert">{messages.unavailable}</p>}
+			<pre>{log || messages.empty}</pre>
 		</section>
 	);
 }

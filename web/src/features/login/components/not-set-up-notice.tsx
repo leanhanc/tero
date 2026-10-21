@@ -1,8 +1,12 @@
+import { useMessages } from '../../../lib/utils/locale';
+
 export function NotSetUpNotice() {
+	const messages = useMessages().login.notSetUp;
+
 	return (
 		<p>
-			The dashboard login isn't set up yet. Open the setup link printed on the server by <code>sudo tero init</code>, or run{' '}
-			<code>sudo tero reset-login</code> there for a new one.
+			{messages.beforeInit} <code>sudo tero init</code>
+			{messages.beforeReset} <code>sudo tero reset-login</code> {messages.afterReset}
 		</p>
 	);
 }

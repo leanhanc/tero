@@ -4,27 +4,29 @@ import { AddressHelp } from '../../../components/address-help';
 import { InternalLink } from '../../../components/internal-link';
 import { type AppSummary, errorMessage, listApps } from '../../../lib/utils/api';
 import { describeState } from '../../../lib/utils/deploy-states';
+import { useMessages } from '../../../lib/utils/locale';
 
 type LoadedApps = { apps: AppSummary[] } | { error: string } | null;
 
 export function AppList() {
+	const messages = useMessages();
 	const [loaded, setLoaded] = useState<LoadedApps>(null);
 
 	useEffect(() => {
 		let isCurrent = true;
 		listApps()
 			.then((apps) => isCurrent && setLoaded({ apps }))
-			.catch((error: unknown) => isCurrent && setLoaded({ error: errorMessage(error) }));
+			.catch((error: unknown) => isCurrent && setLoaded({ error: errorMessage(error, messages.errors) }));
 
 		return () => {
 			isCurrent = false;
 		};
-	}, []);
+	}, [messages]);
 
 	return (
-		<section aria-label="Your apps">
+		<section aria-label={messages.home.apps.label}>
 			<p>
-				<InternalLink to="/apps/new">Deploy a new app</InternalLink>
+				<InternalLink to="/apps/new">{messages.home.apps.deployNew}</InternalLink>
 			</p>
 			<AppListContent loaded={loaded} />
 		</section>
@@ -32,8 +34,10 @@ export function AppList() {
 }
 
 function AppListContent({ loaded }: { loaded: LoadedApps }) {
+	const messages = useMessages();
+
 	if (loaded === null) {
-		return <p>Loading…</p>;
+		return <p>{messages.common.loading}</p>;
 	}
 
 	if ('error' in loaded) {
@@ -41,7 +45,7 @@ function AppListContent({ loaded }: { loaded: LoadedApps }) {
 	}
 
 	if (loaded.apps.length === 0) {
-		return <p>No apps yet. Deploy one from a public GitHub repository to get started.</p>;
+		return <p>{messages.home.apps.empty}</p>;
 	}
 
 	const firstAddress = loaded.apps[0]?.address ?? '';
@@ -50,11 +54,11 @@ function AppListContent({ loaded }: { loaded: LoadedApps }) {
 		<table>
 			<thead>
 				<tr>
-					<th scope="col">App</th>
+					<th scope="col">{messages.home.apps.appColumn}</th>
 					<th scope="col">
-						Address <AddressHelp address={firstAddress} />
+						{messages.home.apps.addressColumn} <AddressHelp address={firstAddress} />
 					</th>
-					<th scope="col">Latest deploy</th>
+					<th scope="col">{messages.home.apps.latestDeployColumn}</th>
 				</tr>
 			</thead>
 			<tbody>
@@ -68,7 +72,7 @@ function AppListContent({ loaded }: { loaded: LoadedApps }) {
 								{app.address}
 							</a>
 						</td>
-						<td>{describeState(app.latestState)}</td>
+						<td>{describeState(app.latestState, messages.deployStates)}</td>
 					</tr>
 				))}
 			</tbody>

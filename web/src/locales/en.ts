@@ -1,0 +1,155 @@
+import type { DeployState } from '../lib/utils/api';
+
+/**
+ * Every text the dashboard shows. Other locales are typed against this one,
+ * so a missing or misnamed key fails type checking. Texts that need a value
+ * are functions of it.
+ */
+export const en = {
+	common: {
+		loading: 'Loading…',
+		saving: 'Saving…',
+	},
+	errors: {
+		generic: 'Something went wrong. Try again.',
+		unreachable: 'The server could not be reached. Check your connection and try again.',
+	},
+	header: {
+		home: 'Tero',
+		logOut: 'Log out',
+	},
+	addressHelp: {
+		label: 'What is nip.io?',
+		explanation:
+			'nip.io is a free public DNS service. It answers a name with an IP address in it, such as shop.203.0.113.10.nip.io, with that IP, so your app gets a working HTTPS address before you set up a domain of your own. Visitors connect straight to your server; no traffic goes through nip.io.',
+	},
+	setup: {
+		heading: 'Set up your dashboard login',
+		missingToken: 'This page needs the setup link printed on the server. Run sudo tero reset-login there for a new one.',
+		password: {
+			heading: 'Choose a password',
+			label: 'Password',
+			hint: 'At least 8 characters.',
+			submit: 'Continue',
+		},
+		authenticator: {
+			heading: 'Add Tero to your authenticator app',
+			scanInstructions: 'Scan this QR code with an authenticator app, such as 1Password, Bitwarden or Google Authenticator.',
+			qrCodeAlt: 'QR code that adds Tero to an authenticator app',
+			manualKey: "Can't scan it? Enter this key in the app instead:",
+			codeLabel: '6-digit code from the app',
+			submit: 'Finish setup',
+		},
+	},
+	login: {
+		heading: 'Log in to Tero',
+		passwordLabel: 'Password',
+		codeLabel: '6-digit code from your authenticator app',
+		submit: 'Log in',
+		notSetUp: {
+			beforeInit: "The dashboard login isn't set up yet. Open the setup link printed on the server by",
+			beforeReset: ', or run',
+			afterReset: 'there for a new one.',
+		},
+	},
+	home: {
+		heading: 'Apps',
+		apps: {
+			label: 'Your apps',
+			deployNew: 'Deploy a new app',
+			empty: 'No apps yet. Deploy one from a public GitHub repository to get started.',
+			appColumn: 'App',
+			addressColumn: 'Address',
+			latestDeployColumn: 'Latest deploy',
+		},
+	},
+	newApp: {
+		heading: 'Deploy a new app',
+		intro: 'Tero builds the app from a public GitHub repository and gives it its own HTTPS address.',
+		repository: {
+			label: 'GitHub repository',
+			placeholder: 'https://github.com/owner/repository',
+			hint: 'Only public repositories for now.',
+		},
+		branch: {
+			label: 'Branch',
+			hint: 'Tero deploys the latest commit of this branch.',
+		},
+		displayName: {
+			label: 'Name',
+			hint: 'What the dashboard calls the app. You can change it later.',
+		},
+		address: {
+			label: 'Address',
+			preview: (address: string) => `It will be ${address}. `,
+			hint: "Lowercase letters, digits and hyphens. It can't be changed later.",
+		},
+		rootDirectory: {
+			label: 'Folder in the repository (optional)',
+			hint: 'Leave empty unless the app lives in a subfolder, such as apps/api.',
+		},
+		submit: 'Create and deploy',
+		submitting: 'Checking the repository…',
+	},
+	app: {
+		summary: {
+			address: 'Address',
+			repository: 'Repository',
+			branch: 'Branch',
+			folder: 'Folder',
+			repositoryRoot: 'The repository root',
+			liveCommit: 'Live commit',
+			nothingLive: 'Nothing is live yet',
+		},
+		redeploy: {
+			label: 'Redeploy',
+			submit: 'Redeploy',
+			hint: "Builds and deploys the branch's latest commit.",
+			inProgress: 'A deploy is in progress.',
+		},
+		displayName: {
+			formLabel: 'App name',
+			label: 'Name',
+			hint: "What the dashboard calls the app. Changing it doesn't change the address.",
+			submit: 'Save name',
+		},
+		runTogether: {
+			sectionLabel: 'Deploy settings',
+			label: 'Run old and new releases together during deploys',
+			hint: "When on, the new release starts next to the old one and takes over once it answers. Turn it off for apps that can't run twice at once: the old release then stops first, so the app is briefly down. Either way, if the new release fails, the old one keeps serving.",
+		},
+		deploys: {
+			empty: 'No deploys yet.',
+			caption: 'Deploys, newest first',
+			startedColumn: 'Started',
+			commitColumn: 'Commit',
+			stateColumn: 'State',
+			logColumn: 'Log',
+			commitNotFetched: 'Not fetched yet',
+			showLog: 'Show log',
+		},
+		buildLog: {
+			heading: (deployID: number) => `Build log of deploy ${deployID}`,
+			streaming: 'Following the build as it runs…',
+			unavailable: "The log couldn't be read.",
+			empty: 'No output yet.',
+		},
+	},
+	deployStates: {
+		notDeployed: 'Not deployed yet',
+		states: {
+			queued: 'Waiting to start',
+			building: 'Building',
+			starting: 'Starting',
+			live: 'Live',
+			failed: 'Failed',
+			superseded: 'Replaced by a newer deploy',
+		} satisfies Record<DeployState, string>,
+		failedSteps: {
+			building: 'while building',
+			starting: 'while starting',
+		},
+	},
+};
+
+export type Messages = typeof en;

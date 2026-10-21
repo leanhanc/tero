@@ -1,31 +1,25 @@
+import type { Messages } from '../../locales/en';
 import type { DeployState } from './api';
 
-const stateLabels: Record<DeployState, string> = {
-	queued: 'Waiting to start',
-	building: 'Building',
-	starting: 'Starting',
-	live: 'Live',
-	failed: 'Failed',
-	superseded: 'Replaced by a newer deploy',
-};
-
-const stepLabels: Record<string, string> = {
-	building: 'while building',
-	starting: 'while starting',
-};
+type DeployStateMessages = Messages['deployStates'];
 
 /** A deploy state in words, for people who don't know the internal names. */
-export function describeState(state: DeployState | ''): string {
+export function describeState(state: DeployState | '', messages: DeployStateMessages): string {
 	if (state === '') {
-		return 'Not deployed yet';
+		return messages.notDeployed;
 	}
 
-	return stateLabels[state];
+	return messages.states[state];
 }
 
 /** Where a failed deploy stopped, such as "while building". */
-export function describeFailedStep(step: string): string {
-	return stepLabels[step] ?? '';
+export function describeFailedStep(step: string, messages: DeployStateMessages): string {
+	const isKnownStep = Object.hasOwn(messages.failedSteps, step);
+	if (!isKnownStep) {
+		return '';
+	}
+
+	return messages.failedSteps[step as keyof DeployStateMessages['failedSteps']];
 }
 
 /** Whether a deploy is still on its way to live or failed. */

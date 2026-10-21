@@ -2,6 +2,7 @@ import { type SubmitEvent, useState } from 'react';
 
 import { AccountNameField } from '../../../components/account-name-field';
 import { ApiError, beginSetup, type Enrolment, errorMessage } from '../../../lib/utils/api';
+import { useMessages } from '../../../lib/utils/locale';
 
 type PasswordStepProps = {
 	token: string;
@@ -10,6 +11,7 @@ type PasswordStepProps = {
 };
 
 export function PasswordStep({ token, onEnrolment, onLinkError }: PasswordStepProps) {
+	const messages = useMessages();
 	const [password, setPassword] = useState('');
 	const [passwordError, setPasswordError] = useState('');
 	const [isSubmitting, setIsSubmitting] = useState(false);
@@ -24,9 +26,9 @@ export function PasswordStep({ token, onEnrolment, onLinkError }: PasswordStepPr
 		} catch (error) {
 			const isPasswordProblem = error instanceof ApiError && error.status === 422;
 			if (isPasswordProblem) {
-				setPasswordError(error.message);
+				setPasswordError(errorMessage(error, messages.errors));
 			} else {
-				onLinkError(errorMessage(error));
+				onLinkError(errorMessage(error, messages.errors));
 			}
 		} finally {
 			setIsSubmitting(false);
@@ -38,9 +40,9 @@ export function PasswordStep({ token, onEnrolment, onLinkError }: PasswordStepPr
 
 	return (
 		<form onSubmit={submit}>
-			<h2>Choose a password</h2>
+			<h2>{messages.setup.password.heading}</h2>
 			<AccountNameField />
-			<label htmlFor="password">Password</label>
+			<label htmlFor="password">{messages.setup.password.label}</label>
 			<input
 				id="password"
 				name="password"
@@ -53,16 +55,14 @@ export function PasswordStep({ token, onEnrolment, onLinkError }: PasswordStepPr
 				aria-describedby={describedBy}
 				aria-invalid={hasError}
 			/>
-			<p id="password-hint">
-				At least 8 characters.
-			</p>
+			<p id="password-hint">{messages.setup.password.hint}</p>
 			{hasError && (
 				<p id="password-error" role="alert">
 					{passwordError}
 				</p>
 			)}
 			<button type="submit" disabled={isSubmitting}>
-				Continue
+				{messages.setup.password.submit}
 			</button>
 		</form>
 	);
