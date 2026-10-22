@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	github.com/caddyserver/caddy/v2 v2.11.7
 	github.com/go-git/go-git/v5 v5.19.3
-	github.com/moby/buildkit v0.33.0
+	github.com/moby/buildkit v0.34.1
 	github.com/railwayapp/railpack v0.40.1
 	github.com/tonistiigi/fsutil v0.0.0-20260819142231-83cac42c1c52
 	golang.org/x/crypto v0.57.0
@@ -77,7 +77,7 @@ require (
 	github.com/dgryski/go-farm v0.0.0-20240924180020-3414d57e47da // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/dlclark/regexp2/v2 v2.8.0 // indirect
-	github.com/docker/cli v29.8.1+incompatible // indirect
+	github.com/docker/cli v29.8.2+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.9.9 // indirect
 	github.com/dunglas/go-urlpattern v1.0.0 // indirect
 	github.com/dunglas/httpsfv v1.1.1 // indirect
