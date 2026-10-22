@@ -5,7 +5,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -30,12 +29,13 @@ import (
 // version is set at build time with -ldflags "-X main.version=...".
 var version = "dev"
 
+// usage lists only the commands people run. systemd starts the service with
+// `tero serve` and the agent with `tero agent`; nobody runs those by hand.
 const usage = `Usage:
   sudo tero init [--domain DOMAIN]   Set up this server as a Tero host
   sudo tero reset-login              Reset the dashboard login
-  tero serve                         Run the Tero service (started by systemd)
-  tero agent                         Build and run apps (started by systemd for tero)
   tero version                       Print the version
+  tero help                          Show this list
 `
 
 func main() {
@@ -49,9 +49,10 @@ func main() {
 }
 
 func run(ctx context.Context, args []string) error {
+	// A bare `tero` is a request for help, not a mistake.
 	if len(args) == 0 {
-		fmt.Fprint(os.Stderr, usage)
-		return errors.New("Missing command")
+		fmt.Print(usage)
+		return nil
 	}
 
 	command, commandArgs := args[0], args[1:]
