@@ -1,5 +1,6 @@
 # Builds and publishes a release with GoReleaser, then signs SLSA provenance
-# for every file in checksums.txt through Sigstore. Verify a downloaded binary
+# for every file in checksums.txt through Sigstore and attaches it to the
+# release as tero.intoto.jsonl. Verify a downloaded binary
 # with:
 #
 #   gh attestation verify tero-linux-amd64 --repo leanhanc/tero \
@@ -46,5 +47,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        id: provenance
         with:
           subject-checksums: dist/checksums.txt
+
+      # The attestation also goes on the release itself, where verifiers that
+      # don't use GitHub's attestation API, such as OpenSSF Scorecard, look.
+      - name: Attach provenance to the release
+        run: |
+          cp "$BUNDLE" tero.intoto.jsonl
+          gh release upload "$GITHUB_REF_NAME" tero.intoto.jsonl --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUNDLE: ${{ steps.provenance.outputs.bundle-path }}

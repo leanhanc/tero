@@ -1,0 +1,16 @@
+# Weekly update pull requests for Go modules, the dashboard's packages and the
+# pinned GitHub Actions.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: bun
+    directory: /web
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
