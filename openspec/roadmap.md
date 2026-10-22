@@ -93,6 +93,16 @@ Drafts: [app-logs](drafts/app-logs/spec.md)
 
 Drafts: [apps](drafts/apps/spec.md), [build-pipeline](drafts/build-pipeline/spec.md)
 
+## Slice 10: Remove Tero from a server
+
+`sudo tero purge` takes the server back to how it was before `sudo tero init`.
+
+- [ ] List everything that will be removed, then ask the admin to type the dashboard domain to confirm; `--yes` skips the prompt for scripts
+- [ ] Stop and remove every app container, image and the BuildKit cache, then the agent and service units, the `tero` user and its data, configuration and logs
+- [ ] Undo init's host changes (firewall rules, SSH and kernel settings). Init doesn't record what it changed yet, so it starts keeping that record, and purge leaves alone anything the admin edited since
+- [ ] Remove the `tero` binary last
+- [ ] Root only, never offered in the dashboard
+
 ## Open decisions
 
 - [ ] Decide what the admin can configure, where (dashboard or `sudo tero ...`), and the defaults. Candidates: log retention (security events, kept one year today, and each app's runtime logs), how many images are kept for rollback, and resource limits per app
