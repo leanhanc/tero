@@ -74,6 +74,7 @@ func testDeploys(t *testing.T) {
 	t.Run("deployments: Redeploy picks up a new commit / Successful deploy / Redeploy while deploying", testRedeployNewCommit)
 	t.Run("deployments: Failed redeploy", testFailedRedeploy)
 	t.Run("deployments: Setting off, deploy succeeds / Setting off, deploy fails", testStopFirst)
+	t.Run("process-isolation: Dashboard cannot trigger root work", testAppRoutesNoRootWork)
 	t.Run("deployments: Interrupted deploy", testInterruptedDeploy)
 }
 
@@ -433,6 +434,34 @@ func testFailedRedeploy(t *testing.T) {
 		t.Errorf("%d requests failed while the redeploy ran", failedRequests)
 	}
 	assertContains(t, fetchApp(t, redeployApp, "/").output, "second commit")
+}
+
+// testAppRoutesNoRootWork extends slice 1's check to the app routes: the
+// service hands deploys to the agent through the database and never starts a
+// process itself.
+func testAppRoutesNoRootWork(t *testing.T) {
+	servicePID := must(t, "systemctl show tero --property=MainPID --value")
+	auditRule := "always,exit -F arch=b64 -S execve,execveat -F ppid=" + servicePID + " -k e2e-tero-app-exec"
+	must(t, "sudo auditctl -a "+auditRule)
+	defer run(t, "sudo auditctl -d "+auditRule)
+
+	app := fixtureApp("npm")
+	deployID := getApp(t, app).Deploys[0].ID
+	postDashboard(t, "admin", "/api/repositories/lookup", map[string]string{"url": fixtureRepository})
+	getDashboard(t, "admin", "/api/apps")
+	getDashboard(t, "admin", "/api/apps/"+app)
+	getDashboard(t, "admin", fmt.Sprintf("/api/deploys/%d/log", deployID))
+	postDashboard(t, "admin", "/api/apps/"+app+"/display-name", map[string]string{"displayName": "Root audit"})
+	postDashboard(t, "admin", "/api/apps/"+app+"/settings", map[string]bool{"runTogether": true})
+	postDashboard(t, "admin", "/api/apps/"+app+"/deploys", map[string]string{})
+	createApp(t, "root-audit", "main", "e2e/fixtures/npm")
+	waitForDeploy(t, app)
+	waitForDeploy(t, "root-audit")
+
+	spawned := run(t, "sudo ausearch -k e2e-tero-app-exec --raw")
+	if strings.Contains(spawned.output, "type=SYSCALL") {
+		t.Errorf("the service started processes:\n%s", spawned.output)
+	}
 }
 
 func testStopFirst(t *testing.T) {

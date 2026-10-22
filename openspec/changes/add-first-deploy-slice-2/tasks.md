@@ -25,7 +25,7 @@ Implements all of slice 2: the new capabilities `apps`, `build-pipeline`, `deplo
 - [x] 3.4 Add the per-app "Run old and new releases together during deploys" setting (on by default); when off, stop the old container after the build, start the new one, and on failure start the previous image again. Covers `deployments: Setting off, deploy succeeds` and `Setting off, deploy fails`
 - [x] 3.5 Add the agent's reconcile loop (on start and every 10 seconds). Covers `apps: App process exits` and `Reboot`
 - [x] 3.6 Make the service build Caddy's config from the dashboard domain plus one host per app, reload it when apps or live deploys change, serve the "not deployed yet" page, and redirect HTTP. Covers `domains: New web app reachable without DNS`, `Dashboard on a custom domain`, `No route before live`, `HTTP request to an app`, and `Dashboard API on an app host`
-- [ ] 3.7 Check the service stays as it was. Covers `process-isolation: Service sandbox unchanged` and `Agent has no listener`, and extend slice 1's `Dashboard cannot trigger root work` test to the new routes
+- [x] 3.7 Check the service stays as it was. Covers `process-isolation: Service sandbox unchanged` and `Agent has no listener`, and extend slice 1's `Dashboard cannot trigger root work` test to the new routes
 
 ## 4. Dashboard
 
