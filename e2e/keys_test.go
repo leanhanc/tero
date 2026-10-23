@@ -111,7 +111,7 @@ func testOnlyTheDashboardIsAnswered(t *testing.T) {
 
 func testDashboardStaysInItsCgroup(t *testing.T) {
 	probe := `for procs in /sys/fs/cgroup/cgroup.procs /sys/fs/cgroup/system.slice/cgroup.procs /sys/fs/cgroup/user.slice/cgroup.procs; do
-		echo $$ > "$procs" 2>/dev/null && echo "moved to $procs"
+		{ echo $$ > "$procs"; } 2>/dev/null && echo "moved to $procs"
 	done; true`
 	if got := must(t, inDashboardCgroup(probe)); got != "" {
 		t.Errorf("the dashboard can leave its cgroup: %s", got)
