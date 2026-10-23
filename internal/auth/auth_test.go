@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leanhanc/tero/internal/keys"
 	"github.com/leanhanc/tero/internal/password"
 	"github.com/leanhanc/tero/internal/store"
 	"github.com/leanhanc/tero/internal/totp"
@@ -34,6 +35,9 @@ type journalEntry struct {
 type testEnv struct {
 	service *Service
 	clock   *testClock
+	// keysRoot is root's client of the in-process key service.
+	keysRoot *keys.Client
+	// journal is what the dashboard and the key service wrote.
 	journal *[]journalEntry
 }
 
@@ -46,19 +50,54 @@ func newTestEnv(t *testing.T) testEnv {
 	}
 	t.Cleanup(func() { db.Close() })
 
+	keysDB, err := store.OpenWith(context.Background(), filepath.Join(t.TempDir(), "keys.db"), keys.Migrations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { keysDB.Close() })
+
 	clock := &testClock{now: time.Unix(1_800_000_000, 0)}
 	entries := &[]journalEntry{}
+	writeJournal := func(_ int, message string, fields map[string]string) error {
+		*entries = append(*entries, journalEntry{message, fields})
+		return nil
+	}
+	keyService := keys.NewService(keysDB, map[int][]byte{1: make([]byte, 32)}, keys.Options{Now: clock.Now, Journal: writeJournal})
+
 	service := New(db, Options{
+		Keys:      keys.NewLocalClient(keyService, keys.CallerDashboard),
 		Domain:    "dash.example.com",
 		Passwords: password.Policy{Breaches: noBreaches{}},
 		Now:       clock.Now,
-		Journal: func(_ int, message string, fields map[string]string) error {
-			*entries = append(*entries, journalEntry{message, fields})
-			return nil
-		},
+		Journal:   writeJournal,
 	})
 
-	return testEnv{service: service, clock: clock, journal: entries}
+	return testEnv{service: service, clock: clock, keysRoot: keys.NewLocalClient(keyService, keys.CallerRoot), journal: entries}
+}
+
+// issueLink is what `sudo tero init` and `reset-login` do: root asks the key
+// service for a token.
+func (env testEnv) issueLink(t *testing.T) string {
+	t.Helper()
+	token, err := env.keysRoot.IssueSetupLink(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return SetupLink("dash.example.com", token)
+}
+
+// resetLogin is `sudo tero reset-login`: the dashboard's part, then the key
+// service's, then a new link.
+func (env testEnv) resetLogin(t *testing.T) string {
+	t.Helper()
+	ctx := context.Background()
+	if err := env.service.ResetLogin(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.keysRoot.ResetLogin(ctx); err != nil {
+		t.Fatal(err)
+	}
+	return env.issueLink(t)
 }
 
 type noBreaches struct{}
@@ -86,11 +125,7 @@ func (env testEnv) setUpWithDevice(t *testing.T) (string, string) {
 	t.Helper()
 	ctx := context.Background()
 
-	link, err := env.service.IssueSetupLink(ctx, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	token := tokenFromLink(t, link)
+	token := tokenFromLink(t, env.issueLink(t))
 
 	enrolment, err := env.service.BeginSetup(ctx, adminIP, token, adminPassword)
 	if err != nil {
@@ -115,14 +150,14 @@ func (env testEnv) loginFrom(ip, deviceToken, secret string) (LoginResult, error
 	return env.service.Login(context.Background(), ip, deviceToken, adminPassword, code)
 }
 
-func (env testEnv) eventTypes(t *testing.T) []EventType {
+func (env testEnv) eventTypes(t *testing.T) []keys.EventType {
 	t.Helper()
 	events, err := env.service.RecentEvents(context.Background(), 100)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	var types []EventType
+	var types []keys.EventType
 	for _, event := range events {
 		types = append(types, event.Type)
 	}
@@ -133,7 +168,7 @@ func TestAdminCompletesSetup(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()
 
-	link, _ := env.service.IssueSetupLink(ctx, "")
+	link := env.issueLink(t)
 	token := tokenFromLink(t, link)
 	enrolment, err := env.service.BeginSetup(ctx, adminIP, token, adminPassword)
 	if err != nil {
@@ -158,7 +193,7 @@ func TestSetupWithoutTOTPCreatesNoAccount(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()
 
-	link, _ := env.service.IssueSetupLink(ctx, "")
+	link := env.issueLink(t)
 	token := tokenFromLink(t, link)
 	if _, err := env.service.BeginSetup(ctx, adminIP, token, adminPassword); err != nil {
 		t.Fatal(err)
@@ -176,7 +211,7 @@ func TestSetupLinkReusedIsRejected(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()
 
-	link, _ := env.service.IssueSetupLink(ctx, "")
+	link := env.issueLink(t)
 	token := tokenFromLink(t, link)
 	enrolment, _ := env.service.BeginSetup(ctx, adminIP, token, adminPassword)
 	code, _ := totp.Code(enrolment.Secret, env.clock.Now())
@@ -193,8 +228,8 @@ func TestSetupLinkExpires(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()
 
-	link, _ := env.service.IssueSetupLink(ctx, "")
-	env.clock.Advance(setupLinkLifetime)
+	link := env.issueLink(t)
+	env.clock.Advance(24 * time.Hour)
 
 	if _, err := env.service.BeginSetup(ctx, adminIP, tokenFromLink(t, link), adminPassword); !errors.Is(err, ErrInvalidLink) {
 		t.Errorf("BeginSetup(expired link) = %v", err)
@@ -205,8 +240,8 @@ func TestNewSetupLinkReplacesTheOldOne(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()
 
-	oldLink, _ := env.service.IssueSetupLink(ctx, "")
-	env.service.IssueSetupLink(ctx, "")
+	oldLink := env.issueLink(t)
+	env.issueLink(t)
 
 	if _, err := env.service.BeginSetup(ctx, adminIP, tokenFromLink(t, oldLink), adminPassword); !errors.Is(err, ErrInvalidLink) {
 		t.Errorf("BeginSetup(replaced link) = %v", err)
@@ -217,7 +252,7 @@ func TestSetupRejectsShortPassword_v5_0_0_6_2_1(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()
 
-	link, _ := env.service.IssueSetupLink(ctx, "")
+	link := env.issueLink(t)
 	_, err := env.service.BeginSetup(ctx, adminIP, tokenFromLink(t, link), "7 chars")
 	if !errors.Is(err, password.ErrTooShort) {
 		t.Errorf("BeginSetup(7 chars) = %v", err)
@@ -237,7 +272,7 @@ func TestSecondAccountCannotBeCreated(t *testing.T) {
 	env.setUp(t)
 	ctx := context.Background()
 
-	link, _ := env.service.IssueSetupLink(ctx, "")
+	link := env.issueLink(t)
 	if _, err := env.service.BeginSetup(ctx, adminIP, tokenFromLink(t, link), "a second admin passphrase"); !errors.Is(err, ErrInvalidLink) {
 		t.Errorf("BeginSetup with an admin present = %v", err)
 	}
@@ -381,11 +416,7 @@ func TestResetLoginRevokesSessionsAndCredentials(t *testing.T) {
 	sessionToken, _ := env.login(secret)
 	ctx := context.Background()
 
-	link, err := env.service.ResetLogin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tokenFromLink(t, link)
+	tokenFromLink(t, env.resetLogin(t))
 
 	if err := env.service.Authenticate(ctx, sessionToken); !errors.Is(err, ErrSessionExpired) {
 		t.Errorf("session after reset = %v", err)
@@ -404,10 +435,10 @@ func TestEventsRecordedWithoutSecrets(t *testing.T) {
 
 	env.service.Login(ctx, adminIP, "", "wrong passphrase for the admin", "000000")
 	sessionToken, _ := env.login(secret)
-	env.service.ResetLogin(ctx)
+	env.resetLogin(t)
 
 	types := env.eventTypes(t)
-	for _, want := range []EventType{EventSetupLinkIssued, EventSetupCompleted, EventLoginFailed, EventLoginSucceeded, EventLoginReset} {
+	for _, want := range []keys.EventType{keys.EventSetupLinkIssued, keys.EventSetupCompleted, keys.EventLoginFailed, keys.EventLoginSucceeded, keys.EventLoginReset} {
 		if !containsEvent(types, want) {
 			t.Errorf("no %s event in %v", want, types)
 		}
@@ -416,7 +447,7 @@ func TestEventsRecordedWithoutSecrets(t *testing.T) {
 	events, _ := env.service.RecentEvents(ctx, 100)
 	secrets := []string{adminPassword, secret, sessionToken}
 	for _, event := range events {
-		for _, value := range []string{string(event.Type), event.IP, event.Detail} {
+		for _, value := range []string{string(event.Type), event.IP} {
 			for _, sensitive := range secrets {
 				if strings.Contains(value, sensitive) {
 					t.Errorf("event %+v contains a secret", event)
@@ -429,11 +460,47 @@ func TestEventsRecordedWithoutSecrets(t *testing.T) {
 		t.Errorf("journal has %d entries, database has %d events", len(*env.journal), len(events))
 	}
 	for _, entry := range *env.journal {
+		for _, value := range entry.fields {
+			for _, sensitive := range secrets {
+				if strings.Contains(value, sensitive) {
+					t.Errorf("journal field %q contains a secret", value)
+				}
+			}
+		}
 		for _, sensitive := range secrets {
 			if strings.Contains(entry.message, sensitive) {
 				t.Errorf("journal entry %q contains a secret", entry.message)
 			}
 		}
+	}
+}
+
+// dashboard-access: Key service not answering
+func TestLoginFailsClosedWithoutTheKeyService(t *testing.T) {
+	env := newTestEnv(t)
+	env.service.keys = keys.NewClient(filepath.Join(t.TempDir(), "missing.sock"))
+	ctx := context.Background()
+
+	if _, err := env.service.Login(ctx, adminIP, "", adminPassword, "123456"); !errors.Is(err, ErrKeysUnavailable) {
+		t.Errorf("Login without the key service = %v", err)
+	}
+	var sessions int
+	env.service.db.QueryRow("SELECT count(*) FROM sessions").Scan(&sessions)
+	if sessions != 0 {
+		t.Errorf("%d sessions created without the key service", sessions)
+	}
+}
+
+// security-log: Append fails
+func TestUnstoredEventGoesToTheJournal(t *testing.T) {
+	env := newTestEnv(t)
+	env.service.keys = keys.NewClient(filepath.Join(t.TempDir(), "missing.sock"))
+
+	env.service.record(context.Background(), keys.EventRateLimited, adminIP)
+
+	entries := *env.journal
+	if len(entries) != 1 || entries[0].fields["TERO_EVENT_UNSTORED"] != "1" || entries[0].fields["TERO_EVENT"] != "rate_limited" {
+		t.Errorf("journal = %+v", entries)
 	}
 }
 
@@ -446,12 +513,12 @@ func TestRateLimitTriggerIsRecorded(t *testing.T) {
 		env.service.Login(ctx, adminIP, "", "wrong passphrase for the admin", "000000")
 	}
 
-	if !containsEvent(env.eventTypes(t), EventRateLimited) {
+	if !containsEvent(env.eventTypes(t), keys.EventRateLimited) {
 		t.Error("no rate_limited event")
 	}
 }
 
-func containsEvent(types []EventType, want EventType) bool {
+func containsEvent(types []keys.EventType, want keys.EventType) bool {
 	for _, eventType := range types {
 		if eventType == want {
 			return true
@@ -479,7 +546,7 @@ func TestLogin_v5_0_0_6_3_1_ParallelFailuresCannotPassThrottle(t *testing.T) {
 
 	checked := 0
 	for _, eventType := range env.eventTypes(t) {
-		if eventType == EventLoginFailed {
+		if eventType == keys.EventLoginFailed {
 			checked++
 		}
 	}
@@ -532,7 +599,7 @@ func TestResetLoginForgetsTrustedDevices(t *testing.T) {
 	env := newTestEnv(t)
 	_, deviceToken := env.setUpWithDevice(t)
 
-	env.service.ResetLogin(context.Background())
+	env.resetLogin(t)
 
 	if _, isTrusted, _ := env.service.trustedDevice(context.Background(), deviceToken); isTrusted {
 		t.Error("a device stays trusted after reset-login")
@@ -615,5 +682,26 @@ func TestPruneDeletesOnlyWhatCanNoLongerBeUsed(t *testing.T) {
 	}
 	if throttles := count("login_throttles"); throttles != 0 {
 		t.Errorf("%d stale throttle rows left", throttles)
+	}
+}
+
+// Review finding: a bogus setup request cleared the throttle counters, so an
+// attacker could alternate it with wrong logins and never be locked out.
+func TestBogusSetupDoesntClearTheThrottle(t *testing.T) {
+	env := newTestEnv(t)
+	env.setUp(t)
+	ctx := context.Background()
+
+	for range ipThreshold - 1 {
+		env.service.Login(ctx, adminIP, "", "wrong passphrase for the admin", "000000")
+	}
+	var limited RateLimitedError
+	if _, err := env.service.FinishSetup(ctx, adminIP, "not-a-token", "000000"); errors.As(err, &limited) {
+		t.Fatalf("bogus setup was rate limited early: %v", err)
+	}
+	env.service.Login(ctx, adminIP, "", "wrong passphrase for the admin", "000000")
+
+	if _, err := env.service.Login(ctx, adminIP, "", "wrong passphrase for the admin", "000000"); !errors.As(err, &limited) {
+		t.Errorf("login after %d failures: err = %v, want rate limited", ipThreshold, err)
 	}
 }

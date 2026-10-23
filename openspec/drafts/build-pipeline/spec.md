@@ -1,7 +1,7 @@
 # build-pipeline Specification
 
 ## Purpose
-What later slices add to the build pipeline: building from a Dockerfile when the repository has one (slice 9). Railpack builds in a throwaway rootless BuildKit are in the slice 2 change.
+What later slices add to the build pipeline: building from a Dockerfile when the repository has one (slice 10). Railpack builds in a throwaway rootless BuildKit are in the slice 2 change.
 
 ## Requirements
 

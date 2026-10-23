@@ -39,6 +39,10 @@ func checkPreflight(ctx context.Context, h host) error {
 		return err
 	}
 
+	if err := checkKeysAccount(h); err != nil {
+		return err
+	}
+
 	return checkSSHLockout(ctx, h)
 }
 

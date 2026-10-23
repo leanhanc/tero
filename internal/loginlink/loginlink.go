@@ -1,7 +1,9 @@
 // Package loginlink issues dashboard setup links for root CLI commands
-// (`sudo tero init` and `sudo tero reset-login`). The database belongs to the
-// tero user, so root never opens it: it runs this binary again as tero, which
-// does the work and prints the link.
+// (`sudo tero init`, `sudo tero reset-login` and `sudo tero assume-breach`).
+// The admin's credentials and setup links belong to the key service, which
+// answers root directly. Sessions and trusted browsers are in the dashboard's
+// database, which belongs to the tero user, so root never opens it: it runs
+// this binary again as tero to clear them.
 package loginlink
 
 import (
@@ -19,7 +21,7 @@ import (
 	"github.com/leanhanc/tero/internal/auth"
 	"github.com/leanhanc/tero/internal/config"
 	"github.com/leanhanc/tero/internal/hostfs"
-	"github.com/leanhanc/tero/internal/journal"
+	"github.com/leanhanc/tero/internal/keys"
 	"github.com/leanhanc/tero/internal/store"
 )
 
@@ -27,7 +29,7 @@ import (
 // text: only root CLI commands call it.
 const Command = "_login-link"
 
-// Action is what the child does.
+// Action is what Run does.
 type Action string
 
 const (
@@ -37,52 +39,72 @@ const (
 	Reset Action = "reset"
 )
 
-// Run performs action as the tero user and returns the setup link. The
-// caller must be root.
+// Run performs action and returns the setup link. The caller must be root.
 func Run(ctx context.Context, action Action) (string, error) {
+	cfg, err := config.Load(hostfs.Host)
+	if err != nil {
+		return "", err
+	}
+	client := keys.NewClient(keys.SocketPath)
+
+	if action == Reset {
+		if err := ClearSessions(ctx); err != nil {
+			return "", fmt.Errorf("end the dashboard's sessions: %w", err)
+		}
+		if err := client.ResetLogin(ctx); err != nil {
+			return "", fmt.Errorf("reset the login in the key service: %w", err)
+		}
+	}
+
+	token, err := client.IssueSetupLink(ctx)
+	if err != nil {
+		return "", fmt.Errorf("issue a setup link: %w", err)
+	}
+
+	return auth.SetupLink(cfg.DashboardDomain, token), nil
+}
+
+// ClearSessions ends every dashboard session and forgets trusted browsers and
+// login throttles, in a child process running as tero.
+func ClearSessions(ctx context.Context) error {
 	tero, err := user.Lookup("tero")
 	if err != nil {
-		return "", fmt.Errorf("find the tero user: %w", err)
+		return fmt.Errorf("find the tero user: %w", err)
 	}
 	uid, _ := strconv.ParseUint(tero.Uid, 10, 32)
 	gid, _ := strconv.ParseUint(tero.Gid, 10, 32)
 
 	executable, err := os.Executable()
 	if err != nil {
-		return "", err
+		return err
 	}
 
-	var stdout, stderr bytes.Buffer
-	child := exec.CommandContext(ctx, executable, Command, string(action))
+	var stderr bytes.Buffer
+	child := exec.CommandContext(ctx, executable, Command)
 	child.Dir = "/"
 	child.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin"}
-	child.Stdout, child.Stderr = &stdout, &stderr
+	child.Stderr = &stderr
 	child.SysProcAttr = &syscall.SysProcAttr{
 		Credential: &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid), Groups: []uint32{}},
 	}
 
 	if err := child.Run(); err != nil {
-		return "", fmt.Errorf("%w\n%s", err, strings.TrimSpace(stderr.String()))
+		return fmt.Errorf("%w\n%s", err, strings.TrimSpace(stderr.String()))
 	}
 
-	return strings.TrimSpace(stdout.String()), nil
+	return nil
 }
 
-// RunChild is the child side: it runs as tero, performs action and prints the
-// link on stdout.
+// RunChild is the child side: it runs as tero and clears the dashboard's
+// sessions, trusted browsers and throttles.
 func RunChild(ctx context.Context, args []string) error {
-	if len(args) != 1 {
-		return errors.New("usage: tero " + Command + " issue|reset")
+	if len(args) != 0 {
+		return errors.New("usage: tero " + Command)
 	}
 
 	// Matches the service's UMask, so the database's journal files are
 	// private whichever process creates them.
 	syscall.Umask(0o077)
-
-	cfg, err := config.Load(hostfs.Host)
-	if err != nil {
-		return err
-	}
 
 	db, err := store.Open(ctx, store.Path)
 	if err != nil {
@@ -90,21 +112,5 @@ func RunChild(ctx context.Context, args []string) error {
 	}
 	defer db.Close()
 
-	service := auth.New(db, auth.Options{Domain: cfg.DashboardDomain, Journal: journal.Send})
-
-	var link string
-	switch Action(args[0]) {
-	case Issue:
-		link, err = service.IssueSetupLink(ctx, "")
-	case Reset:
-		link, err = service.ResetLogin(ctx)
-	default:
-		return fmt.Errorf("unknown action %q", args[0])
-	}
-	if err != nil {
-		return err
-	}
-
-	fmt.Println(link)
-	return nil
+	return auth.New(db, auth.Options{}).ResetLogin(ctx)
 }

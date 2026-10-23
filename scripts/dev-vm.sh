@@ -48,9 +48,10 @@ install_tero() {
 	limactl shell --workdir / "$instance" sudo install -m 0755 /tmp/tero /usr/local/bin/tero
 }
 
-# The agent runs the same binary as the service, so both restart.
+# The agent and the key service run the same binary as the service, so all
+# three restart.
 restart_tero() {
-	limactl shell --workdir / "$instance" sudo systemctl restart tero
+	limactl shell --workdir / "$instance" sudo systemctl restart tero-keys.service tero
 	limactl shell --workdir / "$instance" sudo systemctl --user --machine=tero@ restart tero-agent.service
 }
 
@@ -64,7 +65,7 @@ print_setup_link_if_needed() {
 	fi
 
 	local link
-	link="$(limactl shell --workdir / "$instance" sudo -u tero /usr/local/bin/tero _login-link issue)"
+	link="$(limactl shell --workdir / "$instance" sudo /usr/local/bin/tero reset-login | tail -n 1 | tr -d ' ')"
 	echo
 	echo "The dashboard login isn't set up yet. Open this link to set it up:"
 	echo
@@ -72,6 +73,10 @@ print_setup_link_if_needed() {
 }
 
 update_tero() {
+	if ! limactl shell --workdir / "$instance" test -f /etc/systemd/system/tero-keys.service; then
+		echo "$instance was set up before the key service existed. Run scripts/dev-vm.sh to recreate it." >&2
+		exit 1
+	fi
 	step "Installing the build in $instance" install_tero
 	step "Restarting Tero" restart_tero
 	echo "Updated. Open https://$domain"

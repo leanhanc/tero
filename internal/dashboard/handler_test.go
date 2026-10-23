@@ -15,6 +15,7 @@ import (
 
 	"github.com/leanhanc/tero/internal/apps"
 	"github.com/leanhanc/tero/internal/auth"
+	"github.com/leanhanc/tero/internal/keys"
 	"github.com/leanhanc/tero/internal/password"
 	"github.com/leanhanc/tero/internal/store"
 	"github.com/leanhanc/tero/internal/totp"
@@ -37,6 +38,8 @@ type testDashboard struct {
 	refusals *[]string
 	db       *sql.DB
 	logDir   string
+	// keysRoot is root's client of the in-process key service.
+	keysRoot *keys.Client
 }
 
 func newTestDashboard(t *testing.T) testDashboard {
@@ -47,10 +50,18 @@ func newTestDashboard(t *testing.T) testDashboard {
 	}
 	t.Cleanup(func() { db.Close() })
 
+	keysDB, err := store.OpenWith(context.Background(), filepath.Join(t.TempDir(), "keys.db"), keys.Migrations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { keysDB.Close() })
+
 	now := time.Unix(1_800_000_000, 0)
 	secret := ""
 	refusals := &[]string{}
+	keyService := keys.NewService(keysDB, map[int][]byte{1: make([]byte, 32)}, keys.Options{Now: func() time.Time { return now }})
 	service := auth.New(db, auth.Options{
+		Keys:      keys.NewLocalClient(keyService, keys.CallerDashboard),
 		Domain:    "dash.example.com",
 		Passwords: password.Policy{Breaches: noBreaches{}},
 		Now:       func() time.Time { return now },
@@ -66,7 +77,8 @@ func newTestDashboard(t *testing.T) testDashboard {
 	appService := apps.NewService(db, "203.0.113.10", func() time.Time { return now })
 	handler := NewHandler(service, appService, "dash.example.com", logDir)
 
-	return testDashboard{handler: handler, service: service, db: db, logDir: logDir, now: &now, secret: &secret, refusals: refusals}
+	return testDashboard{handler: handler, service: service, db: db, logDir: logDir, now: &now, secret: &secret, refusals: refusals,
+		keysRoot: keys.NewLocalClient(keyService, keys.CallerRoot)}
 }
 
 func (d testDashboard) post(path string, body any, cookies ...*http.Cookie) *httptest.ResponseRecorder {
@@ -99,11 +111,10 @@ func (d testDashboard) get(path string, cookies ...*http.Cookie) *httptest.Respo
 // setUp completes setup through the API and returns the session cookie.
 func (d testDashboard) setUp(t *testing.T) *http.Cookie {
 	t.Helper()
-	link, err := d.service.IssueSetupLink(context.Background(), "")
+	token, err := d.keysRoot.IssueSetupLink(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, token, _ := strings.Cut(link, "#")
 
 	begin := d.post("/api/setup/begin", map[string]string{"token": token, "password": adminPassword})
 	if begin.Code != http.StatusOK {
@@ -130,8 +141,7 @@ func (d testDashboard) setUp(t *testing.T) *http.Cookie {
 
 func TestCookieAttributes(t *testing.T) {
 	d := newTestDashboard(t)
-	link, _ := d.service.IssueSetupLink(context.Background(), "")
-	_, token, _ := strings.Cut(link, "#")
+	token, _ := d.keysRoot.IssueSetupLink(context.Background())
 	begin := d.post("/api/setup/begin", map[string]string{"token": token, "password": adminPassword})
 	var enrolment auth.Enrolment
 	json.Unmarshal(begin.Body.Bytes(), &enrolment)
@@ -241,8 +251,7 @@ func TestAppPagesServeIndexAndAPIStaysJSON(t *testing.T) {
 
 func TestSetupReturnsScannableQRCode(t *testing.T) {
 	d := newTestDashboard(t)
-	link, _ := d.service.IssueSetupLink(context.Background(), "")
-	_, token, _ := strings.Cut(link, "#")
+	token, _ := d.keysRoot.IssueSetupLink(context.Background())
 
 	response := d.post("/api/setup/begin", map[string]string{"token": token, "password": adminPassword})
 	var body struct{ Secret, URI, QRCode string }

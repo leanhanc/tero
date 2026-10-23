@@ -1,7 +1,7 @@
 # deployments Specification
 
 ## Purpose
-What later slices add to deploys: deploys on push (slice 4), no dropped requests during a switch, history and one-click rollback (slice 6). Manual deploys, deploy states and the start check are in the slice 2 change.
+What later slices add to deploys: deploys on push (slice 5), no dropped requests during a switch, history and one-click rollback (slice 7). Manual deploys, deploy states and the start check are in the slice 2 change.
 
 ## Requirements
 

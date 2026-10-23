@@ -275,6 +275,8 @@ func (h *Handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		auth.ErrInvalidCredentials: http.StatusUnauthorized,
 		auth.ErrInvalidCode:        http.StatusUnprocessableEntity,
 		auth.ErrSessionExpired:     http.StatusUnauthorized,
+		auth.ErrKeysUnavailable:    http.StatusServiceUnavailable,
+		auth.ErrLoginLocked:        http.StatusTooManyRequests,
 		password.ErrTooShort:       http.StatusUnprocessableEntity,
 		password.ErrTooLong:        http.StatusUnprocessableEntity,
 		password.ErrBreached:       http.StatusUnprocessableEntity,

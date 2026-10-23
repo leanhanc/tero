@@ -20,9 +20,9 @@ The [sections before the matrix](#documentation-asvs-asks-for) are the documenta
 
 ## Summary
 
-253 requirements: 140 Met, 3 Gap, 6 Planned, 1 Deviation, 3 Open, 7 Later, 93 N/A.
+253 requirements: 146 Met, 3 Gap, 6 Planned, 1 Deviation, 3 Open, 5 Later, 89 N/A.
 
-Planned for slice 3, Account security:
+Planned for slice 4, Account security:
 
 | ID | What's missing |
 |---|---|
@@ -75,7 +75,7 @@ ASVS 6.1.2 and V6.2.
 - Every new password is checked against a bundled list of the 3,000 most common passwords of at least 8 characters, and against the Have I Been Pwned range API. Only the first 5 hex characters of the SHA-1 hash are sent, with `Add-Padding: true`. When the API can't be reached, the bundled list alone decides and a `breach_check_skipped` event is recorded.
 - Passwords are compared exactly as typed: nothing is trimmed or case-folded.
 - Passwords never expire.
-- Context-specific words aren't checked yet; that is planned for slice 3 (6.1.2 and 6.2.11).
+- Context-specific words aren't checked yet; that is planned for slice 4 (6.1.2 and 6.2.11).
 
 ### Sessions
 
@@ -115,15 +115,16 @@ ASVS 11.1.2. Every key and algorithm Tero uses:
 
 | What | Algorithm | Where it lives | Lifecycle |
 |---|---|---|---|
-| Session, device and setup-link tokens | 256 bits from `crypto/rand` | SHA-256 hash in SQLite | Deleted on expiry, logout or `reset-login` |
-| Admin password | Argon2id (RFC 9106: 64 MiB, t=3, p=4, 16-byte salt) | PHC string in SQLite | Replaced by `reset-login` |
-| TOTP secret | 160 bits from `crypto/rand`, HMAC-SHA1, 6 digits, 30 s (RFC 6238) | Plaintext in SQLite (file mode 0600, owned by `tero`) | Replaced by `reset-login` |
+| Session, device and setup-link tokens | 256 bits from `crypto/rand` | SHA-256 hash in SQLite (setup links in `keys.db`, sessions and devices in `tero.db`) | Deleted on expiry, logout or `reset-login` |
+| Admin password | Argon2id (RFC 9106: 64 MiB, t=3, p=4, 16-byte salt) | PHC string in `/var/lib/tero-keys/keys.db` | Replaced by `reset-login` |
+| Master key | 256 bits from `crypto/rand` | `/etc/tero/keys/<version>`, sealed by `systemd-creds` (TPM2 when the server has one, otherwise the host key in `/var/lib/systemd`); only `tero-keys.service` receives it, in memory | Created by `sudo tero init`; replaced by `sudo tero rotate-key` and `sudo tero assume-breach`, which reseal every value and then delete the old version; an unreadable key is moved to `/etc/tero/keys-unreadable` by `reset-login` |
+| TOTP secret | 160 bits from `crypto/rand`, HMAC-SHA1, 6 digits, 30 s (RFC 6238) | AES-256-GCM under the master key in `/var/lib/tero-keys/keys.db` (mode 0600, owned by `tero-keys`); the additional data names the table, column, row and key version | Replaced by `reset-login` |
 | TLS certificate and key | Chosen by Caddy (ECDSA P-256), TLS 1.2 and 1.3 | `/var/lib/tero/caddy` | Obtained and renewed by Caddy over ACME |
 | Breach check | SHA-1 prefix, as the Have I Been Pwned API defines | Not stored | — |
 
 SHA-1 appears only where a protocol fixes it: inside HMAC for TOTP, which is what authenticator apps support, and in the breach-check prefix, which is a lookup key rather than a security function. Everything Tero chooses itself uses SHA-256 or stronger.
 
-Encrypting stored secrets, including the TOTP secret, arrives with secrets management in slice 5 (ADR 0001, section 5).
+The `tero-keys` service holds the master key and is the only process that reads the password hash and TOTP secret: the dashboard sends the password and code over a Unix socket and gets back yes or no. App secrets are encrypted under the same key with slice 6 (ADR 0001, section 5).
 
 ### Sensitive data
 
@@ -132,7 +133,7 @@ ASVS 14.1.1 and 14.1.2.
 | Data | Protection |
 |---|---|
 | Admin password | Never stored or logged; only its Argon2id hash is kept |
-| TOTP secret | Shown once during setup; never returned again or logged; database readable only by `tero` |
+| TOTP secret | Shown once during setup; never returned again or logged; encrypted in the database of `tero-keys`, which `tero` can't read |
 | Session, device and setup tokens | Only in `HttpOnly` cookies or the URL fragment; only hashes stored; never logged |
 | TLS private key | Readable only by `tero` |
 | Source IPs in security events | Kept for the admin; kept for one year, then deleted |
@@ -164,13 +165,13 @@ ASVS 16.1.1.
 
 | Log | Contents | Where | Retention |
 |---|---|---|---|
-| Security events | Time (UTC), type, source IP | `security_events` table in SQLite, readable through `GET /api/events` | One year |
+| Security events | Time (UTC), type, source (`tero-keys`, `tero` or `root`), source IP, count | `security_events` table in `/var/lib/tero-keys/keys.db`. `tero-keys` writes login events itself; the dashboard may only add `rate_limited` and `breach_check_skipped`, at most 60 a minute, and the excess becomes one `events_dropped` event with a count. Readable through `GET /api/events` | One year, at most 100,000 rows; a flood never pushes out resets, rotations, lockouts or successful logins |
 | Journal copy of each event | Same, with `TERO_EVENT` and `TERO_SOURCE_IP` fields; failures, rate limits and resets at warning priority | systemd journal | journald settings |
 | Refused requests | Time, reason (`no_session`, `cross_site`, `not_json`, `malformed_body`), path (first 256 bytes) and source IP, at warning priority with `TERO_EVENT=request_refused`. Anyone can cause these, so they stay out of the security events table | systemd journal | journald settings |
 | Service errors | Unexpected errors, without request bodies | systemd journal (stdout of `tero.service`) | journald settings |
 | Caddy | TLS and certificate errors | systemd journal | journald settings |
 
-Events never contain a password, TOTP code, TOTP secret or token. The journal is written by journald, so the `tero` user can't change past entries.
+Events never contain a password, TOTP code, TOTP secret or token. The journal is written by journald, so the `tero` user can't change past entries, and journald adds the trusted `_SYSTEMD_UNIT` field that tells the key service's entries apart from the dashboard's. If the key service can't be reached, the dashboard writes the event to the journal with `TERO_EVENT_UNSTORED=1`.
 
 ## Matrix
 
@@ -282,11 +283,11 @@ Tero accepts no file uploads and serves no user-supplied files.
 | ID | L | Requirement | Status | How | Test |
 |---|---|---|---|---|---|
 | 6.1.1 | 1 | Brute-force controls documented | Met | [Brute-force protection](#brute-force-protection) | — |
-| 6.1.2 | 2 | Context-specific words documented | Planned | No list yet (slice 3) | — |
+| 6.1.2 | 2 | Context-specific words documented | Planned | No list yet (slice 4) | — |
 | 6.1.3 | 2 | All login paths documented | Met | [Login paths](#login-paths) | — |
 | 6.2.1 | 1 | At least 8 characters | Met | Minimum is 8, as NIST allows for a password that is always paired with TOTP; see [Passwords](#passwords) | `TestPolicy_v5_0_0_6_2_1_RejectsSevenCharacters`, e2e `Password too short (v5.0.0-6.2.1)` |
-| 6.2.2 | 1 | Users can change their password | Planned | Only `sudo tero reset-login`, which also resets TOTP (slice 3) | — |
-| 6.2.3 | 1 | Password change needs current and new password | Planned | Follows 6.2.2 (slice 3) | — |
+| 6.2.2 | 1 | Users can change their password | Planned | Only `sudo tero reset-login`, which also resets TOTP (slice 4) | — |
+| 6.2.3 | 1 | Password change needs current and new password | Planned | Follows 6.2.2 (slice 4) | — |
 | 6.2.4 | 1 | Checked against the top 3,000 passwords | Met | Bundled list | `TestBundledList_v5_0_0_6_2_4_CoversTopThreeThousandPolicyPasswords` |
 | 6.2.5 | 1 | No composition rules | Met | Only length and breach checks | `TestPolicy_v5_0_0_6_2_5_HasNoCompositionRules` |
 | 6.2.6 | 1 | Password fields masked | Met | `type="password"` on setup and login | — |
@@ -294,7 +295,7 @@ Tero accepts no file uploads and serves no user-supplied files.
 | 6.2.8 | 1 | Password checked exactly as typed | Met | No trimming or case-folding | — |
 | 6.2.9 | 2 | 64-character passwords allowed | Met | Up to 1024 | `TestPolicy_v5_0_0_6_2_9_AcceptsSixtyFourLowercaseLetters`, e2e `Long password accepted (v5.0.0-6.2.9)` |
 | 6.2.10 | 2 | No forced rotation | Met | Passwords never expire | — |
-| 6.2.11 | 2 | Context-specific words refused | Planned | Follows 6.1.2 (slice 3) | — |
+| 6.2.11 | 2 | Context-specific words refused | Planned | Follows 6.1.2 (slice 4) | — |
 | 6.2.12 | 2 | Breached passwords refused | Met | Bundled list plus Have I Been Pwned | `TestPolicy_v5_0_0_6_2_12_RejectsPasswordFromBreachAPI`, `TestPwnedPasswords_v5_0_0_6_2_12_SendsOnlyHashPrefix`, e2e `Breached password (v5.0.0-6.2.12)` |
 | 6.3.1 | 1 | Brute-force controls in place | Met | [Brute-force protection](#brute-force-protection) | `TestLogin_v5_0_0_6_3_1_*`, e2e `Repeated failures from one IP (v5.0.0-6.3.1)` |
 | 6.3.2 | 1 | No default accounts | Met | No account exists until setup | `TestNoLoginBeforeSetup` |
@@ -334,9 +335,9 @@ Tero accepts no file uploads and serves no user-supplied files.
 | 7.4.2 | 1 | Sessions end when the account is disabled | Met | `reset-login` deletes every session | `TestResetLoginRevokesSessionsAndCredentials` |
 | 7.4.3 | 2 | Option to end sessions after a factor change | Met | Factors change only through `reset-login`, which ends every session | `TestResetLoginRevokesSessionsAndCredentials` |
 | 7.4.4 | 2 | Visible logout | Met | Log out button on the only signed-in page | — |
-| 7.4.5 | 2 | Admin can end sessions | Planned | Only `reset-login`, which also wipes the credentials (slice 3) | — |
+| 7.4.5 | 2 | Admin can end sessions | Planned | Only `reset-login`, which also wipes the credentials (slice 4) | — |
 | 7.5.1 | 2 | Re-authentication before changing factors | N/A | The dashboard can't change a factor yet. Applies once 6.2.2 is met | — |
-| 7.5.2 | 2 | View and end active sessions | Planned | No session list (slice 3) | — |
+| 7.5.2 | 2 | View and end active sessions | Planned | No session list (slice 4) | — |
 | 7.6.1 | 2 | RP and IdP session lifetimes | N/A | No federation | — |
 | 7.6.2 | 2 | Sessions need user action | N/A | No federation | — |
 
@@ -368,13 +369,13 @@ Tero accepts no self-contained tokens such as JWTs: sessions are random referenc
 
 ### V10 OAuth and OIDC
 
-Tero isn't an OAuth client, resource server, authorization server or OpenID provider for login. The GitHub App connection in slice 4 makes Tero a GitHub App, so the client rows are checked again then.
+Tero isn't an OAuth client, resource server, authorization server or OpenID provider for login. The GitHub App connection in slice 5 makes Tero a GitHub App, so the client rows are checked again then.
 
 | ID | L | Requirement | Status | How | Test |
 |---|---|---|---|---|---|
-| 10.1.1 | 2 | Tokens only where needed | Later | Slice 4: installation tokens | — |
-| 10.1.2 | 2 | Values tied to the initiating session | Later | Slice 4: GitHub App manifest and install callbacks | — |
-| 10.2.1 | 2 | CSRF protection for the code flow | Later | Slice 4: GitHub App manifest flow | — |
+| 10.1.1 | 2 | Tokens only where needed | Later | Slice 5: installation tokens | — |
+| 10.1.2 | 2 | Values tied to the initiating session | Later | Slice 5: GitHub App manifest and install callbacks | — |
+| 10.2.1 | 2 | CSRF protection for the code flow | Later | Slice 5: GitHub App manifest flow | — |
 | 10.2.2 | 2 | Mix-up defense | N/A | Only GitHub | — |
 | 10.3.1 | 2 | Audience checked | N/A | Not a resource server | — |
 | 10.3.2 | 2 | Delegated claims enforced | N/A | Not a resource server | — |
@@ -406,14 +407,14 @@ Tero isn't an OAuth client, resource server, authorization server or OpenID prov
 
 | ID | L | Requirement | Status | How | Test |
 |---|---|---|---|---|---|
-| 11.1.1 | 2 | Key management policy | Later | Lifecycles are in [Cryptography](#cryptography); rotation, recovery and destruction of stored-secret keys arrive with slice 5 (ADR 0001) | — |
+| 11.1.1 | 2 | Key management policy | Met | Lifecycles, including rotation and destruction of the master key, are in [Cryptography](#cryptography) | `TestRotateLeavesOnlyTheNewKey`, `TestFailedRotationKeepsTheOldKey` |
 | 11.1.2 | 2 | Cryptographic inventory | Met | [Cryptography](#cryptography) | — |
 | 11.2.1 | 2 | Validated implementations | Met | Go standard library, `golang.org/x/crypto/argon2`, Caddy | — |
 | 11.2.2 | 2 | Crypto agility | Met | Argon2id parameters are stored in each hash; TLS settings come from Caddy | — |
 | 11.2.3 | 2 | 128-bit security | Met | 256-bit tokens, 160-bit HMAC key, Caddy's TLS defaults | — |
-| 11.3.1 | 1 | No ECB or weak padding | N/A | Tero encrypts nothing itself yet; slice 5 uses AES-256-GCM | — |
-| 11.3.2 | 1 | Approved ciphers such as AES-GCM | N/A | As 11.3.1 | — |
-| 11.3.3 | 2 | Authenticated encryption | N/A | As 11.3.1 | — |
+| 11.3.1 | 1 | No ECB or weak padding | Met | Only AES-256-GCM | `TestSecretSealedAtRest` |
+| 11.3.2 | 1 | Approved ciphers such as AES-GCM | Met | AES-256-GCM from the Go standard library, with a random 96-bit nonce per value | `TestSecretSealedAtRest` |
+| 11.3.3 | 2 | Authenticated encryption | Met | GCM, with the table, column, row and key version as additional data so a value can't be moved to another row | `TestSealedValueOnlyOpensInItsRow` |
 | 11.4.1 | 1 | Approved hash functions | Met | SHA-256 for everything Tero chooses; SHA-1 only where TOTP and the breach API require it, as explained in [Cryptography](#cryptography) | — |
 | 11.4.2 | 2 | Passwords stored with a slow KDF | Met | Argon2id, RFC 9106 parameters | `TestHashIsArgon2idAndVerifies`, e2e `Stored form` |
 | 11.4.3 | 2 | Collision-resistant hashes | Met | SHA-256 for token hashes | — |
@@ -440,13 +441,13 @@ Tero isn't an OAuth client, resource server, authorization server or OpenID prov
 | ID | L | Requirement | Status | How | Test |
 |---|---|---|---|---|---|
 | 13.1.1 | 2 | Communication needs documented | Met | [Connections](#connections) | — |
-| 13.2.1 | 2 | Backend components authenticated | N/A | No networked backend components; SQLite is a local file | — |
+| 13.2.1 | 2 | Backend components authenticated | Met | The only backend component is `tero-keys`, on a Unix socket only `tero` and root can open. It identifies each caller by the uid the kernel records and the caller's exact systemd unit, never by anything the caller sends | `TestOnlyTheDashboardsExactCgroupCounts`, `TestCallersLimitedToTheirVerbs` |
 | 13.2.2 | 2 | Least privilege for components | Met | The service runs as `tero` with only `CAP_NET_BIND_SERVICE`; the database is mode 0600 | e2e `Service process identity`, `TestOpenCreatesPrivateDatabaseWithSchema` |
 | 13.2.3 | 2 | No default credentials | Met | None exist | — |
 | 13.2.4 | 2 | Outbound allowlist | Gap | The firewall filters inbound only | — |
 | 13.2.5 | 2 | Server allowlist for requests | Gap | As 13.2.4 | — |
-| 13.3.1 | 2 | Secrets management solution | Later | Slice 5: a systemd-sealed key and envelope encryption (ADR 0001). Today the TOTP secret and TLS key are files only `tero` can read | — |
-| 13.3.2 | 2 | Least privilege for secrets | Met | Only the `tero` user can read the database and Caddy storage | `TestOpenCreatesPrivateDatabaseWithSchema` |
+| 13.3.1 | 2 | Secrets management solution | Met | The `tero-keys` service holds the master key sealed by `systemd-creds` and keeps the login secrets encrypted; app secrets join it in slice 6. The TLS key stays in Caddy's storage, readable only by `tero` | `TestSecretSealedAtRest`, e2e `Stored form` |
+| 13.3.2 | 2 | Least privilege for secrets | Met | Only `tero-keys` can read the master key and the login secrets; the dashboard can only ask yes-or-no questions, by verb, and is identified by its exact systemd unit. Only `tero` can read its database and Caddy storage | `TestCallersLimitedToTheirVerbs`, `TestOnlyTheDashboardsExactCgroupCounts`, `TestDatabaseHoldsNoCredentials` |
 | 13.4.1 | 1 | No source control metadata | Met | One binary with the built web app embedded | — |
 | 13.4.2 | 2 | Debug modes off | Met | Caddy's admin API is disabled; no debug endpoints | — |
 | 13.4.3 | 2 | No directory listings | Met | Assets are served by exact name; any other path gets the app page | — |
@@ -500,7 +501,7 @@ Tero isn't an OAuth client, resource server, authorization server or OpenID prov
 | 16.3.3 | 2 | Bypass attempts logged | Met | Rate limiting is recorded as an event; cross-site requests, non-JSON requests and malformed bodies are written to the journal | `TestRefusedRequests_v5_0_0_16_3_3_BypassAttemptsAreJournaled` |
 | 16.3.4 | 2 | Unexpected errors logged | Met | Logged to the journal; Caddy logs TLS errors | — |
 | 16.4.1 | 2 | No log injection | Met | Structured journal fields; the IP comes from TCP; event types are fixed | — |
-| 16.4.2 | 2 | Logs protected | Met | journald owns the journal, so `tero` can't edit past entries | — |
+| 16.4.2 | 2 | Logs protected | Met | Security events are stored by `tero-keys`, so `tero` can only append the two types it reports, never edit or delete; journald owns the journal | `TestCallersCantAppendOtherEvents`, `TestFloodIsCappedAndCounted` |
 | 16.4.3 | 2 | Logs sent to a separate system | Gap | Logs stay on the server | — |
 | 16.5.1 | 2 | Generic error messages | Met | Unknown errors become a generic `500` | — |
 | 16.5.2 | 2 | Works when external resources fail | Met | If the breach API is down, the bundled list decides and an event is recorded | `TestPolicyFallsBackToBundledListWhenAPIFails` |
@@ -529,5 +530,5 @@ ADR 0001 adopts a few Level 3 requirements because they are cheap.
 | 6.3.5 | Tell the user about suspicious logins | Later | Failed logins, rate limits and resets are recorded in the database and the journal, but the dashboard doesn't show them until it has more to show; v1 has no email | `TestEventsRecordedWithoutSecrets`, e2e `Events recorded / No secrets in events (v5.0.0-6.3.4, v5.0.0-6.3.5, v5.0.0-6.3.7)` |
 | 6.3.7 | Tell the user after a credential change | Later | The reset event is recorded, but not shown at the next login until the dashboard lists events again | e2e `Recovery visible after the fact` checks the event is recorded |
 | 6.3.3 | A phishing-resistant factor | Later | Passkeys, right after v1 | — |
-| 13.3.3 | Keys in an isolated module | Later | Slice 5: the key is sealed with `systemd-creds` | — |
-| 13.3.4 | Secret rotation | Later | Slice 5: `sudo tero rotate-key` | — |
+| 13.3.3 | Keys in an isolated module | Met on servers with a TPM2 | The key is sealed with `systemd-creds` to the TPM2 when there is one and is only ever in the memory of `tero-keys`. Without a TPM2, the seal uses a host key that root can read; `assume-breach` says so | — |
+| 13.3.4 | Secret rotation | Met | `sudo tero rotate-key` reseals every value under a new key, then deletes the old one | `TestRotationResealsTheAdmin`, `TestRotateLeavesOnlyTheNewKey` |

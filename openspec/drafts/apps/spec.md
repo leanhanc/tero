@@ -1,12 +1,12 @@
 # apps Specification
 
 ## Purpose
-What later slices add to apps: workers (slice 9), which receive no traffic, environment variables (slice 5), and deleting an app (slice 9). Web apps from public GitHub URLs are in the slice 2 change.
+What later slices add to apps: workers (slice 10), which receive no traffic, environment variables (slice 6), and deleting an app (slice 10). Web apps from public GitHub URLs are in the slice 2 change.
 
 ## Requirements
 
 ### Requirement: Create an app from a repository
-The admin SHALL be able to create an app from a repository connected through the GitHub App (slice 4) as well as from a public GitHub URL, and SHALL choose the app type: web or worker.
+The admin SHALL be able to create an app from a repository connected through the GitHub App (slice 5) as well as from a public GitHub URL, and SHALL choose the app type: web or worker.
 
 #### Scenario: Create from a connected repository
 - **WHEN** the admin creates an app from a private repository the GitHub App can read

@@ -68,6 +68,13 @@ func TestSlice1(t *testing.T) {
 	t.Run("server-init: Agent running after init / process-isolation: Agent has no listener", testAgentRunning)
 	t.Run("process-isolation: Agent unit not writable by tero", testAgentUnitOwnership)
 	t.Run("process-isolation: Service can't change the agent's setup", testServiceFencedFromAgent)
+	t.Run("server-init: Key service running after init", testKeyServiceRunning)
+	t.Run("key-service: Process identity and sandbox / No network / Socket permissions", testKeyServiceIdentity)
+	t.Run("server-init: tero-keys can't log in", testKeysUserNoLogin)
+	t.Run("key-service: Key on disk is sealed", testKeyOnDiskIsSealed)
+	t.Run("key-service: tero can't read the key / process-isolation: Dashboard can't read the key service", testTeroCantReadKeys)
+	t.Run("key-service: Other process running as tero / process-isolation: Other tero processes refused", testOnlyTheDashboardIsAnswered)
+	t.Run("process-isolation: Dashboard can't leave its cgroup", testDashboardStaysInItsCgroup)
 	t.Run("server-init: Public IP recorded for app addresses", testPublicIPRecorded)
 	t.Run("process-isolation: Built-in proxy binds privileged ports", testProxyPorts)
 	t.Run("dashboard-access: Plain HTTP request", testPlainHTTP)
@@ -76,6 +83,9 @@ func TestSlice1(t *testing.T) {
 	t.Run("server-init: Init on an already initialized server", testSecondInit)
 	t.Run("dashboard-access", testDashboardAccess)
 	t.Run("deploys", testDeploys)
+	t.Run("key-service: Rotation / Apps keep serving during rotation", testRotateKey)
+	t.Run("key-service: Key can't be opened / dashboard-access: Master key lost", testKeyCantBeOpened)
+	t.Run("breach-response: Not confirmed / Scripted run / Confirmed run", testAssumeBreach)
 	t.Run("server-init: Lynis score in end-to-end tests", testLynis)
 	t.Run("server-init: Service survives reboot", testReboot)
 }
@@ -543,6 +553,8 @@ func testReboot(t *testing.T) {
 
 	waitUntil(t, 2*time.Minute, func() bool { return run(t, "systemctl is-active tero").exitCode == 0 })
 	testServiceIdentity(t)
+	// server-init: Key service survives reboot
+	assertContains(t, must(t, "sudo "+keysStatus), `"keyVersions":[`)
 	waitUntil(t, time.Minute, func() bool { return run(t, agentSystemctl+" is-active tero-agent").exitCode == 0 })
 	// apps: Reboot
 	waitUntil(t, 2*time.Minute, func() bool {

@@ -8,11 +8,13 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/leanhanc/tero/internal/config"
 	"github.com/leanhanc/tero/internal/hostfs"
 	"github.com/leanhanc/tero/internal/sysexec"
 )
@@ -480,5 +482,109 @@ func TestUnitsKeepTheFirewallAndBoundMemory(t *testing.T) {
 		if !strings.Contains(string(serviceUnit), want) {
 			t.Errorf("tero.service is missing %s", want)
 		}
+	}
+}
+
+// server-init: Key service running after init. The dashboard only wants the
+// key service, so restarting or failing it never stops the dashboard and
+// apps (key-service: Restart while the dashboard waits).
+func TestDashboardOnlyWantsTheKeyService(t *testing.T) {
+	serviceUnit, _ := embedded.ReadFile("files/tero.service")
+	unit := string(serviceUnit)
+
+	if strings.Contains(unit, "Requires=tero-keys") || strings.Contains(unit, "BindsTo=tero-keys") || strings.Contains(unit, "PartOf=tero-keys") {
+		t.Error("tero.service is stopped or restarted with the key service")
+	}
+	for _, want := range []string{"Wants=network-online.target tero-keys.socket", "After=network-online.target tero-firewall.service tero-keys.socket", "LogRateLimitBurst="} {
+		if !strings.Contains(unit, want) {
+			t.Errorf("tero.service is missing %q", want)
+		}
+	}
+}
+
+// key-service: Process identity and sandbox, No network, Socket permissions
+func TestKeyServiceUnitsAreLockedDown(t *testing.T) {
+	serviceUnit, _ := embedded.ReadFile("files/tero-keys.service")
+	socketUnit, _ := embedded.ReadFile("files/tero-keys.socket")
+
+	for _, want := range []string{
+		"User=tero-keys", "ExecStart=/usr/local/bin/tero keys", "LoadCredentialEncrypted=kek:/etc/tero/keys/",
+		"CapabilityBoundingSet=\n", "NoNewPrivileges=yes", "PrivateNetwork=yes", "RestrictAddressFamilies=AF_UNIX\n",
+		"ProtectSystem=strict", "ProtectHome=yes", "MemoryDenyWriteExecute=yes", "SystemCallFilter=@system-service",
+		"MemoryMax=", "LimitCORE=0",
+	} {
+		if !strings.Contains(string(serviceUnit), want) {
+			t.Errorf("tero-keys.service is missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"\nProtectProc=", "\nPrivateUsers="} {
+		if strings.Contains(string(serviceUnit), forbidden) {
+			t.Errorf("tero-keys.service sets %q, which hides its callers", forbidden)
+		}
+	}
+	for _, want := range []string{"ListenStream=/run/tero-keys/keys.sock", "SocketUser=tero-keys", "SocketGroup=tero\n", "SocketMode=0660"} {
+		if !strings.Contains(string(socketUnit), want) {
+			t.Errorf("tero-keys.socket is missing %q", want)
+		}
+	}
+}
+
+// server-init: tero-keys can't log in
+func TestKeysAccountCheckRefusesForeignAccounts(t *testing.T) {
+	cases := map[string]string{
+		"regular user":      "tero-keys:x:1006:1006::/home/tero-keys:/bin/bash\n",
+		"in the tero group": "tero-keys:x:997:997::/var/lib/tero-keys:/usr/sbin/nologin\n",
+	}
+	for name, passwdLine := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newGuardHost(t)
+			writeHostFile(t, h.files, "/etc/passwd", "root:x:0:0::/root:/bin/bash\n"+passwdLine)
+			writeHostFile(t, h.files, "/etc/group", "tero:x:998:tero-keys\ntero-keys:x:997:\n")
+
+			if err := checkKeysAccount(h); err == nil {
+				t.Fatal("init would take over an existing tero-keys account")
+			}
+		})
+	}
+}
+
+func TestKeysAccountCheckAcceptsOneInitCreated(t *testing.T) {
+	h := newGuardHost(t)
+	writeHostFile(t, h.files, "/etc/passwd", "tero-keys:x:997:997::/var/lib/tero-keys:/usr/sbin/nologin\n")
+	writeHostFile(t, h.files, "/etc/group", "tero:x:998:\ntero-keys:x:997:\n")
+
+	if err := checkKeysAccount(h); err != nil {
+		t.Fatalf("checkKeysAccount() = %v", err)
+	}
+}
+
+func TestCreateKeysUserHasNoShellOrPassword(t *testing.T) {
+	h := newGuardHost(t)
+
+	if err := createKeysUser(context.Background(), h); err != nil {
+		t.Fatal(err)
+	}
+	commands := strings.Join(h.run.(*sysexec.Recorder).Commands, "\n")
+	for _, want := range []string{
+		"useradd --system --user-group --no-create-home --home-dir /var/lib/tero-keys --shell /usr/sbin/nologin tero-keys",
+		"usermod --lock tero-keys",
+	} {
+		if !strings.Contains(commands, want) {
+			t.Errorf("missing %q in:\n%s", want, commands)
+		}
+	}
+}
+
+func TestKeyServiceStartsBeforeTheDashboard(t *testing.T) {
+	var titles []string
+	for _, s := range steps(config.Config{}) {
+		titles = append(titles, s.title)
+	}
+
+	keysAt := slices.Index(titles, "starting the key service")
+	sealAt := slices.Index(titles, "sealing the master key")
+	dashboardAt := slices.Index(titles, "starting the Tero service")
+	if sealAt < 0 || keysAt < sealAt || dashboardAt < keysAt {
+		t.Errorf("steps in the wrong order: %v", titles)
 	}
 }

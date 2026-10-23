@@ -1,7 +1,8 @@
-// Package auth is the dashboard's single-admin login: one-time setup links,
-// password plus required TOTP, sessions, brute-force throttling and security
-// events. Everything lives in the SQLite store, so the service and root CLI
-// commands see the same state and nothing is lost on restart.
+// Package auth is the dashboard's side of the single-admin login: sessions,
+// trusted browsers and brute-force throttling, kept in the SQLite store. The
+// admin's password hash, TOTP secret and setup links belong to the key
+// service (internal/keys), which checks every setup and login; the dashboard
+// never stores or reads them. Security events are recorded there too.
 package auth
 
 import (
@@ -10,6 +11,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/leanhanc/tero/internal/keys"
 	"github.com/leanhanc/tero/internal/password"
 )
 
@@ -22,6 +24,8 @@ var (
 	ErrInvalidCode        = errors.New("That code didn't match. Please check your authenticator app and try again.")
 	ErrSessionExpired     = errors.New("Your session has ended. Log in again")
 	ErrAlreadySetUp       = errors.New("The dashboard login is already set up")
+	ErrKeysUnavailable    = errors.New("The server's key service isn't running, so logins can't be checked. Run `sudo tero reset-login` on the server")
+	ErrLoginLocked        = errors.New("Login is locked for 24 hours after too many wrong codes. Run `sudo tero reset-login` on the server to unlock it")
 )
 
 // RateLimitedError means too many failures came from this IP or for the
@@ -38,6 +42,7 @@ func (e RateLimitedError) Error() string {
 // Service carries the login state for one server.
 type Service struct {
 	db        *sql.DB
+	keys      *keys.Client
 	domain    string
 	now       func() time.Time
 	passwords password.Policy
@@ -45,8 +50,9 @@ type Service struct {
 }
 
 // Options configure a Service. Now and Journal default to the real clock and
-// no journal; tests replace them.
+// no journal; tests replace them. Keys is the key service.
 type Options struct {
+	Keys      *keys.Client
 	Domain    string
 	Passwords password.Policy
 	Now       func() time.Time
@@ -60,12 +66,32 @@ func New(db *sql.DB, opts Options) *Service {
 		now = time.Now
 	}
 
-	return &Service{db: db, domain: opts.Domain, now: now, passwords: opts.Passwords, journal: opts.Journal}
+	return &Service{db: db, keys: opts.Keys, domain: opts.Domain, now: now, passwords: opts.Passwords, journal: opts.Journal}
 }
 
 // IsSetUp reports whether the admin account exists.
 func (s *Service) IsSetUp(ctx context.Context) (bool, error) {
-	var count int
-	err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM admin").Scan(&count)
-	return count == 1, err
+	status, err := s.keys.Status(ctx)
+	return status.IsSetUp, fromKeys(err)
+}
+
+// fromKeys turns key service errors into the ones the dashboard shows.
+func fromKeys(err error) error {
+	translations := map[error]error{
+		keys.ErrUnavailable:   ErrKeysUnavailable,
+		keys.ErrInvalidLink:   ErrInvalidLink,
+		keys.ErrAlreadySetUp:  ErrInvalidLink,
+		keys.ErrNotSetUp:      ErrNotSetUp,
+		keys.ErrInvalidCode:   ErrInvalidCode,
+		keys.ErrWrongLogin:    ErrInvalidCredentials,
+		keys.ErrLocked:        ErrLoginLocked,
+		keys.ErrHashingIsBusy: password.ErrBusy,
+	}
+	for from, to := range translations {
+		if errors.Is(err, from) {
+			return to
+		}
+	}
+
+	return err
 }

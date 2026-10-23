@@ -27,6 +27,7 @@ The end-to-end suite (`e2e/init_test.go`) checks every applied control and repor
 | Services | apport (it re-enables setuid core dumps), avahi, cups, rpcbind, NFS, Samba, DHCP server, LDAP, DNS, FTP, IMAP, Squid, SNMP, rsync daemon, telnet and xinetd disabled when installed | 2.1 | `services.go` | `Unneeded services and file permissions` |
 | Files | `/etc/passwd`, `group`, `shadow`, `gshadow` and their backups owned by root with CIS modes | 7.1 | `services.go` | `Unneeded services and file permissions` |
 | Files | `/etc/crontab` and `/etc/cron.*` readable by root only | 2.4.1 | `services.go` | `Unneeded services and file permissions` |
+| Accounts | The `tero-keys` system user has a locked password, no home directory and `/usr/sbin/nologin`; init stops if an existing `tero-keys` user has a login shell or belongs to `tero`, `sudo`, `admin`, `adm` or `systemd-journal` | 5.4.2 (system accounts secured) | `keyservice.go` | `Key service identity` |
 
 ## Skipped
 

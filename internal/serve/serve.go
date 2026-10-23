@@ -19,6 +19,7 @@ import (
 	"github.com/leanhanc/tero/internal/deploylog"
 	"github.com/leanhanc/tero/internal/hostfs"
 	"github.com/leanhanc/tero/internal/journal"
+	"github.com/leanhanc/tero/internal/keys"
 	"github.com/leanhanc/tero/internal/password"
 	"github.com/leanhanc/tero/internal/store"
 )
@@ -46,6 +47,7 @@ func Run(ctx context.Context) error {
 	defer db.Close()
 
 	service := auth.New(db, auth.Options{
+		Keys:      keys.NewClient(keys.SocketPath),
 		Domain:    cfg.DashboardDomain,
 		Passwords: password.Policy{Breaches: password.NewPwnedPasswords()},
 		Journal:   journal.Send,

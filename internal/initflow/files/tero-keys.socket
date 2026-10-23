@@ -1,0 +1,17 @@
+# Written by `tero init`. systemd creates the key service's socket as root, so
+# it can give it the tero group, which tero-keys itself can't. Connections
+# made while tero-keys restarts wait here instead of failing.
+[Unit]
+Description=Tero key service socket
+Documentation=https://github.com/leanhanc/tero
+
+[Socket]
+ListenStream=/run/tero-keys/keys.sock
+SocketUser=tero-keys
+SocketGroup=tero
+SocketMode=0660
+DirectoryMode=0755
+Accept=no
+
+[Install]
+WantedBy=sockets.target

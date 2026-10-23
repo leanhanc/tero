@@ -2,8 +2,11 @@
 [Unit]
 Description=Tero
 Documentation=https://github.com/leanhanc/tero
-After=network-online.target tero-firewall.service
-Wants=network-online.target
+After=network-online.target tero-firewall.service tero-keys.socket
+# Logins are checked by the key service. Only wanted, not required: when it
+# restarts or fails to start, the dashboard and apps keep serving and logins
+# fail closed.
+Wants=network-online.target tero-keys.socket
 # The dashboard only starts behind the firewall.
 Requires=tero-firewall.service
 
@@ -27,6 +30,11 @@ StateDirectoryMode=0750
 InaccessiblePaths=/var/lib/tero/.config /var/lib/tero/.local /var/lib/tero/.cache
 Environment=XDG_DATA_HOME=/var/lib/tero/data XDG_CONFIG_HOME=/var/lib/tero/config
 UMask=0077
+
+# A flood of log lines can't make journald rotate out older entries, such as
+# the key service's copy of the security log.
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=1000
 
 # Bounds the service alone, so a flood of requests can't push the kernel's OOM
 # killer onto sshd or the apps.

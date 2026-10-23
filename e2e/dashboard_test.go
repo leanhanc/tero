@@ -167,13 +167,25 @@ func testStoredForm(t *testing.T) {
 	if got := must(t, "sudo stat -c '%a %U' /var/lib/tero/tero.db"); got != "600 tero" {
 		t.Errorf("database is %q, want 600 tero", got)
 	}
-
-	databaseFiles := "sudo cat /var/lib/tero/tero.db /var/lib/tero/tero.db-wal 2>/dev/null"
-	plaintextCount := run(t, databaseFiles+" | grep -a -c "+adminPassword)
-	if strings.TrimSpace(plaintextCount.output) != "0" {
-		t.Errorf("the database holds the plaintext password (%s matches)", strings.TrimSpace(plaintextCount.output))
+	if got := must(t, "sudo stat -c '%a %U' /var/lib/tero-keys/keys.db"); got != "600 tero-keys" {
+		t.Errorf("key service database is %q, want 600 tero-keys", got)
 	}
-	must(t, databaseFiles+` | grep -a -q '\$argon2id\$v=19\$m=65536,t=3,p=4\$'`)
+
+	teroFiles := "sudo cat /var/lib/tero/tero.db /var/lib/tero/tero.db-wal 2>/dev/null"
+	keysFiles := "sudo cat /var/lib/tero-keys/keys.db /var/lib/tero-keys/keys.db-wal 2>/dev/null"
+	for _, files := range []string{teroFiles, keysFiles} {
+		plaintextCount := run(t, files+" | grep -a -c "+adminPassword)
+		if strings.TrimSpace(plaintextCount.output) != "0" {
+			t.Errorf("a database holds the plaintext password (%s matches)", strings.TrimSpace(plaintextCount.output))
+		}
+	}
+
+	// dashboard-access: No credentials in the dashboard's database
+	argon2 := ` | grep -a -c '\$argon2id\$v=19\$m=65536,t=3,p=4\$'`
+	if got := strings.TrimSpace(run(t, teroFiles+argon2).output); got != "0" {
+		t.Errorf("tero's database holds a password hash (%s matches)", got)
+	}
+	must(t, keysFiles+` | grep -a -q '\$argon2id\$v=19\$m=65536,t=3,p=4\$'`)
 }
 
 func (d *dashboard) testCorrectLogin(t *testing.T) {

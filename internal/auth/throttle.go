@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/netip"
 	"time"
+
+	"github.com/leanhanc/tero/internal/keys"
 )
 
 // Failed logins are throttled per source IP and, for browsers that have never
@@ -179,14 +181,25 @@ func (s *Service) forgive(ctx context.Context, charged attempt) error {
 	return nil
 }
 
-// recordFailedAttempt records the events for a charged attempt that failed.
-func (s *Service) recordFailedAttempt(ctx context.Context, ip string, charged attempt, eventType EventType) error {
-	if err := s.record(ctx, Event{At: s.now(), Type: eventType, IP: ip}); err != nil {
-		return err
-	}
-	if !charged.hasStartedLockout {
-		return nil
+// refund takes back one failure an attempt was charged, when the attempt
+// ended without its credentials being checked. Only that failure is taken
+// back, and a lockout it started stays, so attempts that fail this way can't
+// clear the counters other attempts built up.
+func (s *Service) refund(ctx context.Context, charged attempt) error {
+	for _, key := range charged.keys {
+		_, err := s.db.ExecContext(ctx, "UPDATE login_throttles SET failures = max(failures - 1, 0) WHERE key = ?", key.name)
+		if err != nil {
+			return err
+		}
 	}
 
-	return s.record(ctx, Event{At: s.now(), Type: EventRateLimited, IP: ip})
+	return nil
+}
+
+// recordLockout records a rate_limited event when a failed attempt started a
+// lockout. The failure itself is recorded by the key service.
+func (s *Service) recordLockout(ctx context.Context, ip string, charged attempt) {
+	if charged.hasStartedLockout {
+		s.record(ctx, keys.EventRateLimited, ip)
+	}
 }

@@ -25,11 +25,29 @@ func TestOpenCreatesPrivateDatabaseWithSchema(t *testing.T) {
 		t.Errorf("database mode = %o, want 600", mode)
 	}
 
-	for _, table := range []string{"admin", "setup_links", "sessions", "login_throttles", "security_events", "apps", "deploys"} {
+	for _, table := range []string{"sessions", "trusted_devices", "login_throttles", "apps", "deploys"} {
 		var name string
 		err := db.QueryRow("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", table).Scan(&name)
 		if err != nil {
 			t.Errorf("table %s missing: %v", table, err)
+		}
+	}
+}
+
+// The admin's credentials and the security log belong to the key service
+// (dashboard-access: No credentials in the dashboard's database).
+func TestDatabaseHoldsNoCredentials(t *testing.T) {
+	db, err := Open(context.Background(), filepath.Join(t.TempDir(), "tero.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	for _, table := range []string{"admin", "setup_links", "security_events"} {
+		var count int
+		db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name = ?", table).Scan(&count)
+		if count != 0 {
+			t.Errorf("table %s exists in tero's database", table)
 		}
 	}
 }
@@ -42,7 +60,7 @@ func TestOpenTwiceKeepsData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := first.Exec("INSERT INTO security_events (at, type) VALUES (1, 'test')"); err != nil {
+	if _, err := first.Exec("INSERT INTO sessions (token_hash, created_at, last_seen_at) VALUES ('h', 1, 1)"); err != nil {
 		t.Fatal(err)
 	}
 	first.Close()
@@ -54,11 +72,11 @@ func TestOpenTwiceKeepsData(t *testing.T) {
 	defer second.Close()
 
 	var count int
-	if err := second.QueryRow("SELECT count(*) FROM security_events").Scan(&count); err != nil {
+	if err := second.QueryRow("SELECT count(*) FROM sessions").Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	if count != 1 {
-		t.Fatalf("events after reopening = %d, want 1", count)
+		t.Fatalf("sessions after reopening = %d, want 1", count)
 	}
 }
 

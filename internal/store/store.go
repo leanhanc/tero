@@ -1,5 +1,5 @@
-// Package store opens Tero's SQLite database, which holds the dashboard login,
-// sessions, login throttles and security events. The database belongs to the
+// Package store opens Tero's SQLite database, which holds sessions, trusted
+// browsers, login throttles, apps and deploys. The database belongs to the
 // tero user: the service opens it directly, and root CLI commands open it
 // through a child process running as tero, so every file stays owned by tero.
 package store
@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"embed"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -26,6 +27,13 @@ var migrations embed.FS
 // Open opens the database at path, creating it with mode 0600 when missing,
 // and applies any pending migrations.
 func Open(ctx context.Context, path string) (*sql.DB, error) {
+	return OpenWith(ctx, path, migrations)
+}
+
+// OpenWith opens a database the same way with another set of migrations, read
+// from the "migrations" directory of source. The key service keeps its own
+// database this way.
+func OpenWith(ctx context.Context, path string, source fs.FS) (*sql.DB, error) {
 	if err := createPrivateFile(path); err != nil {
 		return nil, err
 	}
@@ -38,7 +46,7 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 		return nil, err
 	}
 
-	if err := migrate(ctx, db); err != nil {
+	if err := migrate(ctx, db, source); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("prepare the database: %w", err)
 	}
@@ -63,15 +71,15 @@ func createPrivateFile(path string) error {
 
 // migrate applies every embedded migration newer than the database's
 // user_version, in file-name order, each in its own transaction.
-func migrate(ctx context.Context, db *sql.DB) error {
-	names, err := migrationNames()
+func migrate(ctx context.Context, db *sql.DB, source fs.FS) error {
+	names, err := migrationNames(source)
 	if err != nil {
 		return err
 	}
 
 	for index, name := range names {
 		version := index + 1
-		if err := applyMigration(ctx, db, version, name); err != nil {
+		if err := applyMigration(ctx, db, source, version, name); err != nil {
 			return fmt.Errorf("%s: %w", name, err)
 		}
 	}
@@ -79,8 +87,8 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-func migrationNames() ([]string, error) {
-	entries, err := migrations.ReadDir("migrations")
+func migrationNames(source fs.FS) ([]string, error) {
+	entries, err := fs.ReadDir(source, "migrations")
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +107,7 @@ func migrationNames() ([]string, error) {
 // applyMigration runs one migration unless the database already has it. The
 // version check happens inside the write transaction, so the service and a
 // CLI command starting at the same time can't both apply it.
-func applyMigration(ctx context.Context, db *sql.DB, version int, name string) error {
+func applyMigration(ctx context.Context, db *sql.DB, source fs.FS, version int, name string) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -114,7 +122,7 @@ func applyMigration(ctx context.Context, db *sql.DB, version int, name string) e
 		return nil
 	}
 
-	statements, err := migrations.ReadFile("migrations/" + name)
+	statements, err := fs.ReadFile(source, "migrations/"+name)
 	if err != nil {
 		return err
 	}

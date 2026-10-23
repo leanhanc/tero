@@ -31,7 +31,22 @@ Change: [add-first-deploy-slice-2](changes/add-first-deploy-slice-2/)
 
 Drafts: [apps](drafts/apps/spec.md), [build-pipeline](drafts/build-pipeline/spec.md), [deployments](drafts/deployments/spec.md), [domains](drafts/domains/spec.md)
 
-## Slice 3: Account security
+## Slice 3: Key service and breach response
+
+The internet-facing dashboard can't read Tero's master key or edit the security log, and one command responds to a suspected breach.
+
+Change: [add-key-service-slice-3](changes/add-key-service-slice-3/)
+
+- [ ] A `tero-keys` service under its own system user, with no network and a Unix socket that answers only the dashboard (by its systemd unit) and root
+- [ ] A master key sealed by systemd (bound to the TPM when the server has one) that only `tero-keys` receives; a key that won't open never takes apps offline
+- [ ] The admin's password hash, TOTP secret (encrypted) and setup links held by `tero-keys`, which checks every login; only root issues setup links
+- [ ] Security events written by `tero-keys`, so nothing running as `tero` can change or delete them
+- [ ] `sudo tero rotate-key`
+- [ ] `sudo tero assume-breach`: stops the dashboard, ends every session, forgets trusted browsers, replaces certificates, rotates the master key, resets the login and prints what to check and rotate elsewhere
+
+Requirements: ASVS 11.1.1, 11.3.1, 11.3.2, 11.3.3, 13.3.1, 13.3.2, 13.3.3, 13.3.4, 16.4.2 ([asvs-l2.md](../docs/security/asvs-l2.md))
+
+## Slice 4: Account security
 
 The dashboard gains its first settings page. Until then, `sudo tero reset-login` is the way to replace a password, and every login still needs TOTP.
 
@@ -42,7 +57,7 @@ The dashboard gains its first settings page. Until then, `sudo tero reset-login`
 
 Requirements: ASVS 6.2.2, 6.2.3, 6.2.11, 7.4.3, 7.4.5, 7.5.1, 7.5.2 ([asvs-l2.md](../docs/security/asvs-l2.md))
 
-## Slice 4: Deploy on push
+## Slice 5: Deploy on push
 
 - [ ] Connect GitHub through a per-server GitHub App (manifest flow)
 - [ ] Private repositories with short-lived installation tokens
@@ -52,15 +67,19 @@ Requirements: ASVS 6.2.2, 6.2.3, 6.2.11, 7.4.3, 7.4.5, 7.5.1, 7.5.2 ([asvs-l2.md
 
 Drafts: [github-connection](drafts/github-connection/spec.md), [deployments](drafts/deployments/spec.md)
 
-## Slice 5: Environment variables and secrets
+## Slice 6: Environment variables and secrets
 
-- [ ] Set, change and remove variables per app, applied on the next deploy
-- [ ] Secrets stored encrypted and kept out of logs and images
-- [ ] Redeploy offered after a change
+- [ ] Set, change and remove variables per app
+- [ ] A change restarts the live image with the new values, with no build; only variables marked "needed at build" rebuild
+- [ ] Secrets encrypted per app under the slice 3 master key and kept out of logs and images
+- [ ] Decide how the agent receives secrets: it can't yet be told apart from other processes running as `tero`, and the dashboard writes the deploys it runs. Candidates: the agent under its own uid, and `tero-keys` releasing an app's secrets only for a source the admin approved with a fresh TOTP check in `tero-keys`
+- [ ] Per-secret list of when it was read, from the security log
+- [ ] `sudo tero assume-breach` lists each app's secret names to rotate at their providers and the link to revoke the GitHub App
+- [ ] Recovery key printed once, and `sudo tero restore` for moving encrypted secrets to a new server
 
 Drafts: [apps](drafts/apps/spec.md)
 
-## Slice 6: Safe releases and rollback
+## Slice 7: Safe releases and rollback
 
 - [ ] Traffic moves to a new release only after it passes its start check
 - [ ] Deploy history with commit, trigger, state and duration
@@ -69,7 +88,7 @@ Drafts: [apps](drafts/apps/spec.md)
 
 Drafts: [deployments](drafts/deployments/spec.md)
 
-## Slice 7: Custom domains
+## Slice 8: Custom domains
 
 - [ ] Add and remove custom domains with automatic certificates
 - [ ] Pending state with the DNS record to create
@@ -77,14 +96,14 @@ Drafts: [deployments](drafts/deployments/spec.md)
 
 Drafts: [domains](drafts/domains/spec.md)
 
-## Slice 8: Runtime logs
+## Slice 9: Runtime logs
 
 - [ ] Live and recent stdout and stderr per app in the dashboard
 - [ ] Logs kept across restarts and deploys, up to a per-app limit
 
 Drafts: [app-logs](drafts/app-logs/spec.md)
 
-## Slice 9: Workers and other build paths
+## Slice 10: Workers and other build paths
 
 - [ ] Worker apps: no route, no published port, restarted on exit
 - [ ] Dockerfile fallback
@@ -93,7 +112,7 @@ Drafts: [app-logs](drafts/app-logs/spec.md)
 
 Drafts: [apps](drafts/apps/spec.md), [build-pipeline](drafts/build-pipeline/spec.md)
 
-## Slice 10: Remove Tero from a server
+## Slice 11: Remove Tero from a server
 
 `sudo tero purge` takes the server back to how it was before `sudo tero init`.
 

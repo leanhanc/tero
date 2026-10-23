@@ -10,17 +10,18 @@ context: |
   Runtime: the service runs as the unprivileged `tero` user with only CAP_NET_BIND_SERVICE;
   Caddy is built into the binary and serves 80/443; every container is rootless Podman under `tero`.
   Root is used only by `sudo tero init` and other `sudo tero ...` CLI commands, never from the dashboard.
-  Work is planned in vertical slices. Slice 1 (onboarding and lockdown) is built. Current slice (slice 2):
-  the first deploy of a JavaScript backend from a public GitHub URL, by hand from the dashboard. A
-  `tero agent` process under tero's systemd user manager builds with Railpack in a throwaway rootless
-  BuildKit and runs each app in a hardened rootless container; the service routes
-  `<app>.<public-ip>.nip.io` to it.
+  Work is planned in vertical slices. Slices 1 (onboarding and lockdown) and 2 (first deploy of a JavaScript
+  backend by `tero agent` under tero's systemd user manager, Railpack in a throwaway rootless BuildKit, apps on
+  `<app>.<public-ip>.nip.io`) are built. Current slice (slice 3): the `tero-keys` system service, its own user
+  with no network, reachable only on a Unix socket, holds the master key sealed by systemd-creds (TPM2 when
+  present), the admin's password hash and encrypted TOTP secret, and the security log. It identifies callers by
+  uid and exact systemd unit. Adds `sudo tero rotate-key` and `sudo tero assume-breach`.
   openspec/specs holds only the current slice's capabilities. openspec/drafts holds rough specs for what later
   slices still own (apps, deployments, domains, app logs, build pipeline, GitHub connection); they are not commitments.
   Security standards (ADR 0001): OWASP ASVS 5.0.0 Level 2 for the dashboard and HTTP endpoints, citing
   requirement IDs like v5.0.0-6.5.1; a documented subset of the CIS Benchmark Level 1 Server per distro for
   the host, checked with a minimum Lynis score in e2e CI; SLSA v1.1 Build L3 for release binaries.
-  Secrets requirements arrive with slice 5 (environment variables).
+  App secrets are encrypted under the key service's master key in slice 6 (environment variables).
 
 rules:
   specs:

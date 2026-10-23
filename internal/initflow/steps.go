@@ -39,6 +39,9 @@ func steps(cfg config.Config) []step {
 		{"disabling unneeded services", disableUnneededServices},
 		{"setting permissions on sensitive files", setSensitivePermissions},
 		{"saving Tero's configuration", saveConfig(cfg)},
+		{"creating the tero-keys system user", createKeysUser},
+		{"sealing the master key", sealMasterKey},
+		{"starting the key service", startKeyService},
 		{"starting the Tero service", startService},
 		{"starting the Tero agent", startAgent},
 	}
