@@ -40,6 +40,10 @@ func (h Host) Run(ctx context.Context, name string, args ...string) (string, err
 
 	cmd := exec.CommandContext(ctx, executable, args...)
 	cmd.Env = append([]string{"PATH=" + strings.Join(systemDirs, ":")}, h.Env...)
+	// Commands start in /, not the caller's folder: a command run as tero
+	// can't enter a home folder like /home/ubuntu (mode 750), and Podman
+	// refuses to start there.
+	cmd.Dir = "/"
 	// Commands get their own process group, so Ctrl-C in the terminal reaches
 	// only init, which then stops them with SIGTERM rather than SIGKILL.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

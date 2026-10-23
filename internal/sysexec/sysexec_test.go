@@ -30,3 +30,18 @@ func TestHostRefusesCommandsOutsideSystemDirs(t *testing.T) {
 		t.Fatal("an unknown command ran")
 	}
 }
+
+// Real-VPS finding: commands inherited the caller's folder, and `podman` run
+// as tero failed in /home/ubuntu, which tero can't enter.
+func TestHostRunsCommandsFromRoot(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	output, err := (Host{}).Run(context.Background(), "pwd")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if output != "/" {
+		t.Errorf("command ran in %q, want /", output)
+	}
+}
