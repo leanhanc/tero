@@ -72,6 +72,7 @@ func TestSlice1(t *testing.T) {
 	t.Run("key-service: Process identity and sandbox / No network / Socket permissions", testKeyServiceIdentity)
 	t.Run("server-init: tero-keys can't log in", testKeysUserNoLogin)
 	t.Run("key-service: Key on disk is sealed", testKeyOnDiskIsSealed)
+	t.Run("key-service: TPM used when present", testTPMUsedWhenPresent)
 	t.Run("key-service: tero can't read the key / process-isolation: Dashboard can't read the key service", testTeroCantReadKeys)
 	t.Run("key-service: Other process running as tero / process-isolation: Other tero processes refused", testOnlyTheDashboardIsAnswered)
 	t.Run("process-isolation: Dashboard can't leave its cgroup", testDashboardStaysInItsCgroup)
@@ -545,11 +546,7 @@ func testLynis(t *testing.T) {
 }
 
 func testReboot(t *testing.T) {
-	for _, args := range [][]string{{"stop", vmName()}, {"start", "--tty=false", vmName()}} {
-		if output, err := exec.Command("limactl", args...).CombinedOutput(); err != nil {
-			t.Fatalf("limactl %v: %v\n%s", args, err, output)
-		}
-	}
+	restartServer(t)
 
 	waitUntil(t, 2*time.Minute, func() bool { return run(t, "systemctl is-active tero").exitCode == 0 })
 	testServiceIdentity(t)
@@ -569,6 +566,28 @@ func testReboot(t *testing.T) {
 		page := run(t, "curl -sSk --resolve "+skippedDomain+":443:127.0.0.1 https://"+skippedDomain+"/")
 		return page.exitCode == 0 && strings.Contains(page.output, `<div id="root">`)
 	})
+}
+
+// restartServer stops and starts the Lima VM, or reboots the cloud server and
+// waits until SSH answers again.
+func restartServer(t *testing.T) {
+	t.Helper()
+
+	if sshTarget() != "" {
+		bootID := must(t, "cat /proc/sys/kernel/random/boot_id")
+		run(t, "sudo systemctl reboot")
+		waitUntil(t, 5*time.Minute, func() bool {
+			current := run(t, "cat /proc/sys/kernel/random/boot_id")
+			return current.exitCode == 0 && strings.TrimSpace(current.output) != bootID
+		})
+		return
+	}
+
+	for _, args := range [][]string{{"stop", vmName()}, {"start", "--tty=false", vmName()}} {
+		if output, err := exec.Command("limactl", args...).CombinedOutput(); err != nil {
+			t.Fatalf("limactl %v: %v\n%s", args, err, output)
+		}
+	}
 }
 
 func waitUntil(t *testing.T, timeout time.Duration, isReady func() bool) {

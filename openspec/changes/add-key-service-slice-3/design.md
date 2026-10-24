@@ -70,3 +70,5 @@ Facts that decide the design:
 ## Open Questions
 
 None. The systemd behaviour above was checked in the systemd 255 source and man pages; task 1.1 confirms it on both releases.
+
+Found on EC2 (task 1.3): a fresh Ubuntu 24.04 or 26.04 lacks the `libtss2` libraries, so `systemd-creds` reports only partial TPM2 support and `--with-key=auto` seals with the host key alone. Init installs `libtss2-esys-3.0.2-0t64`, `libtss2-mu-4.0.1-0t64`, `libtss2-rc0t64` and `libtss2-tcti-device0t64`; with them the key is sealed with `tpm2+host` and opens after a reboot and after booting a different kernel.

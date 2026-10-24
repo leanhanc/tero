@@ -6,9 +6,10 @@
 # redeploy tests push new commits to.
 #
 #   vm-test-repo.sh <instance>
+#   TERO_SSH=ubuntu@<ip> TERO_SSH_KEY=<key> vm-test-repo.sh   a cloud server
 set -euo pipefail
 
-instance="$1"
+instance="${1:-}"
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -24,9 +25,17 @@ git -C "$work/tree" branch e2e-redeploy
 git clone -q --bare "$work/tree" "$work/tero.git"
 COPYFILE_DISABLE=1 tar -C "$work" -czf "$work/tero-git.tgz" tero.git
 
-limactl copy "$work/tero-git.tgz" "$instance:/tmp/tero-git.tgz"
-limactl shell --workdir / "$instance" bash -euo pipefail -c '
+unpack='
 	sudo install -d -o "$(id -un)" -m 0755 /opt/tero-e2e /opt/tero-e2e/repos /opt/tero-e2e/repos/leanhanc
 	tar -C /opt/tero-e2e/repos/leanhanc -xzf /tmp/tero-git.tgz
 	printf "[safe]\n\tdirectory = *\n" >/opt/tero-e2e/gitconfig
 	chmod -R a+rX /opt/tero-e2e'
+
+if [[ -n "${TERO_SSH:-}" ]]; then
+	scp -q -i "$TERO_SSH_KEY" "$work/tero-git.tgz" "$TERO_SSH:/tmp/tero-git.tgz"
+	ssh -i "$TERO_SSH_KEY" "$TERO_SSH" 'cd / && bash -euo pipefail -s' <<<"$unpack"
+	exit 0
+fi
+
+limactl copy "$work/tero-git.tgz" "$instance:/tmp/tero-git.tgz"
+limactl shell --workdir / "$instance" bash -euo pipefail -c "$unpack"

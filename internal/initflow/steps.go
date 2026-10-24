@@ -21,10 +21,13 @@ type step struct {
 	apply func(ctx context.Context, h host) error
 }
 
-// packages are installed from the distro's own repositories.
+// packages are installed from the distro's own repositories. The libtss2
+// libraries let systemd-creds use a TPM2: without them it reports only
+// partial support and seals the master key with the host key alone.
 var packages = []string{
 	"podman", "uidmap", "passt", "dbus-user-session",
 	"nftables", "auditd", "apparmor", "apparmor-utils", "unattended-upgrades",
+	"libtss2-esys-3.0.2-0t64", "libtss2-mu-4.0.1-0t64", "libtss2-rc0t64", "libtss2-tcti-device0t64",
 }
 
 func steps(cfg config.Config) []step {

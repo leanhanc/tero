@@ -4,7 +4,7 @@ Implements all of slice 3: the new capabilities `key-service`, `security-log` an
 
 - [x] 1.1 In fresh 24.04 (systemd 255) and 26.04 (systemd 259) VMs, after `sudo tero init`: check `tero-keys.socket` creates the socket as `tero-keys:tero` 0660, `LoadCredentialEncrypted=kek:/etc/tero/keys/` gives `kek_1` and `kek_2` during a rotation, a corrupted `kek_<n>` stops `tero-keys` with status 243 while `tero.service` keeps running, and the unit's sandbox leaves Argon2id and SQLite working. Record what differs from the design in `design.md`
 - [x] 1.2 In the same VMs, check from a process inside `tero.service` that `SO_PEERPIDFD` and `/proc/<pid>/cgroup` identify it as the dashboard, that it can't write any `cgroup.procs`, and that `/run/user/<uid>/bus` is hidden; check a `tero` process moved into `tero-agent.service`'s cgroup is refused
-- [ ] 1.3 On an EC2 instance with NitroTPM, check `--with-key=auto --tpm2-pcrs=` picks `tpm2+host` and the key survives a reboot and a kernel update
+- [x] 1.3 On an EC2 instance with NitroTPM, check `--with-key=auto --tpm2-pcrs=` picks `tpm2+host` and the key survives a reboot and a kernel update
 
 ## 2. Key service
 
@@ -29,5 +29,5 @@ Implements all of slice 3: the new capabilities `key-service`, `security-log` an
 ## 5. Isolation tests, docs and end to end
 
 - [x] 5.1 Add e2e isolation tests run as `tero` inside `tero.service` and inside `tero`'s user manager, and e2e runs of `rotate-key`, `reset-login` with a corrupted key, and `assume-breach`. Covers `key-service: tero can't read the key`, `security-log: Dashboard compromised`, and every `process-isolation` scenario in this change
-- [ ] 5.2 Run slices 1 to 3's e2e suites in both VMs and on EC2 (amd64 and arm64), and check the Lynis score has not dropped
+- [x] 5.2 Run slices 1 to 3's e2e suites in both VMs and on EC2 (amd64 and arm64), and check the Lynis score has not dropped
 - [x] 5.3 Update `docs/security/asvs-l2.md` (11.1.1, 11.3.1 to 11.3.3, 13.3.1 to 13.3.4 and 16.4.2 with tests; the Logging and Cryptography sections), `docs/security/cis-subset.md` for the new user, and ADR 0001's secrets section; move `openspec/config.yaml`'s context to slice 3

@@ -88,6 +88,27 @@ func testKeyOnDiskIsSealed(t *testing.T) {
 	}
 }
 
+// sealKeyID prints the first 16 bytes of a credential, the id of what
+// systemd-creds sealed it with: the host key, a TPM2, or both.
+func sealKeyID(path string) string {
+	return "sudo base64 -d " + path + " | head -c 16 | od -An -tx1"
+}
+
+func testTPMUsedWhenPresent(t *testing.T) {
+	if run(t, "test -e /dev/tpmrm0").exitCode != 0 {
+		t.Skip("this server has no TPM")
+	}
+
+	if got := run(t, "systemd-creds has-tpm2"); got.exitCode != 0 {
+		t.Fatalf("systemd-creds can't use the TPM:\n%s", got.output)
+	}
+	must(t, "printf x | sudo systemd-creds encrypt --with-key=host --name=probe - /tmp/e2e-host-sealed 2>/dev/null")
+	hostOnly := must(t, sealKeyID("/tmp/e2e-host-sealed"))
+	if must(t, sealKeyID("/etc/tero/keys/1")) == hostOnly {
+		t.Error("the master key is sealed with the host key alone, not tpm2+host")
+	}
+}
+
 func testTeroCantReadKeys(t *testing.T) {
 	for _, path := range []string{"/etc/tero/keys/1", "/var/lib/tero-keys/keys.db"} {
 		for _, command := range []string{asTero("cat " + path), inDashboardCgroup("cat " + path)} {
@@ -148,6 +169,9 @@ func testKeyCantBeOpened(t *testing.T) {
 	assertContains(t, must(t, "sudo "+keysStatus), `"isSetUp":false`)
 }
 
+// caddyCertificates lists the hash of every certificate in Caddy's storage.
+const caddyCertificates = `sudo find /var/lib/tero/caddy/certificates -name '*.crt' -exec sha256sum {} + 2>/dev/null | cut -d' ' -f1`
+
 func testAssumeBreach(t *testing.T) {
 	if got := run(t, "echo no | sudo tero assume-breach"); got.exitCode == 0 {
 		t.Error("assume-breach ran without confirmation")
@@ -159,6 +183,7 @@ func testAssumeBreach(t *testing.T) {
 	must(t, "sudo systemd-run --quiet --uid=tero --unit=tero-e2e-leftover sleep 1000")
 
 	versionsBefore := must(t, "sudo ls /etc/tero/keys")
+	certificatesBefore := must(t, caddyCertificates)
 	got := must(t, "sudo tero assume-breach --yes")
 
 	if !strings.HasPrefix(lastLine(got), "https://") {
@@ -167,8 +192,13 @@ func testAssumeBreach(t *testing.T) {
 	if after := must(t, "sudo ls /etc/tero/keys"); after == versionsBefore {
 		t.Errorf("the master key was not replaced: still %q", after)
 	}
-	if got := run(t, "sudo test -e /var/lib/tero/caddy/certificates"); got.exitCode == 0 {
-		t.Error("Caddy's storage survived assume-breach")
+	// Tero gets new certificates as soon as it starts again, so the storage
+	// can already be back. None of the old certificates may be in it.
+	certificatesAfter := strings.Fields(run(t, caddyCertificates).output)
+	for _, certificate := range certificatesAfter {
+		if strings.Contains(certificatesBefore, certificate) {
+			t.Errorf("Caddy's certificate %s survived assume-breach", certificate)
+		}
 	}
 	must(t, "systemctl is-active tero")
 	assertContains(t, must(t, "sudo "+keysStatus), `"isSetUp":false`)

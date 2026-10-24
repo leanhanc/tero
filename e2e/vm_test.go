@@ -1,8 +1,9 @@
 //go:build e2e
 
 // Package e2e runs Tero's end-to-end suite against the Lima test VM that
-// scripts/vm-test.sh prepares. Tests are named after the spec scenarios they
-// cover, as "capability: Scenario".
+// scripts/vm-test.sh prepares, or the cloud server that scripts/ec2-test.sh
+// prepares. Tests are named after the spec scenarios they cover, as
+// "capability: Scenario".
 package e2e
 
 import (
@@ -20,6 +21,22 @@ func vmName() string {
 	return "tero-ubuntu-26-04"
 }
 
+// sshTarget is the user@host of a cloud server to test over SSH instead of a
+// Lima VM, and sshKey the private key that logs in to it.
+func sshTarget() string { return os.Getenv("TERO_SSH") }
+func sshKey() string    { return os.Getenv("TERO_SSH_KEY") }
+
+// sshArgs logs in without prompts and gives up on a dead connection quickly,
+// so waiting for a rebooting server doesn't hang. Commands share one
+// connection: a new login to a distant server takes seconds, longer than
+// some states the tests wait for last.
+func sshArgs() []string {
+	return []string{"-i", sshKey(), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new",
+		"-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15",
+		"-o", "ControlMaster=auto", "-o", "ControlPath=/tmp/tero-e2e-ssh-%C", "-o", "ControlPersist=120",
+		sshTarget()}
+}
+
 // result is a finished command in the VM.
 type result struct {
 	output   string
@@ -31,6 +48,11 @@ func run(t *testing.T, script string) result {
 	t.Helper()
 
 	cmd := exec.Command("limactl", "shell", "--workdir", "/", vmName(), "bash", "-c", script)
+	if sshTarget() != "" {
+		// The script goes in on stdin, so the remote shell doesn't reparse it.
+		cmd = exec.Command("ssh", append(sshArgs(), "cd / && bash -s")...)
+		cmd.Stdin = strings.NewReader(script)
+	}
 	output, err := cmd.CombinedOutput()
 
 	var exitErr *exec.ExitError

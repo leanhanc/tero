@@ -495,7 +495,12 @@ func testInterruptedDeploy(t *testing.T) {
 	if response := postDashboard(t, "admin", "/api/apps/"+app+"/deploys", map[string]string{}); response.status != 202 {
 		t.Fatalf("redeploy = %d %s", response.status, response.body)
 	}
-	waitUntil(t, time.Minute, func() bool { return getApp(t, app).Deploys[0].State == "building" })
+	// A cached build can go from building to starting in a few seconds, and
+	// both count as half done when the agent starts again.
+	waitUntil(t, time.Minute, func() bool {
+		state := getApp(t, app).Deploys[0].State
+		return state == "building" || state == "starting"
+	})
 
 	must(t, agentSystemctl+" restart tero-agent")
 

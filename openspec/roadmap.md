@@ -54,8 +54,9 @@ The dashboard gains its first settings page. Until then, `sudo tero reset-login`
 - [ ] Option to end every other session after a change
 - [ ] List active sessions and end any of them, or all
 - [ ] Refuse new passwords that contain context words such as "tero" or the dashboard domain
+- [ ] Passkeys: add one or more from the settings page (after a fresh password and TOTP check), name and remove them, and log in with a passkey alone, which is phishing-resistant; password and TOTP stay as the fallback
 
-Requirements: ASVS 6.2.2, 6.2.3, 6.2.11, 7.4.3, 7.4.5, 7.5.1, 7.5.2 ([asvs-l2.md](../docs/security/asvs-l2.md))
+Requirements: ASVS 6.2.2, 6.2.3, 6.2.11, 6.3.3, 7.4.3, 7.4.5, 7.5.1, 7.5.2 ([asvs-l2.md](../docs/security/asvs-l2.md))
 
 ## Slice 5: Deploy on push
 
@@ -138,3 +139,12 @@ Default addresses under a domain Tero owns, instead of a third-party wildcard DN
 - [ ] Add the domain to the Public Suffix List, so each server gets its own Let's Encrypt limits and one server's abuse doesn't taint the others
 - [ ] Switch new app and dashboard addresses to it, falling back to nip.io while it's unreachable
 - [ ] Plan for abuse reports and uptime, since every server's default address depends on it
+
+### Private access
+
+Opt-in ways to keep the server off the public internet, for admins who want a smaller attack surface than a public dashboard and SSH port.
+
+- [ ] Private access with WireGuard built into Tero: `sudo tero init` or the dashboard turns it on, Tero manages the keys, and the dashboard shows a QR code to add each device
+- [ ] Once on, SSH and the dashboard answer only over WireGuard; Tero first checks for a recent handshake from one of your devices, so turning it on can't lock you out
+- [ ] Only accept web traffic from Cloudflare's IP ranges, for apps whose domain is behind Cloudflare
+- [ ] Later, a Cloudflare Tunnel mode where the server answers on no public port at all

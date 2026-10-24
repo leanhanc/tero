@@ -529,6 +529,6 @@ ADR 0001 adopts a few Level 3 requirements because they are cheap.
 |---|---|---|---|---|
 | 6.3.5 | Tell the user about suspicious logins | Later | Failed logins, rate limits and resets are recorded in the database and the journal, but the dashboard doesn't show them until it has more to show; v1 has no email | `TestEventsRecordedWithoutSecrets`, e2e `Events recorded / No secrets in events (v5.0.0-6.3.4, v5.0.0-6.3.5, v5.0.0-6.3.7)` |
 | 6.3.7 | Tell the user after a credential change | Later | The reset event is recorded, but not shown at the next login until the dashboard lists events again | e2e `Recovery visible after the fact` checks the event is recorded |
-| 6.3.3 | A phishing-resistant factor | Later | Passkeys, right after v1 | — |
+| 6.3.3 | A phishing-resistant factor | Later | Passkeys, planned for slice 4 (account security) | — |
 | 13.3.3 | Keys in an isolated module | Met on servers with a TPM2 | The key is sealed with `systemd-creds` to the TPM2 when there is one and is only ever in the memory of `tero-keys`. Without a TPM2, the seal uses a host key that root can read; `assume-breach` says so | — |
 | 13.3.4 | Secret rotation | Met | `sudo tero rotate-key` reseals every value under a new key, then deletes the old one | `TestRotationResealsTheAdmin`, `TestRotateLeavesOnlyTheNewKey` |
