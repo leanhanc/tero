@@ -30,7 +30,10 @@ const (
 	// routeSwitchTimeout bounds the wait for the service to reload its proxy,
 	// which it checks for every second.
 	routeSwitchTimeout = 15 * time.Second
-	internalErrorNote  = "Tero hit an internal error during this deploy. Redeploy to try again"
+	// cleanupTimeout bounds discarding a failed release and resuming the old
+	// one, so a stuck podman can't keep the deploy from ending.
+	cleanupTimeout    = 2 * time.Minute
+	internalErrorNote = "Tero hit an internal error during this deploy. Redeploy to try again"
 )
 
 // WorkDir holds checkouts and image tarballs while a deploy builds.
@@ -177,7 +180,8 @@ func (p Pipeline) release(ctx context.Context, deploy deploys.Deploy, deployApp 
 }
 
 func (p Pipeline) discardNewRelease(ctx context.Context, container, image string, log io.Writer) {
-	cleanupCtx := context.WithoutCancel(ctx)
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+	defer cancel()
 	if container != "" {
 		if output := containers.LastOutput(cleanupCtx, container, lastOutputLines); output != "" {
 			fmt.Fprintf(log, "\n==> Your app's last output\n%s\n", output)
@@ -188,7 +192,8 @@ func (p Pipeline) discardNewRelease(ctx context.Context, container, image string
 }
 
 func (p Pipeline) resumeOldRelease(ctx context.Context, live deploys.Release, log io.Writer) {
-	cleanupCtx := context.WithoutCancel(ctx)
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+	defer cancel()
 	fmt.Fprintln(log, "==> Starting the previous release again")
 
 	err := containers.Resume(cleanupCtx, live.Container)
@@ -231,6 +236,9 @@ func actionableReason(err error) (string, bool) {
 	var exited containers.ExitedError
 	if errors.As(err, &exited) {
 		return exited.Error(), true
+	}
+	if errors.Is(err, containers.ErrStartTimedOut) {
+		return containers.ErrStartTimedOut.Error(), true
 	}
 	if errors.Is(err, containers.ErrNeverAnswered) {
 		return err.Error(), true

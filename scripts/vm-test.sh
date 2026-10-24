@@ -31,8 +31,17 @@ GOOS=linux GOARCH="$arch" CGO_ENABLED=0 go install \
 	"github.com/letsencrypt/pebble/v2/cmd/pebble-challtestsrv@$pebble_version"
 
 failed=()
+previous=""
 for release in "${releases[@]}"; do
 	instance="tero-ubuntu-${release//./-}"
+	# One VM at a time: two don't fit in a small host's memory. The last one
+	# keeps running; start a stopped one again with limactl start to look
+	# into its failure.
+	if [[ -n "$previous" ]]; then
+		echo "=== Stopping $previous"
+		limactl stop "$previous" >/dev/null 2>&1 || true
+	fi
+	previous="$instance"
 	echo "=== Ubuntu $release ($instance)"
 
 	if [[ "${TERO_VM_KEEP:-}" != "1" ]]; then

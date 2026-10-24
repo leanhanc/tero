@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"strconv"
@@ -34,8 +35,18 @@ func Name(appName string, deployID int64) string {
 	return fmt.Sprintf("tero-app-%s-%d", appName, deployID)
 }
 
+// startTimeout bounds podman run. Starting takes seconds, but before it
+// Podman copies the image's file ownership into the container's user
+// namespace, which takes minutes on a slow disk.
+const startTimeout = 10 * time.Minute
+
+// ErrStartTimedOut means Podman didn't get the container running in time.
+var ErrStartTimedOut = fmt.Errorf("Your app's container took longer than %d minutes to start and was stopped. The server's disk may be too slow or too busy",
+	int(startTimeout.Minutes()))
+
 // Start runs a deploy's image and returns the container name and the
-// loopback port its PORT is published on.
+// loopback port its PORT is published on. When podman run fails, the name
+// is still returned, since a container may have been half created.
 func Start(ctx context.Context, appName string, deployID int64, image string) (string, int, error) {
 	network, err := isolatedNetwork(ctx)
 	if err != nil {
@@ -52,7 +63,11 @@ func Start(ctx context.Context, appName string, deployID int64, image string) (s
 		return "", 0, err
 	}
 
-	_, err = podman.RunInOwnScope(ctx, scopeName(name), "run", "--detach", "--name", name,
+	startCtx, cancel := context.WithTimeout(ctx, startTimeout)
+	defer cancel()
+
+	scope := scopeName(name)
+	_, err = podman.RunInOwnScope(startCtx, scope, "run", "--detach", "--name", name,
 		"--label", AppLabel+"="+appName,
 		"--label", DeployLabel+"="+strconv.FormatInt(deployID, 10),
 		"--network", network,
@@ -63,8 +78,20 @@ func Start(ctx context.Context, appName string, deployID int64, image string) (s
 		"--env", "PORT="+strconv.Itoa(containerPort),
 		"--publish", fmt.Sprintf("127.0.0.1:%d:%d", hostPort, containerPort),
 		image)
+	if err != nil && startCtx.Err() != nil {
+		// Killing podman leaves its children running in the scope, holding
+		// the storage locks the cleanup needs.
+		killCtx, cancelKill := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancelKill()
+		if killErr := podman.KillScope(killCtx, scope); killErr != nil {
+			slog.Warn("kill a container start that didn't finish", "container", name, "error", killErr)
+		}
+		if ctx.Err() == nil {
+			return name, 0, ErrStartTimedOut
+		}
+	}
 	if err != nil {
-		return "", 0, fmt.Errorf("start the app's container: %w", err)
+		return name, 0, fmt.Errorf("start the app's container: %w", err)
 	}
 
 	return name, hostPort, nil

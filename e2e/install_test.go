@@ -93,7 +93,7 @@ func testInstallChecksumMismatch(t *testing.T) {
 // nothing else: with that one file moved aside, /etc, /usr/local, the
 // installed packages and the firewall rules match their state from before.
 func testFreshInstall(t *testing.T) {
-	const systemState = `dpkg-query -W -f '${Package} ${Version} ${Status}\n' | sha256sum; sudo nft list ruleset | sha256sum`
+	const systemState = `dpkg-query -W -f '${Package} ${Version} ${Status}\n' | sha256sum; sudo nft -s list ruleset | sha256sum`
 	etcBefore := etcChecksum(t)
 	systemBefore := must(t, systemState)
 
