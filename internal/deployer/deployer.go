@@ -30,8 +30,9 @@ const (
 	// routeSwitchTimeout bounds the wait for the service to reload its proxy,
 	// which it checks for every second.
 	routeSwitchTimeout = 15 * time.Second
-	// cleanupTimeout bounds discarding a failed release and resuming the old
-	// one, so a stuck podman can't keep the deploy from ending.
+	// cleanupTimeout bounds discarding a failed release, resuming the old
+	// one and removing a replaced one, so a stuck podman can't keep the
+	// deploy from ending.
 	cleanupTimeout    = 2 * time.Minute
 	internalErrorNote = "Tero hit an internal error during this deploy. Redeploy to try again"
 )
@@ -164,19 +165,35 @@ func (p Pipeline) release(ctx context.Context, deploy deploys.Deploy, deployApp 
 	}
 	fmt.Fprintln(log, "==> Live")
 
-	isServed, err := deploys.WaitUntilServed(ctx, p.DB, deployApp.Name, hostPort, routeSwitchTimeout)
-	if err != nil {
-		return err
-	}
-	if !isServed {
-		fmt.Fprintln(log, "The proxy hadn't switched to the new release yet when the old one was stopped")
-	}
-
 	if hasLive {
-		return containers.Remove(context.WithoutCancel(ctx), live.Container, live.Image)
+		p.retireOldRelease(ctx, deployApp.Name, hostPort, live, log)
 	}
 
 	return nil
+}
+
+// retireOldRelease removes the previous release once the proxy serves the
+// new one. The deploy is already live, so nothing here can fail it: problems
+// go to the log, and a container left behind is removed when the agent next
+// starts.
+func (p Pipeline) retireOldRelease(ctx context.Context, appName string, hostPort int, live deploys.Release, log io.Writer) {
+	isServed, err := deploys.WaitUntilServed(ctx, p.DB, appName, hostPort, routeSwitchTimeout)
+	// The proxy may still send traffic to the old release, so a stopping
+	// agent leaves it running.
+	if ctx.Err() != nil {
+		return
+	}
+	if err != nil {
+		fmt.Fprintf(log, "Couldn't check that the proxy switched to the new release: %v\n", err)
+	} else if !isServed {
+		fmt.Fprintln(log, "The proxy hadn't switched to the new release yet when the old one was stopped")
+	}
+
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+	defer cancel()
+	if err := containers.Remove(cleanupCtx, live.Container, live.Image); err != nil {
+		fmt.Fprintf(log, "Couldn't remove the previous release: %v\n", err)
+	}
 }
 
 func (p Pipeline) discardNewRelease(ctx context.Context, container, image string, log io.Writer) {

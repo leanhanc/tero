@@ -33,6 +33,19 @@ const buildkitIDs = "0:800001:200000"
 
 const minimumMemoryLimit = 1 << 30
 
+// PullImage downloads the BuildKit image when it's missing, so the first
+// deploy doesn't wait for it. A deploy that starts during the pull may
+// download the same layers alongside it, which is only slower.
+func PullImage(ctx context.Context) error {
+	// podman image exists answers through its exit code alone: 1 is missing.
+	if _, err := podman.Run(ctx, "image", "exists", buildkitImage); err == nil {
+		return nil
+	}
+
+	_, err := podman.Run(ctx, "pull", "--quiet", buildkitImage)
+	return err
+}
+
 type daemon struct {
 	name   string
 	client *client.Client
@@ -86,10 +99,14 @@ func (d *daemon) waitReady(ctx context.Context) error {
 			return nil
 		}
 
-		if time.Now().After(deadline) || ctx.Err() != nil {
+		if time.Now().After(deadline) {
 			return fmt.Errorf("BuildKit never became ready: %w", err)
 		}
-		time.Sleep(500 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("BuildKit never became ready: %w", ctx.Err())
+		case <-time.After(500 * time.Millisecond):
+		}
 	}
 }
 
@@ -121,7 +138,7 @@ func (d *daemon) hitMemoryLimit(ctx context.Context) bool {
 // stop removes the container even when the build's context was cancelled.
 func (d *daemon) stop() {
 	_ = d.client.Close()
-	_ = podman.RemoveContainer(context.WithoutCancel(context.Background()), d.name)
+	_ = podman.RemoveContainer(context.Background(), d.name)
 }
 
 // memoryLimit is half the server's memory, and at least 1 GiB.

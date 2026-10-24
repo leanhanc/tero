@@ -153,12 +153,16 @@ func (s *Service) BeginSetup(ctx context.Context, token, newPassword string) (En
 		return Enrolment{}, err
 	}
 
-	_, err = s.db.ExecContext(ctx, `
+	updated, err := s.db.ExecContext(ctx, `
 		UPDATE setup_links SET pending_password_hash = ?, pending_totp_key_version = ?, pending_totp_secret = ?
 		WHERE token_hash = ? AND used_at IS NULL`,
 		passwordHash, sealedSecret.version, sealedSecret.ciphertext, tokenHash)
 	if err != nil {
 		return Enrolment{}, err
+	}
+	// The link was used up while the password hashed.
+	if count, _ := updated.RowsAffected(); count != 1 {
+		return Enrolment{}, ErrInvalidLink
 	}
 
 	return Enrolment{Secret: secret}, nil
@@ -202,11 +206,15 @@ func (s *Service) FinishSetup(ctx context.Context, ip, token, code string) error
 	defer tx.Rollback()
 
 	now := s.now().Unix()
-	_, err = tx.ExecContext(ctx, `
+	inserted, err := tx.ExecContext(ctx, `
 		INSERT INTO admin (id, password_hash, totp_key_version, totp_secret, last_totp_step, created_at)
-		VALUES (1, ?, ?, ?, ?, ?)`,
+		VALUES (1, ?, ?, ?, ?, ?)
+		ON CONFLICT (id) DO NOTHING`,
 		link.passwordHash.String, sealedSecret.version, sealedSecret.ciphertext, step, now)
 	if err != nil {
+		return err
+	}
+	if count, _ := inserted.RowsAffected(); count != 1 {
 		return ErrAlreadySetUp
 	}
 
@@ -356,8 +364,12 @@ func (s *Service) succeedLogin(ctx context.Context, ip string, step int64) error
 		return err
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
-		if locked, err := s.isLocked(ctx); err != nil || locked {
-			return errors.Join(err, ErrLocked)
+		locked, err := s.isLocked(ctx)
+		if err != nil {
+			return err
+		}
+		if locked {
+			return ErrLocked
 		}
 		// Another request used this code first.
 		if err := s.recordOwn(ctx, EventLoginFailed, ip); err != nil {

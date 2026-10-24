@@ -113,3 +113,33 @@ func TestMarkInterruptedFailsDeploysLeftRunning(t *testing.T) {
 		t.Errorf("queued deploy = %s, want it still queued", state)
 	}
 }
+
+func TestIsSettledLiveOnlyWhileLiveWithNoDeployStarting(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t, "api")
+	liveID := mustEnqueue(t, db, 1)
+	if _, err := db.Exec("UPDATE deploys SET state = 'live' WHERE id = ?", liveID); err != nil {
+		t.Fatal(err)
+	}
+
+	assertSettled := func(want bool) {
+		t.Helper()
+		isSettled, err := IsSettledLive(ctx, db, liveID)
+		if err != nil || isSettled != want {
+			t.Fatalf("IsSettledLive = %v, %v; want %v", isSettled, err, want)
+		}
+	}
+
+	assertSettled(true)
+
+	nextID := mustEnqueue(t, db, 1)
+	if _, err := db.Exec("UPDATE deploys SET state = 'starting' WHERE id = ?", nextID); err != nil {
+		t.Fatal(err)
+	}
+	assertSettled(false)
+
+	if err := Promote(ctx, db, nextID, testNow); err != nil {
+		t.Fatal(err)
+	}
+	assertSettled(false)
+}

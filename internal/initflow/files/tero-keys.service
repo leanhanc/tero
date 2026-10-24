@@ -24,8 +24,11 @@ StateDirectory=tero-keys
 StateDirectoryMode=0700
 UMask=0077
 
-# Two Argon2id hashes of 64 MiB at a time, plus SQLite.
+# Two Argon2id hashes of 64 MiB at a time, plus SQLite. Go's garbage
+# collector lets the heap grow to twice what is in use before collecting, so
+# GOMEMLIMIT makes it collect before the next hashes reach MemoryMax.
 MemoryMax=256M
+Environment=GOMEMLIMIT=200MiB
 TasksMax=64
 LimitCORE=0
 

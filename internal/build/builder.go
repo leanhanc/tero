@@ -24,6 +24,9 @@ import (
 
 const buildTimeout = 30 * time.Minute
 
+// ImagePrefix starts the name of every app image Tero builds.
+const ImagePrefix = "localhost/tero/"
+
 // Request is one image to build.
 type Request struct {
 	AppName  string
@@ -48,7 +51,7 @@ func Build(ctx context.Context, req Request) (string, error) {
 	}
 
 	fmt.Fprintln(req.Log, "==> Building the image")
-	imageName := fmt.Sprintf("localhost/tero/%s:deploy-%d", req.AppName, req.DeployID)
+	imageName := fmt.Sprintf("%s%s:deploy-%d", ImagePrefix, req.AppName, req.DeployID)
 	tarballPath := filepath.Join(req.WorkDir, fmt.Sprintf("deploy-%d.tar", req.DeployID))
 	defer os.Remove(tarballPath)
 

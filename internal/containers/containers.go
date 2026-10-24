@@ -162,6 +162,60 @@ func IsRunning(ctx context.Context, container string) bool {
 	return err == nil && state.Running
 }
 
+// RunningPorts returns the loopback port of every running app container,
+// keyed by container name, from a single podman call.
+func RunningPorts(ctx context.Context) (map[string]int, error) {
+	output, err := podman.Run(ctx, "ps", "--filter", "label="+AppLabel, "--format", "json")
+	if err != nil {
+		return nil, err
+	}
+
+	return parseRunningPorts(output)
+}
+
+// psEntry is the part of podman ps's JSON output Tero reads. Podman 4 and 5
+// both write ports with these keys; Podman 3, which Tero doesn't support,
+// names them differently, so every port reads as 0 and none is recorded.
+type psEntry struct {
+	Names []string
+	Ports []struct {
+		HostPort      int `json:"host_port"`
+		ContainerPort int `json:"container_port"`
+	}
+}
+
+func parseRunningPorts(output string) (map[string]int, error) {
+	ports := map[string]int{}
+	if output == "" {
+		return ports, nil
+	}
+
+	var entries []psEntry
+	if err := json.Unmarshal([]byte(output), &entries); err != nil {
+		return nil, fmt.Errorf("read podman's container list: %w", err)
+	}
+
+	for _, entry := range entries {
+		for _, name := range entry.Names {
+			ports[name] = publishedPort(entry)
+		}
+	}
+
+	return ports, nil
+}
+
+// publishedPort is the host port the app's PORT is published on, or 0 when
+// it isn't published.
+func publishedPort(entry psEntry) int {
+	for _, port := range entry.Ports {
+		if port.ContainerPort == containerPort {
+			return port.HostPort
+		}
+	}
+
+	return 0
+}
+
 // Resume starts an existing, stopped container again.
 func Resume(ctx context.Context, container string) error {
 	_, err := podman.RunInOwnScope(ctx, scopeName(container), "start", container)
@@ -234,27 +288,32 @@ func answersHTTP(ctx context.Context, httpClient *http.Client, url string) bool 
 // used: on Podman 4 their shared rootless namespace hides the networks
 // stored under tero's home in /var/lib.
 func isolatedNetwork(ctx context.Context) (string, error) {
-	networkOnce.Do(func() {
-		version, err := podman.Run(ctx, "version", "--format", "{{.Client.Version}}")
-		if err != nil {
-			networkErr = err
-			return
-		}
+	networkMu.Lock()
+	defer networkMu.Unlock()
 
-		major, _, _ := strings.Cut(version, ".")
-		networkMode = "slirp4netns:allow_host_loopback=false"
-		if majorVersion, _ := strconv.Atoi(major); majorVersion >= 5 {
-			networkMode = "pasta:--no-map-gw"
-		}
-	})
+	// Only a known mode is kept: a failed podman version call is retried on
+	// the next start instead of failing every deploy until the agent restarts.
+	if networkMode != "" {
+		return networkMode, nil
+	}
 
-	return networkMode, networkErr
+	version, err := podman.Run(ctx, "version", "--format", "{{.Client.Version}}")
+	if err != nil {
+		return "", err
+	}
+
+	major, _, _ := strings.Cut(version, ".")
+	networkMode = "slirp4netns:allow_host_loopback=false"
+	if majorVersion, _ := strconv.Atoi(major); majorVersion >= 5 {
+		networkMode = "pasta:--no-map-gw"
+	}
+
+	return networkMode, nil
 }
 
 var (
-	networkOnce sync.Once
+	networkMu   sync.Mutex
 	networkMode string
-	networkErr  error
 )
 
 // freeLoopbackPort asks the kernel for an unused port. Another process could

@@ -14,6 +14,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/leanhanc/tero/internal/build"
 	"github.com/leanhanc/tero/internal/deploys"
 )
 
@@ -59,6 +60,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	go reconcilePeriodically(ctx, opts.DB)
+	go pullBuildKit(ctx)
 
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
@@ -93,6 +95,14 @@ func reconcilePeriodically(ctx context.Context, db *sql.DB) {
 			return
 		case <-ticker.C:
 		}
+	}
+}
+
+// pullBuildKit fetches the BuildKit image in the background. A failure only
+// means the first deploy pulls it instead.
+func pullBuildKit(ctx context.Context) {
+	if err := build.PullImage(ctx); err != nil && ctx.Err() == nil {
+		slog.Warn("download BuildKit ahead of the first deploy", "error", err)
 	}
 }
 

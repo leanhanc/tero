@@ -70,6 +70,14 @@ func Enqueue(ctx context.Context, db *sql.DB, appID int64, now time.Time) (int64
 // returns false when nothing is queued or another deploy is still running,
 // since builds run one at a time on the server.
 func ClaimNext(ctx context.Context, db *sql.DB, now time.Time) (Deploy, bool, error) {
+	// The agent asks every second. Checking outside a transaction first means
+	// an empty queue doesn't take the database's write lock each time.
+	var hasQueued bool
+	err := db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM deploys WHERE state = 'queued')").Scan(&hasQueued)
+	if err != nil || !hasQueued {
+		return Deploy{}, false, err
+	}
+
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return Deploy{}, false, err
@@ -199,6 +207,19 @@ func LiveReleases(ctx context.Context, db *sql.DB) ([]Release, error) {
 func SettledLiveReleases(ctx context.Context, db *sql.DB) ([]Release, error) {
 	return queryReleases(ctx, db,
 		"AND NOT EXISTS (SELECT 1 FROM deploys AS starting WHERE starting.app_id = deploys.app_id AND starting.state = 'starting')")
+}
+
+// IsSettledLive reports whether the deploy is still live with no deploy of
+// its app starting.
+func IsSettledLive(ctx context.Context, db *sql.DB, deployID int64) (bool, error) {
+	var isSettled bool
+	err := db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM deploys
+			WHERE id = ? AND state = 'live'
+				AND NOT EXISTS (SELECT 1 FROM deploys AS starting WHERE starting.app_id = deploys.app_id AND starting.state = 'starting')
+		)`, deployID).Scan(&isSettled)
+	return isSettled, err
 }
 
 // Promote makes the deploy live and the app's previous live deploy

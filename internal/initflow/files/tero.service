@@ -37,9 +37,11 @@ LogRateLimitIntervalSec=30s
 LogRateLimitBurst=1000
 
 # Bounds the service alone, so a flood of requests can't push the kernel's OOM
-# killer onto sshd or the apps.
+# killer onto sshd or the apps. GOMEMLIMIT makes Go's garbage collector work
+# harder before the service reaches MemoryHigh, where the kernel throttles it.
 MemoryHigh=384M
 MemoryMax=512M
+Environment=GOMEMLIMIT=320MiB
 
 ProtectSystem=strict
 ProtectHome=yes

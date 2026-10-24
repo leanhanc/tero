@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/leanhanc/tero/internal/journal"
@@ -139,12 +140,17 @@ func activatedListener() (*net.UnixListener, error) {
 	return unixListener, nil
 }
 
-// Serve answers connections until ctx is cancelled.
+// Serve answers connections until ctx is cancelled, and returns once the
+// connections it took are answered, so the caller can close the database.
 func (s *Service) Serve(ctx context.Context, listener *net.UnixListener, peers peers) error {
 	go func() {
 		<-ctx.Done()
 		listener.Close()
 	}()
+
+	// Each connection has read and write deadlines, so waiting is bounded.
+	var connections sync.WaitGroup
+	defer connections.Wait()
 
 	slots := map[Caller]chan struct{}{
 		CallerDashboard: make(chan struct{}, maxConnections),
@@ -179,10 +185,10 @@ func (s *Service) Serve(ctx context.Context, listener *net.UnixListener, peers p
 			continue
 		}
 
-		go func() {
+		connections.Go(func() {
 			defer func() { <-slots[caller] }()
 			s.serveConn(ctx, conn, caller)
-		}()
+		})
 	}
 }
 
