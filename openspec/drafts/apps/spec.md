@@ -42,6 +42,33 @@ The admin SHALL be able to set, change and remove environment variables per app.
 - **WHEN** two apps exist and a variable is set on one
 - **THEN** the other app does not see it
 
+### Requirement: Sealed variables
+The admin SHALL be able to seal a variable when creating it or later. Sealing SHALL be one way: a sealed variable SHALL never be unsealed and its value SHALL never be shown again. A sealed variable's value SHALL be held only by `tero-keys`, encrypted under the master key, and no dashboard endpoint and no `tero-keys` verb the dashboard can call SHALL return it. For each sealed variable the dashboard SHALL show its name, a "Sealed" label and when it was last replaced, and SHALL offer only two actions: Replace, which takes a new value without showing the old one, and Delete. A sealed variable's name SHALL NOT be changed. Sealed variables SHALL NOT be editable from the plain-text editor; only the field view can replace them. Sealing a variable and replacing a sealed value SHALL each require a fresh TOTP code. Unsealed variables are not secrets: the dashboard stores and shows them.
+
+#### Scenario: Sealed value never returned
+- **WHEN** the admin seals `API_KEY` on an app and then calls every dashboard endpoint that lists or shows the app's variables
+- **THEN** the responses contain the name `API_KEY`, its sealed state and its last replacement time, and never its value
+
+#### Scenario: Sealed variable available at runtime
+- **WHEN** the admin seals `API_KEY` on an app and redeploys
+- **THEN** the app's process sees `API_KEY` with the value the admin entered
+
+#### Scenario: Replace a sealed variable
+- **WHEN** the admin replaces the value of a sealed variable with a valid TOTP code and redeploys
+- **THEN** the app's process sees the new value, and the dashboard shows the new replacement time and never the old or new value
+
+#### Scenario: No way back
+- **WHEN** the admin opens a sealed variable
+- **THEN** the dashboard offers only Replace and Delete, and no action that shows the value, unseals it or renames it
+
+#### Scenario: Not editable as plain text
+- **WHEN** the admin opens the app's variables in the plain-text editor
+- **THEN** sealed variables are not in the editable text, and saving the text leaves them unchanged
+
+#### Scenario: Fresh TOTP required
+- **WHEN** the admin seals a variable or replaces a sealed value without a valid TOTP code
+- **THEN** the change is refused and the stored variable is unchanged
+
 ### Requirement: Delete an app
 The admin SHALL be able to delete an app, which stops its container and removes its route, images and stored settings.
 

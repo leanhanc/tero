@@ -78,6 +78,7 @@ Drafts: [github-connection](drafts/github-connection/spec.md), [deployments](dra
 - [ ] Set, change and remove variables per app
 - [ ] A change restarts the live image with the new values, with no build; only variables marked "needed at build" rebuild
 - [ ] Secrets encrypted per app under the slice 3 master key and kept out of logs and images
+- [ ] Sealed variables, as Railway's: optional per variable, write-only once saved, held by `tero-keys` and never returned to the dashboard, so the internet-facing process can't read app secrets in clear (the failure behind slice 3). Sealing can't be undone; a sealed value can be replaced, with a fresh TOTP code
 - [ ] Decide how the agent receives secrets: it can't yet be told apart from other processes running as `tero`, and the dashboard writes the deploys it runs. Candidates: the agent under its own uid, and `tero-keys` releasing an app's secrets only for a source the admin approved with a fresh TOTP check in `tero-keys`
 - [ ] Per-secret list of when it was read, from the security log
 - [ ] `sudo tero assume-breach` lists each app's secret names to rotate at their providers and the link to revoke the GitHub App
