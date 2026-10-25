@@ -1,4 +1,4 @@
-import type { DeployState } from '../lib/utils/api';
+import type { DeployState, LoginMethod } from '../lib/utils/api';
 
 /**
  * Every text the dashboard shows. Other locales are typed against this one,
@@ -16,6 +16,7 @@ export const en = {
 	},
 	header: {
 		home: 'Tero',
+		settings: 'Settings',
 		logOut: 'Log out',
 	},
 	addressHelp: {
@@ -46,10 +47,79 @@ export const en = {
 		passwordLabel: 'Password',
 		codeLabel: '6-digit code from your authenticator app',
 		submit: 'Log in',
+		passkey: {
+			submit: 'Log in with a passkey',
+			orPassword: 'Or log in with your password and a code:',
+			failed: "The passkey couldn't be used. Try again, or log in with your password and a code.",
+		},
 		notSetUp: {
 			beforeInit: "The dashboard login isn't set up yet. Open the setup link printed on the server by",
 			beforeReset: ', or run',
 			afterReset: 'there for a new one.',
+		},
+	},
+	settings: {
+		heading: 'Settings',
+		confirm: {
+			heading: "Confirm it's you",
+			intro: 'Ending sessions and changing passkeys need your password and a new code from your authenticator app. It lasts 5 minutes.',
+			passwordLabel: 'Password',
+			codeLabel: '6-digit code from your authenticator app',
+			submit: 'Confirm',
+		},
+		password: {
+			heading: 'Password',
+			currentLabel: 'Current password',
+			codeLabel: '6-digit code from your authenticator app',
+			newLabel: 'New password',
+			newHint: 'At least 8 characters, without "tero", "admin" or this server\'s address.',
+			endOthers: 'End every other session',
+			submit: 'Change password',
+			changed: 'Your password was changed.',
+		},
+		passkeys: {
+			heading: 'Passkeys',
+			intro: "A passkey logs you in without your password or a code, and a fake copy of this page can't use it. Your password and authenticator app keep working.",
+			caption: 'Your passkeys',
+			empty: 'No passkeys yet.',
+			nameColumn: 'Name',
+			addedColumn: 'Added',
+			lastUsedColumn: 'Last used',
+			actionsColumn: 'Actions',
+			neverUsed: 'Never',
+			nameLabel: 'Passkey name',
+			defaultName: 'Passkey',
+			add: 'Add a passkey',
+			rename: 'Rename',
+			save: 'Save',
+			cancel: 'Cancel',
+			remove: (name: string) => `Remove ${name}`,
+			endOthers: 'End every other session after adding or removing a passkey',
+			unsupported: "This browser can't create passkeys.",
+			failed: "The passkey couldn't be created. Try again, or use another authenticator.",
+			added: (name: string) => `${name} was added.`,
+			removed: (name: string) => `${name} was removed.`,
+		},
+		sessions: {
+			heading: 'Active sessions',
+			caption: 'Where you are logged in, newest first',
+			browserColumn: 'Browser',
+			methodColumn: 'Logged in with',
+			startedColumn: 'Started',
+			lastUsedColumn: 'Last used',
+			ipColumn: 'IP address',
+			actionsColumn: 'Actions',
+			current: 'This browser',
+			end: 'End',
+			endOthers: 'End all other sessions',
+			browserOn: (browser: string, system: string) => `${browser} on ${system}`,
+			unknownBrowser: 'Unknown browser',
+			ipChanged: (loginIP: string, lastIP: string) => `${lastIP} (logged in from ${loginIP})`,
+			methods: {
+				password: 'Password and code',
+				passkey: 'Passkey',
+				setup: 'Setup link',
+			} satisfies Record<LoginMethod, string>,
 		},
 	},
 	home: {

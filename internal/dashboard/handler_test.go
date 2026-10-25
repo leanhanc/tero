@@ -59,12 +59,17 @@ func newTestDashboard(t *testing.T) testDashboard {
 	now := time.Unix(1_800_000_000, 0)
 	secret := ""
 	refusals := &[]string{}
-	keyService := keys.NewService(keysDB, map[int][]byte{1: make([]byte, 32)}, keys.Options{Now: func() time.Time { return now }})
-	service := auth.New(db, auth.Options{
+	keyService, err := keys.NewService(keysDB, map[int][]byte{1: make([]byte, 32)}, keys.Options{
+		Domain: "dash.example.com",
+		Now:    func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := auth.New(auth.Options{
 		Keys:      keys.NewLocalClient(keyService, keys.CallerDashboard),
 		Domain:    "dash.example.com",
 		Passwords: password.Policy{Breaches: noBreaches{}},
-		Now:       func() time.Time { return now },
 		Journal: func(_ int, _ string, fields map[string]string) error {
 			if fields["TERO_EVENT"] == "request_refused" {
 				*refusals = append(*refusals, fields["TERO_REASON"])

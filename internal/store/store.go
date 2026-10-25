@@ -1,5 +1,5 @@
-// Package store opens Tero's SQLite database, which holds sessions, trusted
-// browsers, login throttles, apps and deploys. The database belongs to the
+// Package store opens Tero's SQLite database, which holds apps and deploys.
+// Sessions and everything else about the login belong to the key service. The database belongs to the
 // tero user: the service opens it directly, and root CLI commands open it
 // through a child process running as tero, so every file stays owned by tero.
 package store

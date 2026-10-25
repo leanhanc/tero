@@ -2,74 +2,72 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+
+	"github.com/leanhanc/tero/internal/keys"
 )
 
-// LoginResult is what a successful login or setup hands back to the browser.
-type LoginResult struct {
-	SessionToken string
-	// DeviceToken marks the browser as trusted; see DeviceCookie.
-	DeviceToken string
+// SessionCookie is the session cookie's name. The __Host- prefix makes
+// browsers require Secure and Path=/ and refuse a Domain attribute.
+const SessionCookie = "__Host-tero_session"
+
+// DeviceCookie marks a browser the admin has logged in from. It grants
+// nothing by itself: it only moves that browser's failed logins from the
+// account-wide throttle to a per-device one.
+const DeviceCookie = "__Host-tero_device"
+
+// DeviceLifetime is how long a device stays trusted without a login.
+const DeviceLifetime = keys.DeviceLifetime
+
+// Session is a live session, as the dashboard needs it.
+type Session = keys.SessionState
+
+// PasskeyOptions are what the browser passes to the WebAuthn API.
+type PasskeyOptions = keys.PasskeyOptions
+
+// Login has the key service check the password and TOTP code and start a
+// session.
+func (s *Service) Login(ctx context.Context, browser Browser, givenPassword, code string) (LoginResult, error) {
+	result, err := s.keys.LoginPassword(ctx, browser, givenPassword, code)
+	return result, fromKeys(err)
 }
 
-// Login has the key service check the password and TOTP code and returns a
-// new session. deviceToken is the browser's trusted-device cookie, if any.
-// The attempt is charged to the throttle before credentials are checked, so
-// a rate-limited client learns nothing about its credentials, and the key
-// service is only asked about attempts the throttle let through.
-func (s *Service) Login(ctx context.Context, ip, deviceToken, givenPassword, code string) (LoginResult, error) {
-	throttles, isTrustedDevice, err := s.throttleKeys(ctx, ip, deviceToken)
-	if err != nil {
-		return LoginResult{}, err
-	}
-	if err := s.checkThrottle(ctx, throttles); err != nil {
-		return LoginResult{}, err
-	}
-
-	charged, err := s.chargeAttempt(ctx, throttles)
-	if err != nil {
-		return LoginResult{}, err
-	}
-
-	err = fromKeys(s.keys.CheckLogin(ctx, ip, givenPassword, code))
-	switch {
-	case err == nil:
-	case errors.Is(err, ErrInvalidCredentials):
-		s.recordLockout(ctx, ip, charged)
-		return LoginResult{}, err
-	default:
-		// Not set up, locked, or the key service is down: none of these say
-		// anything about the credentials, so its failure is taken back.
-		if refundErr := s.refund(ctx, charged); refundErr != nil {
-			return LoginResult{}, refundErr
-		}
-		return LoginResult{}, err
-	}
-
-	result, err := s.startSession(ctx, deviceToken, isTrustedDevice)
-	if err != nil {
-		return LoginResult{}, err
-	}
-
-	return result, s.forgive(ctx, charged)
+// BeginPasskeyLogin returns the options for a usernameless passkey login.
+func (s *Service) BeginPasskeyLogin(ctx context.Context, ip string) (PasskeyOptions, error) {
+	options, err := s.keys.BeginPasskeyLogin(ctx, ip)
+	return options, fromKeys(err)
 }
 
-// startSession creates a session and trusts the browser in one transaction.
-func (s *Service) startSession(ctx context.Context, deviceToken string, isTrustedDevice bool) (LoginResult, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return LoginResult{}, err
-	}
-	defer tx.Rollback()
-
-	sessionToken, err := s.createSession(ctx, tx)
-	if err != nil {
-		return LoginResult{}, err
-	}
-	newDeviceToken, err := s.trustDevice(ctx, tx, deviceToken, isTrustedDevice)
-	if err != nil {
-		return LoginResult{}, err
+// LoginPasskey has the key service check a passkey answer and start a
+// session. Any failure reads the same, so it doesn't say whether the login
+// was set up or which check failed.
+func (s *Service) LoginPasskey(ctx context.Context, browser Browser, challengeID string, answer json.RawMessage) (LoginResult, error) {
+	result, err := s.keys.LoginPasskey(ctx, browser, challengeID, answer)
+	err = fromKeys(err)
+	if errors.Is(err, ErrInvalidCredentials) || errors.Is(err, ErrNotSetUp) {
+		return LoginResult{}, ErrPasskeyFailed
 	}
 
-	return LoginResult{SessionToken: sessionToken, DeviceToken: newDeviceToken}, tx.Commit()
+	return result, err
+}
+
+// Authenticate checks a session token, marking the session as used from ip.
+// It returns ErrSessionExpired for unknown, ended, idle or too old sessions.
+func (s *Service) Authenticate(ctx context.Context, token, ip string) (Session, error) {
+	if token == "" {
+		return Session{}, ErrSessionExpired
+	}
+
+	session, err := s.keys.CheckSession(ctx, token, ip)
+	return session, fromKeys(err)
+}
+
+// Logout ends the session for token.
+func (s *Service) Logout(ctx context.Context, token string) error {
+	if token == "" {
+		return nil
+	}
+
+	return fromKeys(s.keys.EndSession(ctx, token))
 }

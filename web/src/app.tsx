@@ -4,6 +4,7 @@ import { AppPage } from './features/app/app-page';
 import { HomePage } from './features/home/home-page';
 import { LoginPage } from './features/login/login-page';
 import { NewAppPage } from './features/new-app/new-app-page';
+import { SettingsPage } from './features/settings/settings-page';
 import { SetupPage } from './features/setup/setup-page';
 import type { Messages } from './locales/en';
 import { type DashboardState, errorMessage, getState } from './lib/utils/api';
@@ -55,6 +56,10 @@ const appPathPattern = /^\/apps\/([a-z][a-z0-9-]*)$/;
 function SignedInPage({ path, onLogout }: { path: string; onLogout: () => void }) {
 	if (path === '/apps/new') {
 		return <NewAppPage onLogout={onLogout} />;
+	}
+
+	if (path === '/settings') {
+		return <SettingsPage onLogout={onLogout} />;
 	}
 
 	const appName = appPathPattern.exec(path)?.[1];

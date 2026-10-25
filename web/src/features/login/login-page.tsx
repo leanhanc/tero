@@ -1,5 +1,6 @@
 import { useMessages } from '../../lib/utils/locale';
 import { LoginForm } from './components/login-form';
+import { PasskeyLogin } from './components/passkey-login';
 import { NotSetUpNotice } from './components/not-set-up-notice';
 
 type LoginPageProps = {
@@ -13,7 +14,14 @@ export function LoginPage({ isSetUp, onLogin }: LoginPageProps) {
 	return (
 		<main>
 			<h1>{messages.login.heading}</h1>
-			{isSetUp ? <LoginForm onLogin={onLogin} /> : <NotSetUpNotice />}
+			{isSetUp ? (
+				<>
+					<PasskeyLogin onLogin={onLogin} />
+					<LoginForm onLogin={onLogin} />
+				</>
+			) : (
+				<NotSetUpNotice />
+			)}
 		</main>
 	);
 }

@@ -1,6 +1,6 @@
 // Package dashboard serves the dashboard's JSON API under /api and the web
 // app everywhere else. All security decisions (login, sessions, throttling)
-// are made here and in package auth, never in the browser.
+// are made by the key service, behind package auth, never in the browser.
 package dashboard
 
 import (
@@ -49,8 +49,11 @@ func NewHandler(service *auth.Service, appService *apps.Service, domain, logDir 
 	h.mux.HandleFunc("POST /api/setup/begin", h.beginSetup)
 	h.mux.HandleFunc("POST /api/setup/finish", h.finishSetup)
 	h.mux.HandleFunc("POST /api/login", h.login)
+	h.mux.HandleFunc("POST /api/login/passkey/begin", h.beginPasskeyLogin)
+	h.mux.HandleFunc("POST /api/login/passkey/finish", h.finishPasskeyLogin)
 	h.mux.HandleFunc("POST /api/logout", h.logout)
 	h.mux.HandleFunc("GET /api/events", h.requireSession(h.events))
+	h.registerAccountRoutes()
 	h.registerAppRoutes()
 	h.mux.HandleFunc("/api/", h.notFound)
 	h.mux.Handle("/", newWebApp())
@@ -113,7 +116,8 @@ func (h *Handler) state(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isLoggedIn := h.auth.Authenticate(r.Context(), cookieValue(r, auth.SessionCookie)) == nil
+	_, err = h.auth.Authenticate(r.Context(), cookieValue(r, auth.SessionCookie), clientIP(r))
+	isLoggedIn := err == nil
 	writeJSON(w, http.StatusOK, stateResponse{IsSetUp: isSetUp, IsLoggedIn: isLoggedIn})
 }
 
@@ -172,7 +176,7 @@ func (h *Handler) finishSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.auth.FinishSetup(r.Context(), clientIP(r), request.Token, request.Code)
+	result, err := h.auth.FinishSetup(r.Context(), browserOf(r), request.Token, request.Code)
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -193,14 +197,48 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.auth.Login(r.Context(), clientIP(r), cookieValue(r, auth.DeviceCookie), request.Password, request.Code)
+	result, err := h.auth.Login(r.Context(), browserOf(r), request.Password, request.Code)
+	h.finishLogin(w, r, result, err)
+}
+
+func (h *Handler) beginPasskeyLogin(w http.ResponseWriter, r *http.Request) {
+	var request struct{}
+	if !h.readJSON(w, r, &request) {
+		return
+	}
+
+	options, err := h.auth.BeginPasskeyLogin(r.Context(), clientIP(r))
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
 
-	// The session this browser had before logging in ends, so a token set
-	// before authentication can't outlive it (OWASP ASVS v5.0.0-7.2.4).
+	writeJSON(w, http.StatusOK, options)
+}
+
+type passkeyLoginRequest struct {
+	ChallengeID string          `json:"challengeId"`
+	Credential  json.RawMessage `json:"credential"`
+}
+
+func (h *Handler) finishPasskeyLogin(w http.ResponseWriter, r *http.Request) {
+	var request passkeyLoginRequest
+	if !h.readJSON(w, r, &request) {
+		return
+	}
+
+	result, err := h.auth.LoginPasskey(r.Context(), browserOf(r), request.ChallengeID, request.Credential)
+	h.finishLogin(w, r, result, err)
+}
+
+// finishLogin sets the cookies of a successful login. The session this
+// browser had before logging in ends, so a token set before authentication
+// can't outlive it (OWASP ASVS v5.0.0-7.2.4).
+func (h *Handler) finishLogin(w http.ResponseWriter, r *http.Request, result auth.LoginResult, err error) {
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
 	if err := h.auth.Logout(r.Context(), cookieValue(r, auth.SessionCookie)); err != nil {
 		h.fail(w, r, err)
 		return
@@ -225,7 +263,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
-	events, err := h.auth.RecentEvents(r.Context(), recentEvents)
+	events, err := h.auth.RecentEvents(r.Context(), sessionToken(r), recentEvents)
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -234,10 +272,11 @@ func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"events": events})
 }
 
-// requireSession answers 401 unless the request carries a live session.
+// requireSession answers 401 unless the request carries a live session,
+// which the key service checks on every request.
 func (h *Handler) requireSession(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		err := h.auth.Authenticate(r.Context(), cookieValue(r, auth.SessionCookie))
+		session, err := h.auth.Authenticate(r.Context(), sessionToken(r), clientIP(r))
 		if errors.Is(err, auth.ErrSessionExpired) {
 			h.auth.RecordRefusal(clientIP(r), r.URL.Path, auth.RefusedNoSession)
 			clearSessionCookie(w)
@@ -249,7 +288,7 @@ func (h *Handler) requireSession(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		next(w, r)
+		next(w, r.WithContext(context.WithValue(r.Context(), sessionKey{}, session)))
 	}
 }
 
@@ -277,9 +316,19 @@ func (h *Handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		auth.ErrSessionExpired:     http.StatusUnauthorized,
 		auth.ErrKeysUnavailable:    http.StatusServiceUnavailable,
 		auth.ErrLoginLocked:        http.StatusTooManyRequests,
+		auth.ErrNotConfirmed:       http.StatusForbidden,
+		auth.ErrPasskeyFailed:      http.StatusUnauthorized,
+		auth.ErrPasskeyLimit:       http.StatusConflict,
+		auth.ErrInvalidPasskeyName: http.StatusUnprocessableEntity,
+		auth.ErrNotFound:           http.StatusNotFound,
 		password.ErrTooShort:       http.StatusUnprocessableEntity,
 		password.ErrTooLong:        http.StatusUnprocessableEntity,
 		password.ErrBreached:       http.StatusUnprocessableEntity,
+	}
+	var contextWord password.ContextWordError
+	if errors.As(err, &contextWord) {
+		writeError(w, http.StatusUnprocessableEntity, contextWord)
+		return
 	}
 	for known, status := range statuses {
 		if errors.Is(err, known) {
@@ -321,6 +370,29 @@ func clearSessionCookie(w http.ResponseWriter) {
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
 	})
+}
+
+// sessionKey is the request context key for the session requireSession
+// checked.
+type sessionKey struct{}
+
+// currentSession is the session requireSession checked for this request.
+func currentSession(r *http.Request) auth.Session {
+	session, _ := r.Context().Value(sessionKey{}).(auth.Session)
+	return session
+}
+
+// sessionToken is the session cookie's value. The key service decides
+// whether it is a live session.
+func sessionToken(r *http.Request) string {
+	return cookieValue(r, auth.SessionCookie)
+}
+
+// browserOf is what the key service is told about the browser: its IP, its
+// trusted-device cookie and its user agent, for throttling and the session
+// list.
+func browserOf(r *http.Request) auth.Browser {
+	return auth.Browser{IP: clientIP(r), DeviceToken: cookieValue(r, auth.DeviceCookie), UserAgent: r.UserAgent()}
 }
 
 func cookieValue(r *http.Request, name string) string {

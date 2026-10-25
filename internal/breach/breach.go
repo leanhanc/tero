@@ -2,8 +2,9 @@
 // that may be compromised. It stops the dashboard and every other process
 // running as tero, so nothing an attacker left in memory survives, moves
 // aside what something running as tero could have planted to run later,
-// replaces everything the dashboard could have read or forged (sessions,
-// trusted browsers, certificates and their keys, the login), rotates the
+// replaces everything the dashboard could have read or used (sessions,
+// trusted browsers, certificates and their keys, the login and passkeys),
+// rotates the
 // master key, and tells the admin what to do outside the server. Apps are
 // down until tero's user manager and the dashboard start again.
 package breach
@@ -69,9 +70,6 @@ type Options struct {
 	// TeroUID is the tero user's uid, whose user manager and processes are
 	// stopped.
 	TeroUID int
-	// ClearSessions ends the dashboard's sessions, trusted browsers and
-	// throttles in tero's database.
-	ClearSessions func(context.Context) error
 }
 
 const plan = `This resets everything a compromised dashboard could have read or planted:
@@ -82,7 +80,7 @@ const plan = `This resets everything a compromised dashboard could have read or 
   - ends every dashboard session and forgets every trusted browser
   - deletes the dashboard's and apps' certificates and keys, so new ones are issued
   - replaces the master key
-  - resets the dashboard password and TOTP, and prints a new setup link
+  - resets the dashboard password, TOTP and passkeys, and prints a new setup link
 
 Type yes to continue: `
 
@@ -123,9 +121,9 @@ func Run(ctx context.Context, opts Options) (err error) {
 		return fmt.Errorf("move aside tero's crontab: %w", err)
 	}
 	// Anything left running as tero (a process started outside its slice)
-	// could write a session into tero's database once the reset is done.
-	// With none left, nothing can change tero's files while they are
-	// checked and moved.
+	// could keep acting as the dashboard once the reset is done. With none
+	// left, nothing can change tero's files while they are checked and
+	// moved.
 	if err := stopTeroProcesses(ctx, opts); err != nil {
 		return err
 	}
@@ -177,9 +175,6 @@ func stopTeroProcesses(ctx context.Context, opts Options) error {
 }
 
 func reset(ctx context.Context, opts Options) (string, error) {
-	if err := opts.ClearSessions(ctx); err != nil {
-		return "", fmt.Errorf("end the dashboard's sessions: %w", err)
-	}
 	if err := os.RemoveAll(filepath.Join(opts.Root, caddyStorage)); err != nil {
 		return "", fmt.Errorf("delete the certificates: %w", err)
 	}
@@ -208,7 +203,7 @@ func report(ctx context.Context, opts Options, aside string, moved []string, lin
 	fmt.Fprintln(out, "\nThe server was reset. Outside the server:")
 	fmt.Fprintln(out, "  - Install the latest Tero if this may have come from a bug in Tero")
 	fmt.Fprintln(out, "  - Change the old dashboard password anywhere else you used it")
-	fmt.Fprintln(out, "  - Remove the old Tero entry from your authenticator app")
+	fmt.Fprintln(out, "  - Remove the old Tero entry from your authenticator app, and the old Tero passkeys from your devices")
 	fmt.Fprintln(out, "  - Check the SSH keys in ~/.ssh/authorized_keys of every user on this server")
 
 	for _, path := range moved {

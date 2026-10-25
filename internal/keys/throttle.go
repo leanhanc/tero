@@ -1,4 +1,4 @@
-package auth
+package keys
 
 import (
 	"context"
@@ -6,12 +6,11 @@ import (
 	"errors"
 	"net/netip"
 	"time"
-
-	"github.com/leanhanc/tero/internal/keys"
 )
 
-// Failed logins are throttled per source IP and, for browsers that have never
-// logged in, for the account as a whole (OWASP ASVS v5.0.0-6.3.1). A browser
+// Failed logins and confirmations are throttled per source IP and, for
+// browsers that have never logged in, for the account as a whole (OWASP ASVS
+// v5.0.0-6.3.1). The source IP is the one the dashboard saw. A browser
 // holding a trusted-device cookie is throttled on that device instead of the
 // account, so strangers failing logins can't lock the admin out. Past the
 // threshold, each further failure doubles the lockout, up to maxLockout.
@@ -34,10 +33,15 @@ type throttleKey struct {
 var accountKey = throttleKey{name: "account", threshold: accountThreshold}
 
 // ipKey groups IPv6 clients by /64, since one host usually gets a whole /64
-// and could otherwise rotate addresses past the limit.
+// and could otherwise rotate addresses past the limit. The IP comes from the
+// dashboard; anything that isn't one shares a single key, so made-up values
+// can't add a row each.
 func ipKey(ip string) throttleKey {
 	address, err := netip.ParseAddr(ip)
-	if err == nil && address.Is6() && !address.Is4In6() {
+	if err != nil {
+		return throttleKey{name: "ip:invalid", threshold: ipThreshold}
+	}
+	if address.Is6() && !address.Is4In6() {
 		prefix, _ := address.Prefix(64)
 		return throttleKey{name: "ip:" + prefix.String(), threshold: ipThreshold}
 	}
@@ -197,9 +201,11 @@ func (s *Service) refund(ctx context.Context, charged attempt) error {
 }
 
 // recordLockout records a rate_limited event when a failed attempt started a
-// lockout. The failure itself is recorded by the key service.
-func (s *Service) recordLockout(ctx context.Context, ip string, charged attempt) {
-	if charged.hasStartedLockout {
-		s.record(ctx, keys.EventRateLimited, ip)
+// lockout.
+func (s *Service) recordLockout(ctx context.Context, ip string, charged attempt) error {
+	if !charged.hasStartedLockout {
+		return nil
 	}
+
+	return s.recordOwn(ctx, EventRateLimited, ip)
 }

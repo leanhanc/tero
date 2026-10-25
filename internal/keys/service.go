@@ -1,10 +1,11 @@
 // Package keys is the key service, `tero keys`: the only process that holds
 // Tero's master key. It runs as its own system user, tero-keys, with no
 // network, and answers the dashboard and root over a Unix socket. It keeps
-// the admin's password hash, the TOTP secret (sealed with the master key) and
-// the setup links, checks every login, and keeps the security log, so
-// nothing running as tero can read the key, read or replace the admin's
-// credentials, or change a recorded event.
+// the admin's password hash, the TOTP secret (sealed with the master key),
+// passkeys and setup links, checks every login, holds the dashboard's
+// sessions, and keeps the security log, so nothing running as tero can read
+// the key, read or replace the admin's credentials, create a session, or
+// change a recorded event.
 package keys
 
 import (
@@ -19,6 +20,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/go-webauthn/webauthn/webauthn"
+
 	"github.com/leanhanc/tero/internal/password"
 	"github.com/leanhanc/tero/internal/totp"
 )
@@ -32,17 +35,34 @@ var Migrations embed.FS
 // Errors a request can end with. They cross the socket as codes; see
 // protocol.go.
 var (
-	ErrRefused       = errors.New("the key service refused this request")
-	ErrUnavailable   = errors.New("the key service isn't running")
-	ErrInvalidLink   = errors.New("the setup link is invalid, already used or expired")
-	ErrAlreadySetUp  = errors.New("the dashboard login is already set up")
-	ErrNotSetUp      = errors.New("the dashboard login isn't set up")
-	ErrInvalidCode   = errors.New("the TOTP code didn't match")
-	ErrWrongLogin    = errors.New("wrong password or code")
-	ErrLocked        = errors.New("login is locked after too many wrong codes")
-	ErrKeyNotLoaded  = errors.New("a value is sealed with a master key that isn't loaded")
-	ErrHashingIsBusy = errors.New("the key service is busy")
+	ErrRefused        = errors.New("the key service refused this request")
+	ErrUnavailable    = errors.New("the key service isn't running")
+	ErrInvalidLink    = errors.New("the setup link is invalid, already used or expired")
+	ErrAlreadySetUp   = errors.New("the dashboard login is already set up")
+	ErrNotSetUp       = errors.New("the dashboard login isn't set up")
+	ErrInvalidCode    = errors.New("the TOTP code didn't match")
+	ErrWrongLogin     = errors.New("wrong password or code")
+	ErrLocked         = errors.New("login is locked after too many wrong codes")
+	ErrKeyNotLoaded   = errors.New("a value is sealed with a master key that isn't loaded")
+	ErrHashingIsBusy  = errors.New("the key service is busy")
+	ErrSessionEnded   = errors.New("the session has ended")
+	ErrNotConfirmed   = errors.New("confirm it's you first")
+	ErrPasskeyLimit   = errors.New("there are already as many passkeys as allowed")
+	ErrInvalidName    = errors.New("a passkey name must be 1 to 64 characters")
+	ErrNotFound       = errors.New("not found")
+	ErrInvalidPasskey = errors.New("the passkey answer is invalid or expired")
 )
+
+// RateLimitedError means too many failures came from this IP, browser or for
+// the account. It is returned before credentials are checked, so it says
+// nothing about whether they were right.
+type RateLimitedError struct {
+	RetryAfter time.Duration
+}
+
+func (e RateLimitedError) Error() string {
+	return "Too many attempts. Try again later"
+}
 
 const (
 	// setupLinkLifetime bounds how long a printed link works (OWASP ASVS
@@ -62,29 +82,38 @@ const (
 
 // Service is the key service's state for one server.
 type Service struct {
-	db      *sql.DB
-	keys    keyring
-	now     func() time.Time
-	journal JournalWriter
-	limits  limits
+	db         *sql.DB
+	keys       keyring
+	now        func() time.Time
+	journal    JournalWriter
+	limits     limits
+	passkeys   *webauthn.WebAuthn
+	challenges challenges
 }
 
-// Options configure a Service. Now and Journal default to the real clock and
-// no journal; tests replace them.
+// Options configure a Service. Domain is the dashboard's domain, which
+// passkeys are bound to. Now and Journal default to the real clock and no
+// journal; tests replace them.
 type Options struct {
+	Domain  string
 	Now     func() time.Time
 	Journal JournalWriter
 }
 
 // NewService returns a Service backed by db, which must already be migrated,
 // holding the master key versions in keys.
-func NewService(db *sql.DB, keys map[int][]byte, opts Options) *Service {
+func NewService(db *sql.DB, keys map[int][]byte, opts Options) (*Service, error) {
 	now := opts.Now
 	if now == nil {
 		now = time.Now
 	}
 
-	return &Service{db: db, keys: keys, now: now, journal: opts.Journal}
+	passkeys, err := newRelyingParty(opts.Domain)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Service{db: db, keys: keys, now: now, journal: opts.Journal, passkeys: passkeys}, nil
 }
 
 // Enrolment is the new TOTP secret, returned once so the dashboard can show
@@ -127,7 +156,10 @@ func (s *Service) IssueSetupLink(ctx context.Context) (string, error) {
 // pending on the link until FinishSetup confirms a code. The dashboard has
 // already checked the password against the length, blocklist and breach
 // rules, which need the network this service doesn't have.
-func (s *Service) BeginSetup(ctx context.Context, token, newPassword string) (Enrolment, error) {
+func (s *Service) BeginSetup(ctx context.Context, ip, token, newPassword string) (Enrolment, error) {
+	if err := s.checkThrottle(ctx, []throttleKey{ipKey(ip)}); err != nil {
+		return Enrolment{}, err
+	}
 	if _, err := s.usableLink(ctx, token); err != nil {
 		return Enrolment{}, err
 	}
@@ -168,9 +200,25 @@ func (s *Service) BeginSetup(ctx context.Context, token, newPassword string) (En
 	return Enrolment{Secret: secret}, nil
 }
 
-// FinishSetup checks a code against the pending secret and, in one
+// FinishSetup checks a code against the pending secret, creates the admin,
+// uses up the link and logs the admin in, trusting this browser. A wrong
+// code is charged to the throttle like a failed login, so the six-digit code
+// can't be guessed at speed.
+func (s *Service) FinishSetup(ctx context.Context, browser Browser, token, code string) (LoginResult, error) {
+	throttles := []throttleKey{ipKey(browser.IP), accountKey}
+	err := s.checkThrottled(ctx, throttles, browser.IP, func(ctx context.Context) error {
+		return s.createAdmin(ctx, browser.IP, token, code)
+	})
+	if err != nil {
+		return LoginResult{}, err
+	}
+
+	return s.startSession(ctx, MethodSetup, Browser{IP: browser.IP, UserAgent: browser.UserAgent}, false)
+}
+
+// createAdmin checks a code against the pending secret and, in one
 // transaction, creates the admin and uses up the link.
-func (s *Service) FinishSetup(ctx context.Context, ip, token, code string) error {
+func (s *Service) createAdmin(ctx context.Context, ip, token, code string) error {
 	link, err := s.usableLink(ctx, token)
 	if err != nil {
 		return err
@@ -199,6 +247,11 @@ func (s *Service) FinishSetup(ctx context.Context, ip, token, code string) error
 		return err
 	}
 
+	userHandle, err := newUserHandle()
+	if err != nil {
+		return err
+	}
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -207,10 +260,10 @@ func (s *Service) FinishSetup(ctx context.Context, ip, token, code string) error
 
 	now := s.now().Unix()
 	inserted, err := tx.ExecContext(ctx, `
-		INSERT INTO admin (id, password_hash, totp_key_version, totp_secret, last_totp_step, created_at)
-		VALUES (1, ?, ?, ?, ?, ?)
+		INSERT INTO admin (id, password_hash, totp_key_version, totp_secret, last_totp_step, webauthn_user_id, created_at)
+		VALUES (1, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO NOTHING`,
-		link.passwordHash.String, sealedSecret.version, sealedSecret.ciphertext, step, now)
+		link.passwordHash.String, sealedSecret.version, sealedSecret.ciphertext, step, userHandle, now)
 	if err != nil {
 		return err
 	}
@@ -285,160 +338,10 @@ func (s *Service) isSetUp(ctx context.Context) (bool, error) {
 	return count == 1, err
 }
 
-// CheckLogin checks the password and the code. It always runs the password
-// hash, so timing doesn't say which factor was wrong, and answers only pass
-// or fail. A code passes once: the last used step only moves forward
-// (OWASP ASVS v5.0.0-6.5.1).
-func (s *Service) CheckLogin(ctx context.Context, ip, givenPassword, code string) error {
-	if !s.limits.allowCheck(s.now()) {
-		return ErrHashingIsBusy
-	}
-
-	locked, err := s.isLocked(ctx)
-	if err != nil {
-		return err
-	}
-	if locked {
-		return ErrLocked
-	}
-
-	var passwordHash string
-	var secretValue sealed
-	var lastStep int64
-	err = s.db.QueryRowContext(ctx, "SELECT password_hash, totp_key_version, totp_secret, last_totp_step FROM admin WHERE id = 1").
-		Scan(&passwordHash, &secretValue.version, &secretValue.ciphertext, &lastStep)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNotSetUp
-	}
-	if err != nil {
-		return err
-	}
-
-	isPasswordValid, err := password.Verify(ctx, givenPassword, passwordHash)
-	if errors.Is(err, password.ErrBusy) {
-		return ErrHashingIsBusy
-	}
-	if err != nil {
-		return err
-	}
-	// Checks running when the limit was reached must not get their codes
-	// tried.
-	if locked, err := s.isLocked(ctx); err != nil {
-		return err
-	} else if locked {
-		return ErrLocked
-	}
-	secret, err := s.keys.open(adminSecretPurpose, secretValue)
-	if err != nil {
-		return err
-	}
-	step, isCodeValid := totp.Verify(string(secret), code, s.now(), lastStep)
-
-	switch {
-	case isPasswordValid && isCodeValid:
-		return s.succeedLogin(ctx, ip, step)
-	case isPasswordValid:
-		return s.failCode(ctx, ip)
-	default:
-		// The same write a wrong code makes, so the time an answer takes
-		// doesn't say which factor was wrong.
-		if _, err := s.db.ExecContext(ctx, "DELETE FROM code_failures WHERE at <= ?", s.now().Add(-codeFailureWindow).Unix()); err != nil {
-			return err
-		}
-		if err := s.recordOwn(ctx, EventLoginFailed, ip); err != nil {
-			return err
-		}
-		return ErrWrongLogin
-	}
-}
-
-func (s *Service) succeedLogin(ctx context.Context, ip string, step int64) error {
-	// The lock is checked in the same statement, so a check that was
-	// hashing when the limit was reached can't pass.
-	result, err := s.db.ExecContext(ctx, `
-		UPDATE admin SET last_totp_step = ?
-		WHERE id = 1 AND last_totp_step < ?
-			AND NOT EXISTS (SELECT 1 FROM login_lock WHERE id = 1 AND locked_until > ?)`,
-		step, step, s.now().Unix())
-	if err != nil {
-		return err
-	}
-	if changed, _ := result.RowsAffected(); changed != 1 {
-		locked, err := s.isLocked(ctx)
-		if err != nil {
-			return err
-		}
-		if locked {
-			return ErrLocked
-		}
-		// Another request used this code first.
-		if err := s.recordOwn(ctx, EventLoginFailed, ip); err != nil {
-			return err
-		}
-		return ErrWrongLogin
-	}
-
-	return s.recordOwn(ctx, EventLoginSucceeded, ip)
-}
-
-// failCode counts a wrong code that came with the right password, which
-// means someone has the password, and locks login once there are too many.
-func (s *Service) failCode(ctx context.Context, ip string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	now := s.now()
-	if _, err := tx.ExecContext(ctx, "DELETE FROM code_failures WHERE at <= ?", now.Add(-codeFailureWindow).Unix()); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, "INSERT INTO code_failures (at) VALUES (?)", now.Unix()); err != nil {
-		return err
-	}
-
-	var failures int
-	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM code_failures").Scan(&failures); err != nil {
-		return err
-	}
-	isNowLocked := failures >= codeFailureLimit
-	if isNowLocked {
-		_, err := tx.ExecContext(ctx, `
-			INSERT INTO login_lock (id, locked_until) VALUES (1, ?)
-			ON CONFLICT (id) DO UPDATE SET locked_until = excluded.locked_until`, now.Add(codeLockout).Unix())
-		if err != nil {
-			return err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-
-	if err := s.recordOwn(ctx, EventCodeFailed, ip); err != nil {
-		return err
-	}
-	if isNowLocked {
-		if err := s.recordOwn(ctx, EventCodeLocked, ip); err != nil {
-			return err
-		}
-	}
-
-	return ErrWrongLogin
-}
-
-func (s *Service) isLocked(ctx context.Context) (bool, error) {
-	var lockedUntil int64
-	err := s.db.QueryRowContext(ctx, "SELECT locked_until FROM login_lock WHERE id = 1").Scan(&lockedUntil)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-
-	return s.now().Before(time.Unix(lockedUntil, 0)), err
-}
-
-// ResetLogin deletes the admin, every setup link and the code guessing
-// state. Only root can ask for it; it then issues a new link.
+// ResetLogin deletes the admin, every passkey, setup link, session, trusted
+// browser and throttle, and the code guessing state. Only root can ask for
+// it; it then issues a new link. Whoever runs it has proven root access to
+// the server, which is why the throttles go too.
 func (s *Service) ResetLogin(ctx context.Context) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -448,7 +351,11 @@ func (s *Service) ResetLogin(ctx context.Context) error {
 
 	for _, statement := range []string{
 		"DELETE FROM admin",
+		"DELETE FROM passkeys",
 		"DELETE FROM setup_links",
+		"DELETE FROM sessions",
+		"DELETE FROM trusted_devices",
+		"DELETE FROM login_throttles",
 		"DELETE FROM code_failures",
 		"DELETE FROM login_lock",
 	} {
@@ -459,6 +366,7 @@ func (s *Service) ResetLogin(ctx context.Context) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	s.challenges.clear()
 
 	return s.recordOwn(ctx, EventLoginReset, "")
 }
@@ -611,8 +519,11 @@ func (s *Service) reseal(purpose string, value sealed) (sealed, error) {
 	return s.keys.seal(purpose, plaintext)
 }
 
-// Prune deletes expired setup links, old code failures, events older than a
-// year, and the oldest events past maxEvents.
+// Prune deletes what can no longer be used: expired setup links and
+// sessions, stale trusted browsers, throttle counters that are both
+// forgotten and unlocked, old code failures, events older than a year, and
+// the oldest events past maxEvents. Expired rows are already refused when
+// presented; pruning only keeps the tables small.
 func (s *Service) Prune(ctx context.Context) error {
 	now := s.now()
 	statements := []struct {
@@ -620,12 +531,18 @@ func (s *Service) Prune(ctx context.Context) error {
 		args  []any
 	}{
 		{"DELETE FROM setup_links WHERE used_at IS NULL AND expires_at <= ?", []any{now.Unix()}},
+		{"DELETE FROM sessions WHERE last_seen_at <= ? OR created_at <= ?",
+			[]any{now.Add(-sessionIdleTimeout).Unix(), now.Add(-sessionAbsoluteTimeout).Unix()}},
+		{"DELETE FROM trusted_devices WHERE last_used_at < ?", []any{now.Add(-DeviceLifetime).Unix()}},
+		{"DELETE FROM login_throttles WHERE last_failure < ? AND locked_until <= ?",
+			[]any{now.Add(-failureMemory).Unix(), now.Unix()}},
 		{"DELETE FROM code_failures WHERE at <= ?", []any{now.Add(-codeFailureWindow).Unix()}},
 		{"DELETE FROM security_events WHERE at < ?", []any{now.Add(-eventRetention).Unix()}},
 		// A flood of one kind of event must not push out the record of a
 		// reset, a rotation or a successful login.
 		{`DELETE FROM security_events WHERE id <= (SELECT max(id) FROM security_events) - ?
-			AND type NOT IN ('login_succeeded', 'setup_completed', 'login_reset', 'key_rotated', 'breach_reset', 'totp_locked')`,
+			AND type NOT IN ('login_succeeded', 'passkey_login_succeeded', 'setup_completed', 'login_reset', 'key_rotated',
+				'breach_reset', 'totp_locked', 'password_changed', 'passkey_added', 'passkey_removed')`,
 			[]any{maxEvents}},
 	}
 
@@ -647,7 +564,8 @@ func pendingSecretPurpose(tokenHash string) string {
 	return "setup_links.pending_totp_secret." + tokenHash
 }
 
-// newToken returns a random 256-bit token for setup links.
+// newToken returns a random 256-bit token for setup links, sessions and
+// trusted browsers.
 func newToken() (string, error) {
 	token := make([]byte, 32)
 	if _, err := rand.Read(token); err != nil {
@@ -657,8 +575,19 @@ func newToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(token), nil
 }
 
+// newID returns a random 128-bit id for rows the dashboard may name, such as
+// sessions and passkeys. An id grants nothing by itself.
+func newID() (string, error) {
+	id := make([]byte, 16)
+	if _, err := rand.Read(id); err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(id), nil
+}
+
 // hashToken is what the database stores in place of a token, so a copy of
-// the database can't be used to set up the login.
+// the database can't be used to set up the login or as a session.
 func hashToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])

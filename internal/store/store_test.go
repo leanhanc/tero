@@ -25,7 +25,7 @@ func TestOpenCreatesPrivateDatabaseWithSchema(t *testing.T) {
 		t.Errorf("database mode = %o, want 600", mode)
 	}
 
-	for _, table := range []string{"sessions", "trusted_devices", "login_throttles", "apps", "deploys"} {
+	for _, table := range []string{"apps", "deploys", "served_routes"} {
 		var name string
 		err := db.QueryRow("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", table).Scan(&name)
 		if err != nil {
@@ -34,8 +34,9 @@ func TestOpenCreatesPrivateDatabaseWithSchema(t *testing.T) {
 	}
 }
 
-// The admin's credentials and the security log belong to the key service
-// (dashboard-access: No credentials in the dashboard's database).
+// The admin's credentials, passkeys, sessions, trusted browsers, throttles
+// and the security log belong to the key service (dashboard-access: No
+// credentials in the dashboard's database).
 func TestDatabaseHoldsNoCredentials(t *testing.T) {
 	db, err := Open(context.Background(), filepath.Join(t.TempDir(), "tero.db"))
 	if err != nil {
@@ -43,7 +44,8 @@ func TestDatabaseHoldsNoCredentials(t *testing.T) {
 	}
 	defer db.Close()
 
-	for _, table := range []string{"admin", "setup_links", "security_events"} {
+	tables := []string{"admin", "setup_links", "security_events", "passkeys", "sessions", "trusted_devices", "login_throttles"}
+	for _, table := range tables {
 		var count int
 		db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name = ?", table).Scan(&count)
 		if count != 0 {
@@ -60,7 +62,7 @@ func TestOpenTwiceKeepsData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := first.Exec("INSERT INTO sessions (token_hash, created_at, last_seen_at) VALUES ('h', 1, 1)"); err != nil {
+	if _, err := first.Exec("INSERT INTO apps (name, repository, branch, created_at) VALUES ('shop', 'https://github.com/a/b', 'main', 1)"); err != nil {
 		t.Fatal(err)
 	}
 	first.Close()
@@ -72,11 +74,11 @@ func TestOpenTwiceKeepsData(t *testing.T) {
 	defer second.Close()
 
 	var count int
-	if err := second.QueryRow("SELECT count(*) FROM sessions").Scan(&count); err != nil {
+	if err := second.QueryRow("SELECT count(*) FROM apps").Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	if count != 1 {
-		t.Fatalf("sessions after reopening = %d, want 1", count)
+		t.Fatalf("apps after reopening = %d, want 1", count)
 	}
 }
 

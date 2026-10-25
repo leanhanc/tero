@@ -12,10 +12,13 @@ context: |
   Root is used only by `sudo tero init` and other `sudo tero ...` CLI commands, never from the dashboard.
   Work is planned in vertical slices. Slices 1 (onboarding and lockdown) and 2 (first deploy of a JavaScript
   backend by `tero agent` under tero's systemd user manager, Railpack in a throwaway rootless BuildKit, apps on
-  `<app>.<public-ip>.nip.io`) are built. Current slice (slice 3): the `tero-keys` system service, its own user
-  with no network, reachable only on a Unix socket, holds the master key sealed by systemd-creds (TPM2 when
-  present), the admin's password hash and encrypted TOTP secret, and the security log. It identifies callers by
-  uid and exact systemd unit. Adds `sudo tero rotate-key` and `sudo tero assume-breach`.
+  `<app>.<public-ip>.nip.io`) and 3 (the `tero-keys` system service, its own user with no network, reachable
+  only on a Unix socket, holding the master key sealed by systemd-creds (TPM2 when present), the admin's password
+  hash and encrypted TOTP secret and the security log, identifying callers by uid and exact systemd unit;
+  `sudo tero rotate-key` and `sudo tero assume-breach`) are built. Current slice (slice 4): account security.
+  `tero-keys` also holds dashboard sessions, trusted browsers, login throttles and passkeys (WebAuthn, verified
+  with go-webauthn), creates every session, and checks the session on every dashboard request. The dashboard
+  gains a settings page: password change, a 5-minute "confirm it's you" window, the session list and passkeys.
   openspec/specs holds only the current slice's capabilities. openspec/drafts holds rough specs for what later
   slices still own (apps, deployments, domains, app logs, build pipeline, GitHub connection); they are not commitments.
   Security standards (ADR 0001): OWASP ASVS 5.0.0 Level 2 for the dashboard and HTTP endpoints, citing

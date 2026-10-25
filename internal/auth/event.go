@@ -30,9 +30,10 @@ func (s *Service) record(ctx context.Context, eventType keys.EventType, ip strin
 	s.journal(journal.PriorityWarning, fmt.Sprintf("Security event %s could not be stored: %v", eventType, err), fields)
 }
 
-// RecentEvents returns the latest events, newest first.
-func (s *Service) RecentEvents(ctx context.Context, limit int) ([]Event, error) {
-	events, err := s.keys.RecentEvents(ctx, limit)
+// RecentEvents returns the latest events, newest first, for the caller's
+// session.
+func (s *Service) RecentEvents(ctx context.Context, session string, limit int) ([]Event, error) {
+	events, err := s.keys.RecentEvents(ctx, session, limit)
 	return events, fromKeys(err)
 }
 

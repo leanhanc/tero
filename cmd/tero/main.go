@@ -80,8 +80,6 @@ func run(ctx context.Context, args []string) error {
 		return runRotateKey(ctx)
 	case "assume-breach":
 		return runAssumeBreach(ctx, commandArgs)
-	case loginlink.Command:
-		return loginlink.RunChild(ctx, commandArgs)
 	case "version", "--version":
 		fmt.Println(version)
 		return nil
@@ -177,15 +175,14 @@ func runAssumeBreach(ctx context.Context, args []string) error {
 	}
 
 	return breach.Run(ctx, breach.Options{
-		Domain:        cfg.DashboardDomain,
-		IsConfirmed:   *isConfirmed,
-		In:            os.Stdin,
-		Out:           os.Stdout,
-		Root:          "/",
-		Run:           sysexec.Host{},
-		Keys:          keyfiles.Host(),
-		TeroUID:       teroUID,
-		ClearSessions: loginlink.ClearSessions,
+		Domain:      cfg.DashboardDomain,
+		IsConfirmed: *isConfirmed,
+		In:          os.Stdin,
+		Out:         os.Stdout,
+		Root:        "/",
+		Run:         sysexec.Host{},
+		Keys:        keyfiles.Host(),
+		TeroUID:     teroUID,
 	})
 }
 

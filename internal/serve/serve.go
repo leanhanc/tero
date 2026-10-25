@@ -6,7 +6,6 @@ package serve
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"time"
 
 	"github.com/caddyserver/caddy/v2"
@@ -46,15 +45,15 @@ func Run(ctx context.Context) error {
 	}
 	defer db.Close()
 
-	service := auth.New(db, auth.Options{
+	service := auth.New(auth.Options{
 		Keys:      keys.NewClient(keys.SocketPath),
 		Domain:    cfg.DashboardDomain,
+		PublicIP:  cfg.PublicIP,
 		Passwords: password.Policy{Breaches: password.NewPwnedPasswords()},
 		Journal:   journal.Send,
 	})
 	appService := apps.NewService(db, cfg.PublicIP, time.Now)
 	dashboard.Activate(dashboard.NewHandler(service, appService, cfg.DashboardDomain, deploylog.Dir))
-	go prunePeriodically(ctx, service)
 
 	settings := caddySettings{Domain: cfg.DashboardDomain, PublicIP: cfg.PublicIP, Issuer: acmeIssuer()}
 	routes, err := loadAppRoutes(ctx, db, settings.PublicIP)
@@ -165,26 +164,4 @@ func buildCaddyConfig(settings caddySettings, appRoutes []appRoute) (*caddy.Conf
 	}
 
 	return &caddyConfig, nil
-}
-
-// pruneInterval is how often expired login data is deleted. Expired rows are
-// already refused when used, so this only keeps the tables small.
-const pruneInterval = 12 * time.Hour
-
-// prunePeriodically prunes at start and then every pruneInterval.
-func prunePeriodically(ctx context.Context, service *auth.Service) {
-	ticker := time.NewTicker(pruneInterval)
-	defer ticker.Stop()
-
-	for {
-		if err := service.Prune(ctx); err != nil && ctx.Err() == nil {
-			slog.Error("pruning the login tables failed", "error", err)
-		}
-
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-	}
 }

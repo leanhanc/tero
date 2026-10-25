@@ -20,15 +20,7 @@ The [sections before the matrix](#documentation-asvs-asks-for) are the documenta
 
 ## Summary
 
-253 requirements: 146 Met, 3 Gap, 6 Planned, 1 Deviation, 3 Open, 5 Later, 89 N/A.
-
-Planned for slice 4, Account security:
-
-| ID | What's missing |
-|---|---|
-| 6.2.2, 6.2.3 | The admin can't change their password in the dashboard. Until then, `sudo tero reset-login` replaces it, and resets TOTP too. |
-| 7.4.5, 7.5.2 | The admin can't list sessions or end them, other than with `sudo tero reset-login`. |
-| 6.1.2, 6.2.11 | No list of context-specific words (such as "tero" or the dashboard domain) is checked for new passwords. |
+253 requirements: 153 Met, 3 Gap, 1 Deviation, 3 Open, 5 Later, 88 N/A.
 
 Gaps, in the order they matter most:
 
@@ -45,24 +37,37 @@ Requirements met with no automated test yet: 1.2.4, 3.4.4, 3.4.5, 6.2.6, 6.2.8, 
 
 ### Login paths
 
-ASVS 6.1.3 and 6.3.4. There are exactly two ways into the dashboard, and both end with a password and a confirmed TOTP code.
+ASVS 6.1.3 and 6.3.4. There are exactly three ways into the dashboard. The key service, `tero-keys`, checks each one and creates the session; the dashboard only relays the request and sets the cookie.
 
-1. **Login**: `POST /api/login` with the password and a TOTP code. It is throttled (see [Brute-force protection](#brute-force-protection)) and records `login_succeeded`, `login_failed` or `rate_limited`.
-2. **Setup link**: printed only on the server, by `sudo tero init` or `sudo tero reset-login`. The token is 256 random bits, sits in the URL fragment so it is never sent in a request line, works once, and expires after 24 hours. Issuing a new link cancels any unused one. Setup asks for a new password, then for a code from the new TOTP secret, and creates the account only when the code is right. It records `setup_link_issued`, `setup_completed` and `setup_code_failed`. Wrong codes count toward the login throttle.
+1. **Login with a password and code**: `POST /api/login` with the password and a TOTP code. It is throttled (see [Brute-force protection](#brute-force-protection)) and records `login_succeeded`, `login_failed` or `rate_limited`.
+2. **Login with a passkey**: `POST /api/login/passkey/begin` returns WebAuthn options with a fresh challenge, and `POST /api/login/passkey/finish` sends the browser's answer. `tero-keys` checks it against the admin's passkeys, the dashboard domain (read from root's configuration, never from a request), the origin `https://<domain>`, user verification and the signature counter. Each challenge works once and for 2 minutes; at most 1,024 are open at a time, at most 4 per IP or IPv6 /64. A failed answer counts toward the per-IP throttle only, an answer for a challenge that is gone isn't counted, and passkey answers are capped at 30 a minute. It records `passkey_login_succeeded`, `passkey_login_failed` or `passkey_counter_mismatch`.
+3. **Setup link**: printed only on the server, by `sudo tero init` or `sudo tero reset-login`. The token is 256 random bits, sits in the URL fragment so it is never sent in a request line, works once, and expires after 24 hours. Issuing a new link cancels any unused one. Setup asks for a new password, then for a code from the new TOTP secret, and creates the account only when the code is right. It records `setup_link_issued`, `setup_completed` and `setup_code_failed`. Wrong codes count toward the login throttle.
 
-Recovery is the second path. `sudo tero reset-login` needs root on the server, which is stronger proof than the password. It deletes the password, the TOTP secret, every session, every trusted device and every throttle counter, records `login_reset`, and prints a new setup link. The admin then enrols a new TOTP secret, exactly as at first setup. The dashboard home shows the reset event at the next login.
+Recovery is the setup path again. `sudo tero reset-login` needs root on the server, which is stronger proof than the password. It deletes the password, the TOTP secret, every passkey, every session, every trusted device and every throttle counter, records `login_reset`, and prints a new setup link. The admin then enrols a new TOTP secret, exactly as at first setup. The dashboard home shows the reset event at the next login.
 
-There is no default account, no password-only login, no API key and no recovery by email or security question.
+Password and TOTP can't be turned off, so they always remain as the fallback to passkeys. There is no default account, no password-only login, no API key and no recovery by email or security question.
+
+### Changing factors and ending sessions
+
+ASVS 6.2.2, 6.2.3, 7.4.3, 7.4.5, 7.5.1 and 7.5.2. The settings page changes the password, lists sessions and manages passkeys. Every request names the browser's session, and `tero-keys` acts only for a live one.
+
+- **Password change** asks for the current password, a current TOTP code and the new password in one form. The new password goes through the same checks as at setup. "End every other session" is checked by default. The TOTP secret and passkeys are kept.
+- **Confirming it's you**: ending sessions and adding, renaming or removing a passkey need the password and a fresh TOTP code entered on this session in the last 5 minutes. Wrong attempts are charged to the login throttles and the code guessing limit, and a code that confirmed can't be used again.
+- **Sessions**: the list shows each session's start, last use, IP at login and latest IP, browser and login method, marks the current one, and ends any other or all the others. Sessions are named by a random id, never by their token.
+- **Passkeys**: up to 10, each named by the admin, verified by `tero-keys`. Adding or removing one offers "End every other session", checked by default. It records `password_changed`, `account_confirmed`, `confirm_failed`, `sessions_ended`, `passkey_added` and `passkey_removed`.
 
 ### Brute-force protection
 
 ASVS 6.1.1 and 6.3.1.
 
-- Every login attempt is counted before the credentials are checked, in one write transaction, so parallel requests can't slip past a limit. A rate-limited client gets the same answer whether its credentials were right or not.
+- The throttles live in `tero-keys`, next to the credentials, so the dashboard can't skip them. The client IP is the one the dashboard saw. Password logins, confirmations and password changes are charged to the same counters.
+- Every attempt is counted before the credentials are checked, in one write transaction, so parallel requests can't slip past a limit. A rate-limited client gets the same answer whether its credentials were right or not.
 - Per source IP (per /64 for IPv6): lockouts start at the 5th failure in a row. Per account: at the 10th.
 - The first lockout lasts 30 seconds and doubles with each further failure, up to 15 minutes. A lockout is only ever extended, never shortened.
 - Counters are forgotten after 24 hours without a failure, or after a successful login. `sudo tero reset-login` clears them.
-- Counters live in SQLite, so restarting the service doesn't reset them.
+- Counters live in SQLite, so restarting the dashboard or the key service doesn't reset them.
+- Failed passkey logins count only toward the per-IP counter: a signature can't be guessed, and counting them on the account would let strangers lock the admin out.
+- Behind the throttles, `tero-keys` answers at most 30 password and code checks a minute, and locks password and code checks for 24 hours after 20 wrong codes with the right password in 24 hours. Passkey logins keep working while it is locked.
 - Account lockout can't be used against the admin: a browser the admin has logged in from carries a `__Host-tero_device` cookie. That browser is limited by its own failures (5) instead of the account's, so strangers failing logins don't lock it out. The cookie grants nothing else, lasts 180 days without a login, and `reset-login` forgets every device.
 - The client IP is the TCP peer address. Caddy serves the dashboard in the same process with no proxy in front, so forwarding headers are never read.
 
@@ -75,24 +80,24 @@ ASVS 6.1.2 and V6.2.
 - Every new password is checked against a bundled list of the 3,000 most common passwords of at least 8 characters, and against the Have I Been Pwned range API. Only the first 5 hex characters of the SHA-1 hash are sent, with `Add-Padding: true`. When the API can't be reached, the bundled list alone decides and a `breach_check_skipped` event is recorded.
 - Passwords are compared exactly as typed: nothing is trimmed or case-folded.
 - Passwords never expire.
-- Context-specific words aren't checked yet; that is planned for slice 4 (6.1.2 and 6.2.11).
+- A new password, at setup or on change, can't contain "tero", "admin", the dashboard domain, any label of the dashboard domain of at least 4 characters that isn't all digits, or the server's public IP, ignoring case (6.1.2 and 6.2.11). The error names the word found.
 
 ### Sessions
 
 ASVS 7.1.1 and 7.1.2.
 
 - A session ends after 30 minutes without a request, and 12 hours after login whatever the activity. The dashboard can deploy code to the server, so sessions are short. The 12-hour limit lets one working day go by without logging in again.
-- The token is 256 random bits in the `__Host-tero_session` cookie (`Secure`, `HttpOnly`, `SameSite=Strict`, `Path=/`, no `Domain`). The database keeps only its SHA-256 hash.
+- The token is 256 random bits in the `__Host-tero_session` cookie (`Secure`, `HttpOnly`, `SameSite=Strict`, `Path=/`, no `Domain`). Only `tero-keys` stores sessions, in its own database, which `tero` can't read, and keeps only the token's SHA-256 hash. It creates a session only after it checked a login itself, and the dashboard asks it to check the cookie on every request, so nothing running as `tero` can create or extend a session.
 - There is no limit on parallel sessions. There is one admin, and each session expires on its own timers.
-- Logging in ends the session the browser already had, if any. Logout ends that session on the server. `sudo tero reset-login` ends all of them.
+- Logging in ends the session the browser already had, if any. Logout ends that session on the server. The settings page ends any other session, or all the others (see [Changing factors and ending sessions](#changing-factors-and-ending-sessions)). `sudo tero reset-login` ends all of them.
 - The signed-in page checks the login state again once 30 idle minutes have passed, so it stops showing data when the server has ended the session.
 
 ### Authorization
 
 ASVS 8.1.1 and 8.1.2. There is one role: the admin, who may do everything the dashboard offers and see every field it shows.
 
-- Without a session: `GET /api/state`, the two setup calls (which need a valid setup link), `POST /api/login`, `POST /api/logout`, and the web app's static files.
-- Every other API route needs a live session, checked in Go on every request.
+- Without a session: `GET /api/state`, the two setup calls (which need a valid setup link), `POST /api/login`, the two passkey login calls, `POST /api/logout`, and the web app's static files.
+- Every other API route needs a live session, which `tero-keys` checks on every request. The account routes also pass the session to `tero-keys` with the request itself, and ending sessions and managing passkeys need it confirmed in the last 5 minutes.
 - Nothing in the dashboard can run work as root. Root-only operations exist only as `sudo tero ...` commands on the server.
 
 ### Inputs and limits
@@ -104,7 +109,10 @@ ASVS 2.1.1, 2.1.3 and 15.1.3.
 | Request body | JSON only (`Content-Type: application/json`), at most 64 KiB, decoded into a fixed struct, unknown fields refused |
 | Password | 8 to 1024 characters; see [Passwords](#passwords) |
 | TOTP code | Exactly 6 ASCII digits |
-| Setup link, session and device tokens | Looked up by SHA-256 hash; anything unknown is refused |
+| Passkey name | 1 to 64 characters after trimming, no control characters |
+| Passkey answer | Parsed and verified by `go-webauthn/webauthn` in `tero-keys`, inside the 64 KiB body limit |
+| Setup link, session and device tokens | Looked up by SHA-256 hash in `tero-keys`; anything unknown is refused |
+| Session and passkey ids | Random 128-bit hex; an unknown id changes nothing |
 | State-changing request | `POST` only, with no `Origin` other than the dashboard's and no `Sec-Fetch-Site: cross-site` |
 
 Password hashing is the one expensive operation: each Argon2id hash uses 64 MiB. At most two run at once. Other requests wait up to 10 seconds for a slot and then get a `503` with `Retry-After`. The service runs with `MemoryMax=512M`, so a flood can take down Tero but not sshd or the apps. The Have I Been Pwned request times out after 5 seconds.
@@ -115,8 +123,9 @@ ASVS 11.1.2. Every key and algorithm Tero uses:
 
 | What | Algorithm | Where it lives | Lifecycle |
 |---|---|---|---|
-| Session, device and setup-link tokens | 256 bits from `crypto/rand` | SHA-256 hash in SQLite (setup links in `keys.db`, sessions and devices in `tero.db`) | Deleted on expiry, logout or `reset-login` |
-| Admin password | Argon2id (RFC 9106: 64 MiB, t=3, p=4, 16-byte salt) | PHC string in `/var/lib/tero-keys/keys.db` | Replaced by `reset-login` |
+| Session, device and setup-link tokens | 256 bits from `crypto/rand` | SHA-256 hash in `/var/lib/tero-keys/keys.db` | Deleted on expiry, logout, ending from the session list or `reset-login` |
+| Admin password | Argon2id (RFC 9106: 64 MiB, t=3, p=4, 16-byte salt) | PHC string in `/var/lib/tero-keys/keys.db` | Replaced by a password change or `reset-login` |
+| Passkeys | ES256, EdDSA or RS256 key pairs made by the admin's authenticator; Tero keeps only the public key and signature counter | `/var/lib/tero-keys/keys.db`, tied to a random 64-byte WebAuthn user handle | Removed from the settings page or by `reset-login`, which also replaces the user handle |
 | Master key | 256 bits from `crypto/rand` | `/etc/tero/keys/<version>`, sealed by `systemd-creds` (TPM2 when the server has one, otherwise the host key in `/var/lib/systemd`); only `tero-keys.service` receives it, in memory | Created by `sudo tero init`; replaced by `sudo tero rotate-key` and `sudo tero assume-breach`, which reseal every value and then delete the old version; an unreadable key is moved to `/etc/tero/keys-unreadable` by `reset-login` |
 | TOTP secret | 160 bits from `crypto/rand`, HMAC-SHA1, 6 digits, 30 s (RFC 6238) | AES-256-GCM under the master key in `/var/lib/tero-keys/keys.db` (mode 0600, owned by `tero-keys`); the additional data names the table, column, row and key version | Replaced by `reset-login` |
 | TLS certificate and key | Chosen by Caddy (ECDSA P-256), TLS 1.2 and 1.3 | `/var/lib/tero/caddy` | Obtained and renewed by Caddy over ACME |
@@ -124,7 +133,7 @@ ASVS 11.1.2. Every key and algorithm Tero uses:
 
 SHA-1 appears only where a protocol fixes it: inside HMAC for TOTP, which is what authenticator apps support, and in the breach-check prefix, which is a lookup key rather than a security function. Everything Tero chooses itself uses SHA-256 or stronger.
 
-The `tero-keys` service holds the master key and is the only process that reads the password hash and TOTP secret: the dashboard sends the password and code over a Unix socket and gets back yes or no. App secrets are encrypted under the same key with slice 6 (ADR 0001, section 5).
+The `tero-keys` service holds the master key and is the only process that reads the password hash, the TOTP secret and the passkeys: the dashboard sends the password and code, or the browser's passkey answer, over a Unix socket and gets back a session or a refusal. App secrets are encrypted under the same key with slice 6 (ADR 0001, section 5).
 
 ### Sensitive data
 
@@ -134,7 +143,7 @@ ASVS 14.1.1 and 14.1.2.
 |---|---|
 | Admin password | Never stored or logged; only its Argon2id hash is kept |
 | TOTP secret | Shown once during setup; never returned again or logged; encrypted in the database of `tero-keys`, which `tero` can't read |
-| Session, device and setup tokens | Only in `HttpOnly` cookies or the URL fragment; only hashes stored; never logged |
+| Session, device and setup tokens | Only in `HttpOnly` cookies or the URL fragment; only hashes stored, by `tero-keys`; never logged |
 | TLS private key | Readable only by `tero` |
 | Source IPs in security events | Kept for the admin; kept for one year, then deleted |
 
@@ -165,7 +174,7 @@ ASVS 16.1.1.
 
 | Log | Contents | Where | Retention |
 |---|---|---|---|
-| Security events | Time (UTC), type, source (`tero-keys`, `tero` or `root`), source IP, count | `security_events` table in `/var/lib/tero-keys/keys.db`. `tero-keys` writes login events itself; the dashboard may only add `rate_limited` and `breach_check_skipped`, at most 60 a minute, and the excess becomes one `events_dropped` event with a count. Readable through `GET /api/events` | One year, at most 100,000 rows; a flood never pushes out resets, rotations, lockouts or successful logins |
+| Security events | Time (UTC), type, source (`tero-keys`, `tero` or `root`), source IP, count | `security_events` table in `/var/lib/tero-keys/keys.db`. `tero-keys` writes login, throttle and account events itself; the dashboard may only add `breach_check_skipped`, at most 60 a minute, and the excess becomes one `events_dropped` event with a count. Readable through `GET /api/events` | One year, at most 100,000 rows; a flood never pushes out resets, rotations, lockouts, successful logins, password changes or passkey changes |
 | Journal copy of each event | Same, with `TERO_EVENT` and `TERO_SOURCE_IP` fields; failures, rate limits and resets at warning priority | systemd journal | journald settings |
 | Refused requests | Time, reason (`no_session`, `cross_site`, `not_json`, `malformed_body`), path (first 256 bytes) and source IP, at warning priority with `TERO_EVENT=request_refused`. Anyone can cause these, so they stay out of the security events table | systemd journal | journald settings |
 | Service errors | Unexpected errors, without request bodies | systemd journal (stdout of `tero.service`) | journald settings |
@@ -184,7 +193,7 @@ Events never contain a password, TOTP code, TOTP secret or token. The journal is
 | 1.2.1 | 1 | Context-aware output encoding | Met | No HTML is built on the server from input; React escapes text | — |
 | 1.2.2 | 1 | Encode data in built URLs | Met | Setup tokens are base64url; the `otpauth://` URI uses `url.PathEscape` and `url.Values` | `TestURIIsScannable` |
 | 1.2.3 | 1 | Encode data in JavaScript and JSON | Met | `encoding/json` | — |
-| 1.2.4 | 1 | Parameterized database queries | Met | Every query in `internal/auth` and `internal/store` uses placeholders | — |
+| 1.2.4 | 1 | Parameterized database queries | Met | Every query in `internal/keys` and `internal/store` uses placeholders | — |
 | 1.2.5 | 1 | No OS command injection | Met | The dashboard runs no commands. Root CLI commands run fixed programs from system directories with argument lists and no shell (`internal/sysexec`). The agent runs `podman` with argument lists and no shell (`internal/podman`), after checking app names, branches and folders again | `TestHostRefusesCommandsOutsideSystemDirs`, `TestCheckName`, e2e `Dashboard cannot trigger root work` |
 | 1.2.6 | 2 | LDAP injection | N/A | No LDAP | — |
 | 1.2.7 | 2 | XPath injection | N/A | No XML | — |
@@ -283,24 +292,24 @@ Tero accepts no file uploads and serves no user-supplied files.
 | ID | L | Requirement | Status | How | Test |
 |---|---|---|---|---|---|
 | 6.1.1 | 1 | Brute-force controls documented | Met | [Brute-force protection](#brute-force-protection) | — |
-| 6.1.2 | 2 | Context-specific words documented | Planned | No list yet (slice 4) | — |
+| 6.1.2 | 2 | Context-specific words documented | Met | [Passwords](#passwords) | `TestContextWords_v5_0_0_6_2_11_ListsDomainLabels` |
 | 6.1.3 | 2 | All login paths documented | Met | [Login paths](#login-paths) | — |
 | 6.2.1 | 1 | At least 8 characters | Met | Minimum is 8, as NIST allows for a password that is always paired with TOTP; see [Passwords](#passwords) | `TestPolicy_v5_0_0_6_2_1_RejectsSevenCharacters`, e2e `Password too short (v5.0.0-6.2.1)` |
-| 6.2.2 | 1 | Users can change their password | Planned | Only `sudo tero reset-login`, which also resets TOTP (slice 4) | — |
-| 6.2.3 | 1 | Password change needs current and new password | Planned | Follows 6.2.2 (slice 4) | — |
+| 6.2.2 | 1 | Users can change their password | Met | Settings page; see [Changing factors and ending sessions](#changing-factors-and-ending-sessions) | `TestChangePassword_v5_0_0_6_2_3_EndsOtherSessions`, e2e `Password changed / Other sessions ended / Service name in the password (v5.0.0-6.2.3, v5.0.0-6.2.11)` |
+| 6.2.3 | 1 | Password change needs current and new password | Met | Current password, a TOTP code and the new password in one request | `TestChangePassword_v5_0_0_6_2_3_EndsOtherSessions`, `TestChangePasswordNeedsTheCurrentFactors`, web `changes the password and ends other sessions by default (v5.0.0-6.2.3)` |
 | 6.2.4 | 1 | Checked against the top 3,000 passwords | Met | Bundled list | `TestBundledList_v5_0_0_6_2_4_CoversTopThreeThousandPolicyPasswords` |
 | 6.2.5 | 1 | No composition rules | Met | Only length and breach checks | `TestPolicy_v5_0_0_6_2_5_HasNoCompositionRules` |
-| 6.2.6 | 1 | Password fields masked | Met | `type="password"` on setup and login | — |
+| 6.2.6 | 1 | Password fields masked | Met | `type="password"` on setup, login, confirmation and password change | — |
 | 6.2.7 | 1 | Paste and password managers allowed | Met | `autocomplete` set, paste not blocked | web `labels the password field for password managers and sends the token from the fragment (v5.0.0-6.2.7)` |
 | 6.2.8 | 1 | Password checked exactly as typed | Met | No trimming or case-folding | — |
 | 6.2.9 | 2 | 64-character passwords allowed | Met | Up to 1024 | `TestPolicy_v5_0_0_6_2_9_AcceptsSixtyFourLowercaseLetters`, e2e `Long password accepted (v5.0.0-6.2.9)` |
 | 6.2.10 | 2 | No forced rotation | Met | Passwords never expire | — |
-| 6.2.11 | 2 | Context-specific words refused | Planned | Follows 6.1.2 (slice 4) | — |
+| 6.2.11 | 2 | Context-specific words refused | Met | [Passwords](#passwords) | `TestPolicy_v5_0_0_6_2_11_RefusesContextWords`, `TestSetupRefusesContextWords_v5_0_0_6_2_11`, e2e `Password changed / Other sessions ended / Service name in the password (v5.0.0-6.2.3, v5.0.0-6.2.11)` |
 | 6.2.12 | 2 | Breached passwords refused | Met | Bundled list plus Have I Been Pwned | `TestPolicy_v5_0_0_6_2_12_RejectsPasswordFromBreachAPI`, `TestPwnedPasswords_v5_0_0_6_2_12_SendsOnlyHashPrefix`, e2e `Breached password (v5.0.0-6.2.12)` |
 | 6.3.1 | 1 | Brute-force controls in place | Met | [Brute-force protection](#brute-force-protection) | `TestLogin_v5_0_0_6_3_1_*`, e2e `Repeated failures from one IP (v5.0.0-6.3.1)` |
 | 6.3.2 | 1 | No default accounts | Met | No account exists until setup | `TestNoLoginBeforeSetup` |
-| 6.3.3 | 2 | Multi-factor authentication | Met | Password and TOTP on every login; setup can't finish without TOTP | `TestSetupWithoutTOTPCreatesNoAccount`, `TestWrongCodeDoesNotSayWhichFactor` |
-| 6.3.4 | 2 | No undocumented login paths | Met | Two paths, both documented and recorded | `TestEventsRecordedWithoutSecrets`, e2e `Events recorded / No secrets in events (v5.0.0-6.3.4, v5.0.0-6.3.5, v5.0.0-6.3.7)` |
+| 6.3.3 | 2 | Multi-factor authentication | Met | Password and TOTP, or a passkey with user verification, on every login; setup can't finish without TOTP | `TestSetupWithoutTOTPCreatesNoAccount`, `TestWrongCodeDoesNotSayWhichFactor`, `TestPasskeyNeedsUserVerification` |
+| 6.3.4 | 2 | No undocumented login paths | Met | Three paths, all documented and recorded | `TestEventsRecordedWithoutSecrets`, e2e `Events recorded / No secrets in events (v5.0.0-6.3.4, v5.0.0-6.3.5, v5.0.0-6.3.7)` |
 | 6.4.1 | 1 | Activation codes random, short-lived, single use | Met | Setup links: 256 bits, 24 hours, single use | `TestSetupLinkReusedIsRejected`, `TestSetupLinkExpires`, `TestNewSetupLinkReplacesTheOldOne` |
 | 6.4.2 | 1 | No hints or security questions | Met | None | — |
 | 6.4.3 | 2 | Password reset doesn't bypass MFA | Met | The only reset needs root and makes the admin enrol TOTP again | `TestResetLoginRevokesSessionsAndCredentials` |
@@ -325,7 +334,7 @@ Tero accepts no file uploads and serves no user-supplied files.
 | 7.1.1 | 2 | Timeouts documented | Met | [Sessions](#sessions) | — |
 | 7.1.2 | 2 | Parallel sessions documented | Met | [Sessions](#sessions) | — |
 | 7.1.3 | 2 | Federated sessions documented | N/A | No federation | — |
-| 7.2.1 | 1 | Tokens verified by the backend | Met | Checked in Go on every protected route | `TestEventsNeedSession` |
+| 7.2.1 | 1 | Tokens verified by the backend | Met | Checked by `tero-keys` on every protected route | `TestEventsNeedSession`, `TestInventedTokenIsRefused`, e2e `Session planted by a tero process / Dashboard can't reach the sessions` |
 | 7.2.2 | 1 | Dynamic session tokens | Met | A new random token per session | — |
 | 7.2.3 | 1 | 128-bit tokens from a CSPRNG | Met | 256 bits from `crypto/rand` | — |
 | 7.2.4 | 1 | New token on login, old one ended | Met | Every login issues a new token and ends the session the browser sent | `TestLogin_v5_0_0_7_2_4_EndsThePreviousSession` |
@@ -333,11 +342,11 @@ Tero accepts no file uploads and serves no user-supplied files.
 | 7.3.2 | 2 | Absolute lifetime | Met | 12 hours | `TestSessionAbsoluteTimeout` |
 | 7.4.1 | 1 | Ended sessions can't be used | Met | Logout and expiry delete the session on the server | `TestLogout_v5_0_0_7_4_1_EndsTheSession`, `TestSessionIdleTimeout` |
 | 7.4.2 | 1 | Sessions end when the account is disabled | Met | `reset-login` deletes every session | `TestResetLoginRevokesSessionsAndCredentials` |
-| 7.4.3 | 2 | Option to end sessions after a factor change | Met | Factors change only through `reset-login`, which ends every session | `TestResetLoginRevokesSessionsAndCredentials` |
-| 7.4.4 | 2 | Visible logout | Met | Log out button on the only signed-in page | — |
-| 7.4.5 | 2 | Admin can end sessions | Planned | Only `reset-login`, which also wipes the credentials (slice 4) | — |
-| 7.5.1 | 2 | Re-authentication before changing factors | N/A | The dashboard can't change a factor yet. Applies once 6.2.2 is met | — |
-| 7.5.2 | 2 | View and end active sessions | Planned | No session list (slice 4) | — |
+| 7.4.3 | 2 | Option to end sessions after a factor change | Met | Password change and adding or removing a passkey offer "End every other session", checked by default; `reset-login` ends every session | `TestChangePassword_v5_0_0_6_2_3_EndsOtherSessions`, `TestPasskeyRemovalCanEndOtherSessions_v5_0_0_7_4_3`, web `removes a passkey and ends other sessions by default (v5.0.0-7.4.3)` |
+| 7.4.4 | 2 | Visible logout | Met | Log out button on every signed-in page | — |
+| 7.4.5 | 2 | Admin can end sessions | Met | The one admin ends any other session, or all of them, from the settings page | `TestEndAllOtherSessions_v5_0_0_7_4_5`, `TestListAndEndOneSession_v5_0_0_7_5_2` |
+| 7.5.1 | 2 | Re-authentication before changing factors | Met | Password change asks for the password and a code itself; passkey changes need a confirmation with both in the last 5 minutes | `TestConfirmation_v5_0_0_7_5_1_ExpiresAndStaysOnItsSession`, `TestPasskeyRegistrationNeedsConfirmation` |
+| 7.5.2 | 2 | View and end active sessions | Met | Session list on the settings page; ending needs a confirmation with the password and a code | `TestListAndEndOneSession_v5_0_0_7_5_2`, `TestEndingSessionsNeedsConfirmation`, e2e `List / End one session / Not confirmed (v5.0.0-7.5.2)` |
 | 7.6.1 | 2 | RP and IdP session lifetimes | N/A | No federation | — |
 | 7.6.2 | 2 | Sessions need user action | N/A | No federation | — |
 
@@ -528,7 +537,7 @@ ADR 0001 adopts a few Level 3 requirements because they are cheap.
 | ID | Requirement | Status | How | Test |
 |---|---|---|---|---|
 | 6.3.5 | Tell the user about suspicious logins | Later | Failed logins, rate limits and resets are recorded in the database and the journal, but the dashboard doesn't show them until it has more to show; v1 has no email | `TestEventsRecordedWithoutSecrets`, e2e `Events recorded / No secrets in events (v5.0.0-6.3.4, v5.0.0-6.3.5, v5.0.0-6.3.7)` |
-| 6.3.7 | Tell the user after a credential change | Later | The reset event is recorded, but not shown at the next login until the dashboard lists events again | e2e `Recovery visible after the fact` checks the event is recorded |
-| 6.3.3 | A phishing-resistant factor | Later | Passkeys, planned for slice 4 (account security) | — |
+| 6.3.7 | Tell the user after a credential change | Later | Resets, password changes and passkey changes are recorded, but not shown at the next login until the dashboard lists events again | e2e `Recovery visible after the fact` checks the event is recorded |
+| 6.3.3 | A phishing-resistant factor | Met | Passkeys bound to the dashboard domain, verified by `tero-keys`; one logs in alone | `TestPasskeyAddAndLogin_v5_0_0_6_3_3`, `TestPasskeyForAnotherSiteIsRefused`, e2e `Add a passkey / dashboard-access: Log in with a passkey (v5.0.0-6.3.3)` |
 | 13.3.3 | Keys in an isolated module | Met on servers with a TPM2 | The key is sealed with `systemd-creds` to the TPM2 when there is one and is only ever in the memory of `tero-keys`. Without a TPM2, the seal uses a host key that root can read; `assume-breach` says so | — |
 | 13.3.4 | Secret rotation | Met | `sudo tero rotate-key` reseals every value under a new key, then deletes the old one | `TestRotationResealsTheAdmin`, `TestRotateLeavesOnlyTheNewKey` |

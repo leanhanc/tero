@@ -1,15 +1,15 @@
-// Package auth is the dashboard's side of the single-admin login: sessions,
-// trusted browsers and brute-force throttling, kept in the SQLite store. The
-// admin's password hash, TOTP secret and setup links belong to the key
-// service (internal/keys), which checks every setup and login; the dashboard
-// never stores or reads them. Security events are recorded there too.
+// Package auth is the dashboard's side of the single-admin login and account
+// settings. The key service (internal/keys) checks every setup, login and
+// confirmation, holds the sessions, trusted browsers, throttles, passkeys
+// and the security log, and creates every session; the dashboard never
+// stores or reads any of them. What stays here is what needs the network or
+// the browser: the password policy and turning key service errors into the
+// messages the dashboard shows.
 package auth
 
 import (
 	"context"
-	"database/sql"
 	"errors"
-	"time"
 
 	"github.com/leanhanc/tero/internal/keys"
 	"github.com/leanhanc/tero/internal/password"
@@ -26,47 +26,47 @@ var (
 	ErrAlreadySetUp       = errors.New("The dashboard login is already set up")
 	ErrKeysUnavailable    = errors.New("The server's key service isn't running, so logins can't be checked. Run `sudo tero reset-login` on the server")
 	ErrLoginLocked        = errors.New("Login is locked for 24 hours after too many wrong codes. Run `sudo tero reset-login` on the server to unlock it")
+	ErrNotConfirmed       = errors.New("Confirm it's you with your password and a code first")
+	ErrPasskeyFailed      = errors.New("That passkey didn't work. Try again, or log in with your password and a code")
+	ErrPasskeyLimit       = errors.New("You already have 10 passkeys. Remove one first")
+	ErrInvalidPasskeyName = errors.New("Give the passkey a name of 1 to 64 characters")
+	ErrNotFound           = errors.New("Not found")
 )
 
-// RateLimitedError means too many failures came from this IP or for the
-// account. It is returned before credentials are checked, so it says nothing
-// about whether they were right.
-type RateLimitedError struct {
-	RetryAfter time.Duration
-}
+// RateLimitedError means too many failures came from this IP or browser, or
+// for the account.
+type RateLimitedError = keys.RateLimitedError
 
-func (e RateLimitedError) Error() string {
-	return "Too many attempts. Try again later"
-}
+// Browser is what the dashboard saw of the browser making a request.
+type Browser = keys.Browser
+
+// LoginResult is what a successful login or setup hands back to the browser.
+type LoginResult = keys.LoginResult
 
 // Service carries the login state for one server.
 type Service struct {
-	db        *sql.DB
 	keys      *keys.Client
 	domain    string
-	now       func() time.Time
 	passwords password.Policy
 	journal   JournalWriter
 }
 
-// Options configure a Service. Now and Journal default to the real clock and
-// no journal; tests replace them. Keys is the key service.
+// Options configure a Service. Keys is the key service. Passwords' context
+// words are filled from Domain and PublicIP. Journal defaults to no journal.
 type Options struct {
 	Keys      *keys.Client
 	Domain    string
+	PublicIP  string
 	Passwords password.Policy
-	Now       func() time.Time
 	Journal   JournalWriter
 }
 
-// New returns a Service backed by db, which must already be migrated.
-func New(db *sql.DB, opts Options) *Service {
-	now := opts.Now
-	if now == nil {
-		now = time.Now
-	}
+// New returns a Service that asks the key service in opts.Keys.
+func New(opts Options) *Service {
+	passwords := opts.Passwords
+	passwords.ContextWords = password.ContextWords(opts.Domain, opts.PublicIP)
 
-	return &Service{db: db, keys: opts.Keys, domain: opts.Domain, now: now, passwords: opts.Passwords, journal: opts.Journal}
+	return &Service{keys: opts.Keys, domain: opts.Domain, passwords: passwords, journal: opts.Journal}
 }
 
 // IsSetUp reports whether the admin account exists.
@@ -75,17 +75,46 @@ func (s *Service) IsSetUp(ctx context.Context) (bool, error) {
 	return status.IsSetUp, fromKeys(err)
 }
 
+// checkNewPassword runs the password policy, recording when the online
+// breach check couldn't run.
+func (s *Service) checkNewPassword(ctx context.Context, ip, newPassword string) error {
+	result, err := s.passwords.Check(ctx, newPassword)
+	if err != nil {
+		return err
+	}
+	if result.IsOnlineCheckSkipped {
+		s.record(ctx, keys.EventBreachCheckSkipped, ip)
+	}
+
+	return nil
+}
+
 // fromKeys turns key service errors into the ones the dashboard shows.
 func fromKeys(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	var limited keys.RateLimitedError
+	if errors.As(err, &limited) {
+		return limited
+	}
+
 	translations := map[error]error{
-		keys.ErrUnavailable:   ErrKeysUnavailable,
-		keys.ErrInvalidLink:   ErrInvalidLink,
-		keys.ErrAlreadySetUp:  ErrInvalidLink,
-		keys.ErrNotSetUp:      ErrNotSetUp,
-		keys.ErrInvalidCode:   ErrInvalidCode,
-		keys.ErrWrongLogin:    ErrInvalidCredentials,
-		keys.ErrLocked:        ErrLoginLocked,
-		keys.ErrHashingIsBusy: password.ErrBusy,
+		keys.ErrUnavailable:    ErrKeysUnavailable,
+		keys.ErrInvalidLink:    ErrInvalidLink,
+		keys.ErrAlreadySetUp:   ErrInvalidLink,
+		keys.ErrNotSetUp:       ErrNotSetUp,
+		keys.ErrInvalidCode:    ErrInvalidCode,
+		keys.ErrWrongLogin:     ErrInvalidCredentials,
+		keys.ErrLocked:         ErrLoginLocked,
+		keys.ErrHashingIsBusy:  password.ErrBusy,
+		keys.ErrSessionEnded:   ErrSessionExpired,
+		keys.ErrNotConfirmed:   ErrNotConfirmed,
+		keys.ErrInvalidPasskey: ErrPasskeyFailed,
+		keys.ErrPasskeyLimit:   ErrPasskeyLimit,
+		keys.ErrInvalidName:    ErrInvalidPasskeyName,
+		keys.ErrNotFound:       ErrNotFound,
 	}
 	for from, to := range translations {
 		if errors.Is(err, from) {

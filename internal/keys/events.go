@@ -27,6 +27,17 @@ const (
 	EventRateLimited        EventType = "rate_limited"
 	EventBreachCheckSkipped EventType = "breach_check_skipped"
 	EventBreachReset        EventType = "breach_reset"
+
+	EventPasswordChanged        EventType = "password_changed"
+	EventAccountConfirmed       EventType = "account_confirmed"
+	EventConfirmFailed          EventType = "confirm_failed"
+	EventConfirmCodeFailed      EventType = "confirm_totp_failed"
+	EventSessionsEnded          EventType = "sessions_ended"
+	EventPasskeyAdded           EventType = "passkey_added"
+	EventPasskeyRemoved         EventType = "passkey_removed"
+	EventPasskeyLoginSucceeded  EventType = "passkey_login_succeeded"
+	EventPasskeyLoginFailed     EventType = "passkey_login_failed"
+	EventPasskeyCounterMismatch EventType = "passkey_counter_mismatch"
 )
 
 // Source is who recorded an event. The key service records its own events;
@@ -50,19 +61,31 @@ var eventMessages = map[EventType]string{
 	EventRateLimited:        "Dashboard logins rate limited",
 	EventBreachCheckSkipped: "Online breached-password check unavailable; the bundled list was used",
 	EventBreachReset:        "Server reset with sudo tero assume-breach",
+
+	EventPasswordChanged:        "Dashboard password changed",
+	EventAccountConfirmed:       "Admin confirmed it's them on a dashboard session",
+	EventConfirmFailed:          "Confirmation on a dashboard session failed",
+	EventConfirmCodeFailed:      "Confirmation with the right password and a wrong TOTP code",
+	EventSessionsEnded:          "Dashboard sessions ended",
+	EventPasskeyAdded:           "Passkey added",
+	EventPasskeyRemoved:         "Passkey removed",
+	EventPasskeyLoginSucceeded:  "Dashboard login with a passkey succeeded",
+	EventPasskeyLoginFailed:     "Dashboard login with a passkey failed",
+	EventPasskeyCounterMismatch: "Passkey login refused: its signature counter went backwards, so it may have been copied",
 }
 
 // warnings are written to the journal at warning priority.
 var warnings = map[EventType]bool{
 	EventSetupCodeFailed: true, EventLoginFailed: true, EventCodeFailed: true, EventCodeLocked: true,
 	EventLoginReset: true, EventCallersRefused: true, EventEventsDropped: true, EventRateLimited: true,
-	EventBreachReset: true,
+	EventBreachReset: true, EventConfirmFailed: true, EventConfirmCodeFailed: true, EventPasskeyLoginFailed: true,
+	EventPasskeyCounterMismatch: true, EventPasswordChanged: true, EventPasskeyAdded: true, EventPasskeyRemoved: true,
 }
 
 // appendable lists the events each caller may append. Everything else is
 // recorded by the key service itself, from what it saw happen.
 var appendable = map[Caller]map[EventType]bool{
-	CallerDashboard: {EventRateLimited: true, EventBreachCheckSkipped: true},
+	CallerDashboard: {EventBreachCheckSkipped: true},
 	CallerRoot:      {EventBreachReset: true},
 }
 
@@ -85,13 +108,17 @@ const (
 	appendLimit = 60
 	// maxEvents bounds the table; the oldest go first, except keptEvents.
 	maxEvents = 100_000
-	// loginCheckLimit is how many logins the dashboard may have checked per
-	// minute, whoever they are for. It bounds how fast a compromised
-	// dashboard can guess passwords and fill the log. The dashboard's own
-	// throttle stops other browsers after 10 failures for the account, so
-	// an attack from outside can't use it up and lock out the admin's
-	// trusted browser.
+	// loginCheckLimit is how many password and code checks the dashboard
+	// may have made per minute, whoever they are for. It bounds how fast a
+	// compromised dashboard can guess passwords and fill the log. The login
+	// throttle stops other browsers after 10 failures for the account, so an
+	// attack from outside can't use it up and lock out the admin's trusted
+	// browser.
 	loginCheckLimit = 30
+	// passkeyCheckLimit is the same bound for passkey answers, counted
+	// apart so a flood of junk passkeys from the internet can't use up the
+	// password checks.
+	passkeyCheckLimit = 30
 	// eventRetention is how long events are kept.
 	eventRetention = 365 * 24 * time.Hour
 	// maxIPLength fits any IPv6 address with a zone.
@@ -188,12 +215,13 @@ func (s *Service) RecentEvents(ctx context.Context, limit int) ([]Event, error) 
 
 // limits counts appends per caller and refused connections per minute.
 type limits struct {
-	mu      sync.Mutex
-	minute  int64
-	appends map[Caller]int
-	checks  int
-	dropped int
-	refused int
+	mu            sync.Mutex
+	minute        int64
+	appends       map[Caller]int
+	checks        int
+	passkeyChecks int
+	dropped       int
+	refused       int
 	// checksRefused counts login checks over loginCheckLimit.
 	checksRefused int
 }
@@ -204,6 +232,7 @@ func (l *limits) roll(now time.Time) {
 		l.minute = minute
 		l.appends = map[Caller]int{}
 		l.checks = 0
+		l.passkeyChecks = 0
 	}
 }
 
@@ -228,6 +257,20 @@ func (l *limits) allowCheck(now time.Time) bool {
 	l.roll(now)
 	l.checks++
 	if l.checks > loginCheckLimit {
+		l.checksRefused++
+		return false
+	}
+
+	return true
+}
+
+func (l *limits) allowPasskeyCheck(now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.roll(now)
+	l.passkeyChecks++
+	if l.passkeyChecks > passkeyCheckLimit {
 		l.checksRefused++
 		return false
 	}

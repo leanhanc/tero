@@ -31,6 +31,10 @@ type fakeServer struct {
 	// reset.
 	upDuringReset bool
 	hasTPM        bool
+	// session is the dashboard session setup started.
+	session string
+	// failing is a command line that fails.
+	failing string
 }
 
 func newFakeServer(t *testing.T) *fakeServer {
@@ -43,6 +47,9 @@ func newFakeServer(t *testing.T) *fakeServer {
 func (s *fakeServer) Run(_ context.Context, name string, args ...string) (string, error) {
 	commandLine := strings.Join(append([]string{name}, args...), " ")
 	s.commands = append(s.commands, commandLine)
+	if commandLine == s.failing {
+		return "", errors.New("failed")
+	}
 
 	switch commandLine {
 	case "systemctl stop tero.service":
@@ -86,7 +93,10 @@ func (s *fakeServer) startKeys() {
 	}
 	s.t.Cleanup(func() { db.Close() })
 
-	s.service = keys.NewService(db, loaded, keys.Options{})
+	s.service, err = keys.NewService(db, loaded, keys.Options{})
+	if err != nil {
+		s.t.Fatal(err)
+	}
 	*s.client = *keys.NewLocalClient(s.service, keys.CallerRoot)
 }
 
@@ -111,10 +121,6 @@ func (s *fakeServer) options(out *bytes.Buffer, answer string) Options {
 		Run:     s,
 		Keys:    s.files(),
 		TeroUID: 999,
-		ClearSessions: func(context.Context) error {
-			s.commands = append(s.commands, "clear sessions")
-			return nil
-		},
 	}
 }
 
@@ -130,14 +136,16 @@ func (s *fakeServer) setUp(t *testing.T) {
 
 	token, _ := s.client.IssueSetupLink(ctx)
 	dashboard := keys.NewLocalClient(s.service, keys.CallerDashboard)
-	enrolment, err := dashboard.BeginSetup(ctx, token, "a long passphrase nobody has used")
+	enrolment, err := dashboard.BeginSetup(ctx, "", token, "a long passphrase nobody has used")
 	if err != nil {
 		t.Fatal(err)
 	}
 	code, _ := totp.Code(enrolment.Secret, time.Now())
-	if err := dashboard.FinishSetup(ctx, "", token, code); err != nil {
+	login, err := dashboard.FinishSetup(ctx, keys.Browser{}, token, code)
+	if err != nil {
 		t.Fatal(err)
 	}
+	s.session = login.SessionToken
 
 	os.MkdirAll(filepath.Join(s.root, caddyStorage, "certificates"), 0o700)
 	os.WriteFile(filepath.Join(s.root, caddyStorage, "certificates", "key.pem"), []byte("key"), 0o600)
@@ -157,7 +165,8 @@ func TestAssumeBreachResetsEverything(t *testing.T) {
 	stopAt := slices.Index(server.commands, "systemctl stop tero.service")
 	stopUserAt := slices.Index(server.commands, "systemctl stop user-999.slice user-runtime-dir@999.service")
 	killAt := slices.Index(server.commands, "pkill --signal KILL --uid 999")
-	clearAt := slices.Index(server.commands, "clear sessions")
+	// The rotation restarts the key service after the login is reset.
+	clearAt := slices.Index(server.commands, "systemctl restart tero-keys.service")
 	startUserAt := slices.Index(server.commands, "systemctl start user@999.service")
 	startAt := slices.Index(server.commands, "systemctl start tero.service")
 	isInOrder := stopAt >= 0 && stopUserAt > stopAt && killAt > stopUserAt && clearAt > killAt &&
@@ -177,7 +186,15 @@ func TestAssumeBreachResetsEverything(t *testing.T) {
 		t.Error("certificates and keys were kept")
 	}
 
-	events, _ := server.client.RecentEvents(ctx, 10)
+	dashboard := keys.NewLocalClient(server.service, keys.CallerDashboard)
+	if _, err := dashboard.CheckSession(ctx, server.session, ""); !errors.Is(err, keys.ErrSessionEnded) {
+		t.Errorf("session after the reset = %v", err)
+	}
+	if !strings.Contains(out.String(), "passkeys") {
+		t.Errorf("the output doesn't mention passkeys:\n%s", out.String())
+	}
+
+	events, _ := server.client.RecentEvents(ctx, "", 10)
 	if events[0].Type != keys.EventBreachReset || events[0].Source != "root" {
 		t.Errorf("latest event = %+v", events[0])
 	}
@@ -261,10 +278,9 @@ func TestDashboardStartsAgainWhenAStepFails(t *testing.T) {
 	server := newFakeServer(t)
 	server.setUp(t)
 	var out bytes.Buffer
-	opts := server.options(&out, "yes\n")
-	opts.ClearSessions = func(context.Context) error { return errors.New("database locked") }
+	server.failing = "systemctl restart tero-keys.service"
 
-	if err := Run(context.Background(), opts); err == nil {
+	if err := Run(context.Background(), server.options(&out, "yes\n")); err == nil {
 		t.Fatal("Run succeeded")
 	}
 	if !server.dashboardUp {

@@ -85,7 +85,11 @@ func (h *fakeHost) start() {
 	}
 	h.t.Cleanup(func() { db.Close() })
 
-	*h.client = *keys.NewLocalClient(keys.NewService(db, loaded, keys.Options{}), keys.CallerRoot)
+	service, err := keys.NewService(db, loaded, keys.Options{})
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	*h.client = *keys.NewLocalClient(service, keys.CallerRoot)
 }
 
 func TestSealNextAddsVersionsWithNothingLeftBehind(t *testing.T) {

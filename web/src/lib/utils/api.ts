@@ -62,6 +62,48 @@ export type NewApp = {
 	rootDirectory: string;
 };
 
+export type LoginMethod = 'password' | 'passkey' | 'setup';
+
+export type SessionInfo = {
+	/** A random id for ending the session; never its token. */
+	id: string;
+	method: LoginMethod;
+	createdAt: string;
+	lastSeenAt: string;
+	loginIP: string;
+	lastIP: string;
+	userAgent: string;
+	isCurrent: boolean;
+};
+
+export type PasskeyInfo = {
+	id: string;
+	name: string;
+	createdAt: string;
+	/** Missing until the passkey logs in for the first time. */
+	lastUsedAt?: string;
+};
+
+export type Account = {
+	/** Whether this session confirmed it's the admin in the last few minutes. */
+	isConfirmed: boolean;
+	sessions: SessionInfo[];
+	passkeys: PasskeyInfo[];
+};
+
+/** WebAuthn options from the key service, and the id that finishes the ceremony. */
+export type PasskeyOptions = {
+	challengeId: string;
+	options: unknown;
+};
+
+export type PasswordChange = {
+	currentPassword: string;
+	code: string;
+	newPassword: string;
+	isEndingOthers: boolean;
+};
+
 /** An error the server explained, safe to show as is. */
 export class ApiError extends Error {
 	readonly status: number;
@@ -89,6 +131,14 @@ export function finishSetup(token: string, code: string): Promise<void> {
 
 export function login(password: string, code: string): Promise<void> {
 	return request<void>('POST', '/api/login', { password, code });
+}
+
+export function beginPasskeyLogin(): Promise<PasskeyOptions> {
+	return request<PasskeyOptions>('POST', '/api/login/passkey/begin', {});
+}
+
+export function finishPasskeyLogin(challengeId: string, credential: unknown): Promise<void> {
+	return request<void>('POST', '/api/login/passkey/finish', { challengeId, credential });
 }
 
 export function logout(): Promise<void> {
@@ -123,6 +173,47 @@ export function setDisplayName(name: string, displayName: string): Promise<void>
 
 export function setRunTogether(name: string, runTogether: boolean): Promise<void> {
 	return request<void>('POST', `/api/apps/${encodeURIComponent(name)}/settings`, { runTogether });
+}
+
+export function getAccount(): Promise<Account> {
+	return request<Account>('GET', '/api/account');
+}
+
+export function confirmIdentity(password: string, code: string): Promise<void> {
+	return request<void>('POST', '/api/account/confirm', { password, code });
+}
+
+export function changePassword(change: PasswordChange): Promise<void> {
+	return request<void>('POST', '/api/account/password', change);
+}
+
+export function endSession(id: string): Promise<void> {
+	return request<void>('POST', '/api/sessions/end', { id, isAllOthers: false });
+}
+
+export function endOtherSessions(): Promise<void> {
+	return request<void>('POST', '/api/sessions/end', { id: '', isAllOthers: true });
+}
+
+export function beginPasskeyRegistration(): Promise<PasskeyOptions> {
+	return request<PasskeyOptions>('POST', '/api/passkeys/register/begin', {});
+}
+
+export function finishPasskeyRegistration(
+	challengeId: string,
+	name: string,
+	credential: unknown,
+	isEndingOthers: boolean,
+): Promise<PasskeyInfo> {
+	return request<PasskeyInfo>('POST', '/api/passkeys/register/finish', { challengeId, name, credential, isEndingOthers });
+}
+
+export function renamePasskey(id: string, name: string): Promise<void> {
+	return request<void>('POST', '/api/passkeys/rename', { id, name });
+}
+
+export function removePasskey(id: string, isEndingOthers: boolean): Promise<void> {
+	return request<void>('POST', '/api/passkeys/remove', { id, isEndingOthers });
 }
 
 /** The address of a deploy's build log, streamed as Server-Sent Events. */

@@ -42,9 +42,11 @@ type BreachChecker interface {
 }
 
 // Policy checks new passwords. There are no composition rules
-// (v5.0.0-6.2.5): only length and known-breach checks.
+// (v5.0.0-6.2.5): only length, context-word and known-breach checks.
 type Policy struct {
 	Breaches BreachChecker
+	// ContextWords are refused anywhere in a password; see ContextWords.
+	ContextWords []string
 }
 
 // Result says whether the online breach check could run. When it couldn't,
@@ -53,8 +55,8 @@ type Result struct {
 	IsOnlineCheckSkipped bool
 }
 
-// Check returns ErrTooShort, ErrTooLong or ErrBreached when password can't be
-// used.
+// Check returns ErrTooShort, ErrTooLong, a ContextWordError or ErrBreached
+// when password can't be used.
 func (p Policy) Check(ctx context.Context, password string) (Result, error) {
 	length := utf8.RuneCountInString(password)
 	if length < MinLength {
@@ -62,6 +64,10 @@ func (p Policy) Check(ctx context.Context, password string) (Result, error) {
 	}
 	if length > maxLength {
 		return Result{}, ErrTooLong
+	}
+
+	if word, isFound := firstContextWord(password, p.ContextWords); isFound {
+		return Result{}, ContextWordError{Word: word}
 	}
 
 	if commonPasswords[strings.ToLower(password)] {

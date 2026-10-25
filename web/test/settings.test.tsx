@@ -1,0 +1,231 @@
+import { cleanup, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { App } from '../src/app';
+import type { Account } from '../src/lib/utils/api';
+
+type MockResponse = { status: number; body?: unknown };
+
+/** Answers API calls in order and records what was sent. */
+function mockAPI(responses: Record<string, MockResponse[]>) {
+	const calls: { path: string; body: unknown }[] = [];
+	vi.stubGlobal(
+		'fetch',
+		vi.fn(async (path: string, init?: RequestInit) => {
+			calls.push({ path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+			const next = responses[path]?.shift() ?? { status: 500, body: { error: 'unexpected call' } };
+			return new Response(next.body === undefined ? null : JSON.stringify(next.body), { status: next.status });
+		}),
+	);
+	return calls;
+}
+
+const signedIn = { status: 200, body: { isSetUp: true, isLoggedIn: true } };
+
+const firefox = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14.5; rv:140.0) Gecko/20100101 Firefox/140.0';
+
+function account(isConfirmed: boolean): Account {
+	return {
+		isConfirmed,
+		sessions: [
+			{
+				id: 'current-id',
+				method: 'password',
+				createdAt: '2026-10-24T10:00:00Z',
+				lastSeenAt: '2026-10-24T10:05:00Z',
+				loginIP: '198.51.100.7',
+				lastIP: '198.51.100.7',
+				userAgent: firefox,
+				isCurrent: true,
+			},
+			{
+				id: 'other-id',
+				method: 'passkey',
+				createdAt: '2026-10-24T09:00:00Z',
+				lastSeenAt: '2026-10-24T09:30:00Z',
+				loginIP: '192.0.2.80',
+				lastIP: '192.0.2.81',
+				userAgent: 'curl/8.5.0',
+				isCurrent: false,
+			},
+		],
+		passkeys: [{ id: 'key-id', name: 'Laptop', createdAt: '2026-10-20T10:00:00Z' }],
+	};
+}
+
+function openSettings() {
+	window.history.replaceState(null, '', '/settings');
+}
+
+afterEach(() => {
+	cleanup();
+	vi.unstubAllGlobals();
+});
+
+describe('settings page', () => {
+	it('asks to confirm before sessions can be ended, then ends one (v5.0.0-7.5.2)', async () => {
+		openSettings();
+		const calls = mockAPI({
+			'/api/state': [signedIn],
+			'/api/account': [
+				{ status: 200, body: account(false) },
+				{ status: 200, body: account(true) },
+				{ status: 200, body: account(true) },
+			],
+			'/api/account/confirm': [{ status: 204 }],
+			'/api/sessions/end': [{ status: 204 }],
+		});
+		render(<App />);
+
+		const sessions = await screen.findByRole('table', { name: /Where you are logged in/ });
+		expect(within(sessions).getByText('Firefox on macOS (This browser)')).toBeTruthy();
+		expect(within(sessions).getByText('curl/8.5.0')).toBeTruthy();
+		expect(within(sessions).getByText('192.0.2.81 (logged in from 192.0.2.80)')).toBeTruthy();
+		expect(screen.queryByRole('button', { name: /^End/ })).toBeNull();
+
+		const confirm = screen.getByRole('region', { name: "Confirm it's you" });
+		await userEvent.type(within(confirm).getByLabelText('Password'), 'a long enough passphrase');
+		await userEvent.type(within(confirm).getByLabelText('6-digit code from your authenticator app'), '123456');
+		await userEvent.click(within(confirm).getByRole('button', { name: 'Confirm' }));
+
+		await userEvent.click(await screen.findByRole('button', { name: 'End: curl/8.5.0' }));
+		expect(calls.find((call) => call.path === '/api/sessions/end')?.body).toEqual({ id: 'other-id', isAllOthers: false });
+		expect(screen.queryByRole('region', { name: "Confirm it's you" })).toBeNull();
+	});
+
+	it('changes the password and ends other sessions by default (v5.0.0-6.2.3)', async () => {
+		openSettings();
+		const calls = mockAPI({
+			'/api/state': [signedIn],
+			'/api/account': [
+				{ status: 200, body: account(false) },
+				{ status: 200, body: account(false) },
+			],
+			'/api/account/password': [
+				{ status: 422, body: { error: 'Don\'t use "tero" in the password' } },
+				{ status: 204 },
+			],
+		});
+		render(<App />);
+
+		const form = await screen.findByRole('region', { name: 'Password' });
+		const newPassword = within(form).getByLabelText('New password');
+		expect(newPassword).toHaveProperty('autocomplete', 'new-password');
+		expect(within(form).getByLabelText('Current password')).toHaveProperty('autocomplete', 'current-password');
+		expect(within(form).getByLabelText('End every other session')).toHaveProperty('checked', true);
+
+		await userEvent.type(within(form).getByLabelText('Current password'), 'the current passphrase');
+		await userEvent.type(within(form).getByLabelText('6-digit code from your authenticator app'), '123456');
+		await userEvent.type(newPassword, 'my tero passphrase');
+		await userEvent.click(within(form).getByRole('button', { name: 'Change password' }));
+
+		const error = await within(form).findByRole('alert');
+		expect(newPassword.getAttribute('aria-describedby')).toContain(error.id);
+		expect(calls.find((call) => call.path === '/api/account/password')?.body).toEqual({
+			currentPassword: 'the current passphrase',
+			code: '123456',
+			newPassword: 'my tero passphrase',
+			isEndingOthers: true,
+		});
+
+		await userEvent.type(within(form).getByLabelText('6-digit code from your authenticator app'), '654321');
+		await userEvent.clear(newPassword);
+		await userEvent.type(newPassword, 'an unrelated passphrase');
+		await userEvent.click(within(form).getByRole('button', { name: 'Change password' }));
+		expect((await within(form).findByRole('status')).textContent).toBe('Your password was changed.');
+	});
+
+	it('lists passkeys and offers passkey changes only once confirmed', async () => {
+		openSettings();
+		mockAPI({ '/api/state': [signedIn], '/api/account': [{ status: 200, body: account(false) }] });
+		render(<App />);
+
+		const passkeys = await screen.findByRole('table', { name: 'Your passkeys' });
+		expect(within(passkeys).getByText('Laptop')).toBeTruthy();
+		expect(within(passkeys).getByText('Never')).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Add a passkey' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Remove Laptop' })).toBeNull();
+	});
+
+	it('removes a passkey and ends other sessions by default (v5.0.0-7.4.3)', async () => {
+		openSettings();
+		const calls = mockAPI({
+			'/api/state': [signedIn],
+			'/api/account': [
+				{ status: 200, body: account(true) },
+				{ status: 200, body: { ...account(true), passkeys: [] } },
+			],
+			'/api/passkeys/remove': [{ status: 204 }],
+		});
+		render(<App />);
+
+		await userEvent.click(await screen.findByRole('button', { name: 'Remove Laptop' }));
+
+		expect(calls.find((call) => call.path === '/api/passkeys/remove')?.body).toEqual({ id: 'key-id', isEndingOthers: true });
+		expect((await screen.findByRole('status')).textContent).toBe('Laptop was removed.');
+		expect(await screen.findByText('No passkeys yet.')).toBeTruthy();
+	});
+
+	it('asks to confirm again when the confirmation ran out', async () => {
+		openSettings();
+		mockAPI({
+			'/api/state': [signedIn],
+			'/api/account': [
+				{ status: 200, body: account(true) },
+				{ status: 200, body: account(false) },
+			],
+			'/api/sessions/end': [{ status: 403, body: { error: "Confirm it's you with your password and a code first" } }],
+		});
+		render(<App />);
+
+		await userEvent.click(await screen.findByRole('button', { name: 'End all other sessions' }));
+
+		expect(await screen.findByRole('region', { name: "Confirm it's you" })).toBeTruthy();
+	});
+});
+
+describe('passkey login', () => {
+	it('sends the browser passkey answer and logs in (v5.0.0-6.3.3)', async () => {
+		window.history.replaceState(null, '', '/');
+		const answer = { id: 'cred', type: 'public-key' };
+		class FakePublicKeyCredential {
+			static parseCreationOptionsFromJSON = (options: unknown) => options;
+			static parseRequestOptionsFromJSON = (options: unknown) => ({ parsed: options });
+			toJSON() {
+				return answer;
+			}
+		}
+		vi.stubGlobal('PublicKeyCredential', FakePublicKeyCredential);
+		const get = vi.fn(async () => new FakePublicKeyCredential());
+		vi.stubGlobal('navigator', { ...navigator, credentials: { get } });
+		const calls = mockAPI({
+			'/api/state': [
+				{ status: 200, body: { isSetUp: true, isLoggedIn: false } },
+				{ status: 200, body: { isSetUp: true, isLoggedIn: true } },
+			],
+			'/api/login/passkey/begin': [{ status: 200, body: { challengeId: 'challenge', options: { challenge: 'abc' } } }],
+			'/api/login/passkey/finish': [{ status: 204 }],
+			'/api/apps': [{ status: 200, body: { apps: [] } }],
+		});
+		render(<App />);
+
+		await userEvent.click(await screen.findByRole('button', { name: 'Log in with a passkey' }));
+
+		expect(await screen.findByRole('heading', { name: 'Apps' })).toBeTruthy();
+		expect(get).toHaveBeenCalledWith({ publicKey: { parsed: { challenge: 'abc' } } });
+		expect(calls.find((call) => call.path === '/api/login/passkey/finish')?.body).toEqual({
+			challengeId: 'challenge',
+			credential: answer,
+		});
+	});
+
+	it('keeps the password form when the browser has no passkey support', async () => {
+		window.history.replaceState(null, '', '/');
+		mockAPI({ '/api/state': [{ status: 200, body: { isSetUp: true, isLoggedIn: false } }] });
+		render(<App />);
+
+		expect(await screen.findByLabelText('Password')).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Log in with a passkey' })).toBeNull();
+	});
+});

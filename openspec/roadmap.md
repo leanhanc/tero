@@ -37,24 +37,27 @@ The internet-facing dashboard can't read Tero's master key or edit the security 
 
 Change: [add-key-service-slice-3](changes/add-key-service-slice-3/)
 
-- [ ] A `tero-keys` service under its own system user, with no network and a Unix socket that answers only the dashboard (by its systemd unit) and root
-- [ ] A master key sealed by systemd (bound to the TPM when the server has one) that only `tero-keys` receives; a key that won't open never takes apps offline
-- [ ] The admin's password hash, TOTP secret (encrypted) and setup links held by `tero-keys`, which checks every login; only root issues setup links
-- [ ] Security events written by `tero-keys`, so nothing running as `tero` can change or delete them
-- [ ] `sudo tero rotate-key`
-- [ ] `sudo tero assume-breach`: stops the dashboard, ends every session, forgets trusted browsers, replaces certificates, rotates the master key, resets the login and prints what to check and rotate elsewhere
+- [x] A `tero-keys` service under its own system user, with no network and a Unix socket that answers only the dashboard (by its systemd unit) and root
+- [x] A master key sealed by systemd (bound to the TPM when the server has one) that only `tero-keys` receives; a key that won't open never takes apps offline
+- [x] The admin's password hash, TOTP secret (encrypted) and setup links held by `tero-keys`, which checks every login; only root issues setup links
+- [x] Security events written by `tero-keys`, so nothing running as `tero` can change or delete them
+- [x] `sudo tero rotate-key`
+- [x] `sudo tero assume-breach`: stops the dashboard, ends every session, forgets trusted browsers, replaces certificates, rotates the master key, resets the login and prints what to check and rotate elsewhere
 
 Requirements: ASVS 11.1.1, 11.3.1, 11.3.2, 11.3.3, 13.3.1, 13.3.2, 13.3.3, 13.3.4, 16.4.2 ([asvs-l2.md](../docs/security/asvs-l2.md))
 
 ## Slice 4: Account security
 
-The dashboard gains its first settings page. Until then, `sudo tero reset-login` is the way to replace a password, and every login still needs TOTP.
+The dashboard gains its first settings page, and sessions move into the key service.
 
-- [ ] Change the password with the current password, a fresh TOTP code and the usual length and breach checks
-- [ ] Option to end every other session after a change
-- [ ] List active sessions and end any of them, or all
-- [ ] Refuse new passwords that contain context words such as "tero" or the dashboard domain
-- [ ] Passkeys: add one or more from the settings page (after a fresh password and TOTP check), name and remove them, and log in with a passkey alone, which is phishing-resistant; password and TOTP stay as the fallback
+Change: [add-account-security-slice-4](changes/add-account-security-slice-4/)
+
+- [x] Change the password with the current password, a fresh TOTP code and the usual length and breach checks
+- [x] Option to end every other session after a change
+- [x] List active sessions and end any of them, or all
+- [x] Refuse new passwords that contain context words such as "tero" or the dashboard domain
+- [x] Passkeys: add one or more from the settings page (after a fresh password and TOTP check), name and remove them, and log in with a passkey alone, which is phishing-resistant; password and TOTP stay as the fallback
+- [x] Sessions, trusted browsers and login throttles held by `tero-keys`, which creates every session, so nothing running as `tero` can make one
 
 Requirements: ASVS 6.2.2, 6.2.3, 6.2.11, 6.3.3, 7.4.3, 7.4.5, 7.5.1, 7.5.2 ([asvs-l2.md](../docs/security/asvs-l2.md))
 
@@ -122,6 +125,15 @@ Drafts: [apps](drafts/apps/spec.md), [build-pipeline](drafts/build-pipeline/spec
 - [ ] Undo init's host changes (firewall rules, SSH and kernel settings). Init doesn't record what it changed yet, so it starts keeping that record, and purge leaves alone anything the admin edited since
 - [ ] Remove the `tero` binary last
 - [ ] Root only, never offered in the dashboard
+
+## Slice 13: Passkeys only
+
+An opt-in switch that turns the password and TOTP login off, for admins who want only the phishing-resistant path.
+
+- [ ] "Use passkeys only" on the settings page, offered once the admin has a passkey, after a fresh confirmation; with only one, it warns that losing that device means `sudo tero reset-login` over SSH, and suggests adding a second
+- [ ] While it is on, `tero-keys` refuses password and code logins, and refuses removing the last passkey
+- [ ] Turning it off needs a fresh passkey check; `sudo tero reset-login` turns it off and stays the recovery for a lost device
+- [ ] The login page shows only the passkey button while it is on
 
 ## Open decisions
 

@@ -210,3 +210,34 @@ func TestPwnedPasswords_v5_0_0_15_3_2_RefusesRedirects(t *testing.T) {
 		t.Errorf("IsBreached() after a redirect = %v, %v; want an error and no match", isBreached, err)
 	}
 }
+
+func TestContextWords_v5_0_0_6_2_11_ListsDomainLabels(t *testing.T) {
+	words := ContextWords("Deploy.Example.com", "203.0.113.5")
+	want := []string{"tero", "admin", "deploy.example.com", "deploy", "example", "203.0.113.5"}
+	if strings.Join(words, ",") != strings.Join(want, ",") {
+		t.Errorf("ContextWords() = %q, want %q", words, want)
+	}
+}
+
+func TestContextWords_v5_0_0_6_2_11_SkipsNumericLabels(t *testing.T) {
+	words := ContextWords("203.0.113.5.nip.io", "203.0.113.5")
+	want := []string{"tero", "admin", "203.0.113.5.nip.io", "203.0.113.5"}
+	if strings.Join(words, ",") != strings.Join(want, ",") {
+		t.Errorf("ContextWords() = %q, want %q", words, want)
+	}
+}
+
+func TestPolicy_v5_0_0_6_2_11_RefusesContextWords(t *testing.T) {
+	policy := Policy{Breaches: fakeBreaches{}, ContextWords: ContextWords("deploy.example.com", "")}
+	for password, word := range map[string]string{"MyDeployBox2026": "deploy", "my-tero-password": "tero"} {
+		_, err := policy.Check(context.Background(), password)
+		var contextErr ContextWordError
+		if !errors.As(err, &contextErr) || contextErr.Word != word {
+			t.Errorf("Check(%q) = %v, want the word %q named", password, err, word)
+		}
+	}
+
+	if _, err := policy.Check(context.Background(), "kq7#vmzt otter lamp"); err != nil {
+		t.Errorf("Check(unrelated password) = %v", err)
+	}
+}

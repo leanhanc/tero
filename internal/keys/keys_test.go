@@ -18,6 +18,7 @@ import (
 const (
 	adminPassword = "a long passphrase nobody has used"
 	adminIP       = "198.51.100.7"
+	testDomain    = "dash.example.com"
 )
 
 type testClock struct{ now time.Time }
@@ -31,6 +32,8 @@ type testEnv struct {
 	root      *Client
 	dashboard *Client
 	journal   *[]map[string]string
+	// session is the session setUp started.
+	session *string
 }
 
 func testKey(fill byte) []byte { return bytes.Repeat([]byte{fill}, keySize) }
@@ -46,13 +49,17 @@ func newTestEnv(t *testing.T, keys map[int][]byte) testEnv {
 
 	clock := &testClock{now: time.Unix(1_800_000_000, 0)}
 	entries := &[]map[string]string{}
-	service := NewService(db, keys, Options{
-		Now: clock.Now,
+	service, err := NewService(db, keys, Options{
+		Domain: testDomain,
+		Now:    clock.Now,
 		Journal: func(_ int, _ string, fields map[string]string) error {
 			*entries = append(*entries, fields)
 			return nil
 		},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	return testEnv{
 		service:   service,
@@ -60,6 +67,7 @@ func newTestEnv(t *testing.T, keys map[int][]byte) testEnv {
 		root:      NewLocalClient(service, CallerRoot),
 		dashboard: NewLocalClient(service, CallerDashboard),
 		journal:   entries,
+		session:   new(string),
 	}
 }
 
@@ -72,26 +80,40 @@ func (env testEnv) setUp(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	enrolment, err := env.dashboard.BeginSetup(ctx, token, adminPassword)
+	enrolment, err := env.dashboard.BeginSetup(ctx, adminIP, token, adminPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
 	code, _ := totp.Code(enrolment.Secret, env.clock.Now())
-	if err := env.dashboard.FinishSetup(ctx, adminIP, token, code); err != nil {
+	result, err := env.dashboard.FinishSetup(ctx, Browser{IP: adminIP}, token, code)
+	if err != nil {
 		t.Fatal(err)
 	}
+	*env.session = result.SessionToken
 
 	return enrolment.Secret
 }
 
+// login logs in through the throttles, as the dashboard does.
 func (env testEnv) login(secret, givenPassword string) error {
+	_, err := env.loginFrom(Browser{IP: adminIP}, secret, givenPassword)
+	return err
+}
+
+func (env testEnv) loginFrom(browser Browser, secret, givenPassword string) (LoginResult, error) {
 	code, _ := totp.Code(secret, env.clock.Now())
-	return env.dashboard.CheckLogin(context.Background(), adminIP, givenPassword, code)
+	return env.dashboard.LoginPassword(context.Background(), browser, givenPassword, code)
+}
+
+// check checks a password and code without the throttles, for the limits
+// the key service keeps whatever the throttles say.
+func (env testEnv) check(ip, givenPassword, code string) error {
+	return env.service.checkCredentials(context.Background(), ip, givenPassword, code, loginCheck)
 }
 
 func (env testEnv) eventTypes(t *testing.T) []EventType {
 	t.Helper()
-	events, err := env.root.RecentEvents(context.Background(), 1000)
+	events, err := env.root.RecentEvents(context.Background(), "", 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,16 +203,16 @@ func TestDashboardCantReplaceCredentials(t *testing.T) {
 	secret := env.setUp(t)
 	ctx := context.Background()
 
-	if _, err := env.dashboard.BeginSetup(ctx, "any token", "a new password chosen"); !errors.Is(err, ErrAlreadySetUp) {
+	if _, err := env.dashboard.BeginSetup(ctx, adminIP, "any token", "a new password chosen"); !errors.Is(err, ErrAlreadySetUp) {
 		t.Errorf("setup.begin with an admin: err = %v", err)
 	}
-	if err := env.dashboard.FinishSetup(ctx, adminIP, "any token", "123456"); !errors.Is(err, ErrAlreadySetUp) {
+	if _, err := env.dashboard.FinishSetup(ctx, Browser{IP: adminIP}, "any token", "123456"); !errors.Is(err, ErrAlreadySetUp) {
 		t.Errorf("setup.finish with an admin: err = %v", err)
 	}
 
 	// Even a link root issued can't replace an existing admin.
 	token, _ := env.root.IssueSetupLink(ctx)
-	if _, err := env.dashboard.BeginSetup(ctx, token, "a new password chosen"); !errors.Is(err, ErrAlreadySetUp) {
+	if _, err := env.dashboard.BeginSetup(ctx, adminIP, token, "a new password chosen"); !errors.Is(err, ErrAlreadySetUp) {
 		t.Errorf("setup.begin with a fresh link and an admin: err = %v", err)
 	}
 
@@ -214,8 +236,11 @@ func TestCallersLimitedToTheirVerbs(t *testing.T) {
 	if err := env.dashboard.ResetLogin(ctx); !errors.Is(err, ErrRefused) {
 		t.Errorf("dashboard login.reset: err = %v", err)
 	}
-	if err := env.root.CheckLogin(ctx, "", adminPassword, "123456"); !errors.Is(err, ErrRefused) {
-		t.Errorf("root login.check: err = %v", err)
+	if _, err := env.root.LoginPassword(ctx, Browser{}, adminPassword, "123456"); !errors.Is(err, ErrRefused) {
+		t.Errorf("root login.password: err = %v", err)
+	}
+	if _, err := env.root.CheckSession(ctx, "any", ""); !errors.Is(err, ErrRefused) {
+		t.Errorf("root session.check: err = %v", err)
 	}
 	if _, err := NewLocalClient(env.service, Caller("agent")).Status(ctx); !errors.Is(err, ErrRefused) {
 		t.Errorf("unknown caller: err = %v", err)
@@ -226,13 +251,13 @@ func TestSetupNeedsAnIssuedUnexpiredLink(t *testing.T) {
 	env := newTestEnv(t, map[int][]byte{1: testKey(1)})
 	ctx := context.Background()
 
-	if _, err := env.dashboard.BeginSetup(ctx, "made up", adminPassword); !errors.Is(err, ErrInvalidLink) {
+	if _, err := env.dashboard.BeginSetup(ctx, adminIP, "made up", adminPassword); !errors.Is(err, ErrInvalidLink) {
 		t.Errorf("made-up token: err = %v", err)
 	}
 
 	token, _ := env.root.IssueSetupLink(ctx)
 	env.clock.Advance(setupLinkLifetime)
-	if _, err := env.dashboard.BeginSetup(ctx, token, adminPassword); !errors.Is(err, ErrInvalidLink) {
+	if _, err := env.dashboard.BeginSetup(ctx, adminIP, token, adminPassword); !errors.Is(err, ErrInvalidLink) {
 		t.Errorf("expired token: err = %v", err)
 	}
 }
@@ -242,11 +267,11 @@ func TestSetupWithoutCodeDoesNotComplete(t *testing.T) {
 	ctx := context.Background()
 
 	token, _ := env.root.IssueSetupLink(ctx)
-	if err := env.dashboard.FinishSetup(ctx, adminIP, token, "123456"); !errors.Is(err, ErrInvalidLink) {
+	if _, err := env.dashboard.FinishSetup(ctx, Browser{IP: adminIP}, token, "123456"); !errors.Is(err, ErrInvalidLink) {
 		t.Errorf("finish before begin: err = %v", err)
 	}
-	env.dashboard.BeginSetup(ctx, token, adminPassword)
-	if err := env.dashboard.FinishSetup(ctx, adminIP, token, "000000"); !errors.Is(err, ErrInvalidCode) {
+	env.dashboard.BeginSetup(ctx, adminIP, token, adminPassword)
+	if _, err := env.dashboard.FinishSetup(ctx, Browser{IP: adminIP}, token, "000000"); !errors.Is(err, ErrInvalidCode) {
 		t.Errorf("wrong code: err = %v", err)
 	}
 
@@ -260,11 +285,10 @@ func TestSetupWithoutCodeDoesNotComplete(t *testing.T) {
 func TestWrongCodesWithThePasswordLockLogin(t *testing.T) {
 	env := newTestEnv(t, map[int][]byte{1: testKey(1)})
 	secret := env.setUp(t)
-	ctx := context.Background()
 
 	for range codeFailureLimit {
 		env.clock.Advance(time.Minute)
-		if err := env.dashboard.CheckLogin(ctx, adminIP, adminPassword, "000000"); !errors.Is(err, ErrWrongLogin) {
+		if err := env.check(adminIP, adminPassword, "000000"); !errors.Is(err, ErrWrongLogin) {
 			t.Fatalf("wrong code: err = %v", err)
 		}
 	}
@@ -289,11 +313,10 @@ func TestWrongCodesWithThePasswordLockLogin(t *testing.T) {
 func TestWrongPasswordsDontLockLogin(t *testing.T) {
 	env := newTestEnv(t, map[int][]byte{1: testKey(1)})
 	secret := env.setUp(t)
-	ctx := context.Background()
 
 	for range codeFailureLimit + 5 {
 		env.clock.Advance(time.Second)
-		env.dashboard.CheckLogin(ctx, "203.0.113.9", "a guessed password", "000000")
+		env.check("203.0.113.9", "a guessed password", "000000")
 	}
 
 	env.clock.Advance(time.Minute)
@@ -346,7 +369,7 @@ func TestRotationResealsAPendingSetup(t *testing.T) {
 	ctx := context.Background()
 
 	token, _ := env.root.IssueSetupLink(ctx)
-	enrolment, err := env.dashboard.BeginSetup(ctx, token, adminPassword)
+	enrolment, err := env.dashboard.BeginSetup(ctx, adminIP, token, adminPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,7 +381,7 @@ func TestRotationResealsAPendingSetup(t *testing.T) {
 	delete(env.service.keys, 1)
 
 	code, _ := totp.Code(enrolment.Secret, env.clock.Now())
-	if err := env.dashboard.FinishSetup(ctx, adminIP, token, code); err != nil {
+	if _, err := env.dashboard.FinishSetup(ctx, Browser{IP: adminIP}, token, code); err != nil {
 		t.Fatalf("finishing setup after rotation: %v", err)
 	}
 }
@@ -394,12 +417,12 @@ func TestEventSourcesAndTimes(t *testing.T) {
 	env.clock.Advance(time.Minute)
 	env.login(secret, adminPassword)
 
-	if err := env.dashboard.AppendEvent(ctx, EventRateLimited, adminIP); err != nil {
+	if err := env.dashboard.AppendEvent(ctx, EventBreachCheckSkipped, adminIP); err != nil {
 		t.Fatal(err)
 	}
 
-	events, _ := env.root.RecentEvents(ctx, 10)
-	if events[0].Type != EventRateLimited || events[0].Source != "dashboard" || !events[0].At.Equal(env.clock.Now()) {
+	events, _ := env.root.RecentEvents(ctx, "", 10)
+	if events[0].Type != EventBreachCheckSkipped || events[0].Source != "dashboard" || !events[0].At.Equal(env.clock.Now()) {
 		t.Errorf("appended event = %+v", events[0])
 	}
 	if events[1].Type != EventLoginSucceeded || events[1].Source != SourceKeys {
@@ -449,21 +472,21 @@ func TestFloodIsCappedAndCounted(t *testing.T) {
 	env.root.IssueSetupLink(ctx)
 
 	for range 10_000 {
-		env.dashboard.AppendEvent(ctx, EventRateLimited, adminIP)
+		env.dashboard.AppendEvent(ctx, EventBreachCheckSkipped, adminIP)
 	}
 	if err := env.service.FlushCounts(ctx); err != nil {
 		t.Fatal(err)
 	}
 
 	types := env.eventTypes(t)
-	if got := countOf(types, EventRateLimited); got != appendLimit {
+	if got := countOf(types, EventBreachCheckSkipped); got != appendLimit {
 		t.Errorf("stored %d appended events, want %d", got, appendLimit)
 	}
 	if countOf(types, EventSetupLinkIssued) != 1 {
 		t.Error("the earlier event was pushed out")
 	}
 
-	events, _ := env.root.RecentEvents(ctx, 1)
+	events, _ := env.root.RecentEvents(ctx, "", 1)
 	if events[0].Type != EventEventsDropped || events[0].Count != 10_000-appendLimit {
 		t.Errorf("dropped event = %+v", events[0])
 	}
@@ -548,7 +571,7 @@ func TestLoginChecksAreLimitedPerMinute(t *testing.T) {
 	env.clock.Advance(time.Minute)
 
 	for range loginCheckLimit {
-		env.dashboard.CheckLogin(ctx, adminIP, "a guessed password", "000000")
+		env.check(adminIP, "a guessed password", "000000")
 	}
 	if err := env.login(secret, adminPassword); !errors.Is(err, ErrHashingIsBusy) {
 		t.Fatalf("check over the limit: err = %v", err)
@@ -556,7 +579,7 @@ func TestLoginChecksAreLimitedPerMinute(t *testing.T) {
 	if err := env.service.FlushCounts(ctx); err != nil {
 		t.Fatal(err)
 	}
-	events, _ := env.root.RecentEvents(ctx, 1)
+	events, _ := env.root.RecentEvents(ctx, "", 1)
 	if events[0].Type != EventRateLimited || events[0].Source != SourceKeys || events[0].Count != 1 {
 		t.Errorf("refused checks recorded as %+v", events[0])
 	}
@@ -571,9 +594,9 @@ func TestDashboardSeesWrongCodesAsFailedLogins(t *testing.T) {
 	env := newTestEnv(t, map[int][]byte{1: testKey(1)})
 	env.setUp(t)
 	ctx := context.Background()
-	env.dashboard.CheckLogin(ctx, adminIP, adminPassword, "000000")
+	env.check(adminIP, adminPassword, "000000")
 
-	events, err := env.dashboard.RecentEvents(ctx, 1)
+	events, err := env.dashboard.RecentEvents(ctx, *env.session, 1)
 	if err != nil {
 		t.Fatal(err)
 	}

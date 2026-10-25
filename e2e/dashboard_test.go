@@ -19,7 +19,7 @@ import (
 var setupLink string
 
 // adminPassword is 64 lowercase letters, fresh for every run so it is in no
-// breach list.
+// breach list. Password change replaces it.
 var adminPassword = randomLowercase(64)
 
 const breachedPassword = "password123"
@@ -55,6 +55,7 @@ func testDashboardAccess(t *testing.T) {
 	t.Run("dashboard-access: Repeated failures from one IP (v5.0.0-6.3.1)", admin.testRateLimit)
 	t.Run("dashboard-access: Admin loses their authenticator / Credential change revokes sessions / Server settings unaffected by reset", admin.testResetLogin)
 	t.Run("dashboard-access: Recovery visible after the fact", admin.testRecoveryVisible)
+	t.Run("account-security", admin.testAccountSecurity)
 }
 
 // testWebApp checks that every page path serves the embedded app, that its
@@ -276,12 +277,13 @@ func (d *dashboard) testRateLimit(t *testing.T) {
 		t.Errorf("rate-limited login with the right credentials = %d %s", rightCredentials.status, rightCredentials.body)
 	}
 
-	must(t, "sudo systemctl restart tero")
-	waitUntil(t, time.Minute, func() bool { return getDashboard(t, "anonymous", "/api/state").status == 200 })
+	// The counters live in the key service, which systemd starts again on
+	// the next connection.
+	must(t, "sudo systemctl restart tero-keys")
 
 	afterRestart := postDashboard(t, "attacker", "/api/login", map[string]string{"password": randomLowercase(30), "code": "000000"})
 	if afterRestart.status != 429 {
-		t.Errorf("rate limit after a service restart = %d", afterRestart.status)
+		t.Errorf("rate limit after a key service restart = %d", afterRestart.status)
 	}
 }
 
@@ -428,11 +430,19 @@ func tokenOf(t *testing.T, link string) string {
 	return token
 }
 
+// randomLowercase never contains "tero" or "admin", which the password
+// policy refuses.
 func randomLowercase(length int) string {
-	random := make([]byte, length)
-	rand.Read(random)
-	for index := range random {
-		random[index] = 'a' + random[index]%26
+	for {
+		random := make([]byte, length)
+		rand.Read(random)
+		for index := range random {
+			random[index] = 'a' + random[index]%26
+		}
+
+		password := string(random)
+		if !strings.Contains(password, "tero") && !strings.Contains(password, "admin") {
+			return password
+		}
 	}
-	return string(random)
 }

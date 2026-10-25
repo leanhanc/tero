@@ -16,9 +16,9 @@ export function PageHeader({ onLogout }: { onLogout: () => void }) {
 
 	return (
 		<header>
-			<p>
-				<InternalLink to="/">{messages.header.home}</InternalLink>
-			</p>
+			<nav>
+				<InternalLink to="/">{messages.header.home}</InternalLink> <InternalLink to="/settings">{messages.header.settings}</InternalLink>
+			</nav>
 			<form onSubmit={submitLogout}>
 				<button type="submit">{messages.header.logOut}</button>
 			</form>

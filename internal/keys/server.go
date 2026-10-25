@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/leanhanc/tero/internal/config"
+	"github.com/leanhanc/tero/internal/hostfs"
 	"github.com/leanhanc/tero/internal/journal"
 	"github.com/leanhanc/tero/internal/store"
 )
@@ -74,7 +76,14 @@ func Run(ctx context.Context) error {
 	}
 	defer db.Close()
 
-	service := NewService(db, keys, Options{Journal: journal.Send})
+	cfg, err := config.Load(hostfs.Host)
+	if err != nil {
+		return err
+	}
+	service, err := NewService(db, keys, Options{Domain: cfg.DashboardDomain, Journal: journal.Send})
+	if err != nil {
+		return err
+	}
 	go service.maintain(ctx)
 
 	return service.Serve(ctx, listener, peers{teroUID: teroUID, dashboard: dashboardCgroup})

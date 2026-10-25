@@ -1,6 +1,8 @@
 # Written by `tero init`. The key service holds the master key, the admin's
-# credentials and the security log. It runs as its own user with no network,
-# so nothing running as tero can read them. Started by tero-keys.socket.
+# credentials and passkeys, the dashboard's sessions and the security log. It
+# runs as its own user with no network, so nothing running as tero can read
+# them or create a session. It reads the dashboard domain, which passkeys are
+# bound to, from /etc/tero/config.json. Started by tero-keys.socket.
 [Unit]
 Description=Tero key service
 Documentation=https://github.com/leanhanc/tero
