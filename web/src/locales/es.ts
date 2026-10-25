@@ -53,6 +53,11 @@ export const es: Messages = {
 			afterReset: 'ahí para obtener uno nuevo.',
 		},
 	},
+	passkeyOffer: {
+		heading: 'Iniciá sesión más rápido la próxima vez',
+		intro: 'Agregá una llave de acceso e iniciá sesión con tu huella, tu cara o el PIN del dispositivo en lugar de tu contraseña y un código. Tu contraseña y tu app de autenticación siguen funcionando.',
+		notNow: 'Ahora no',
+	},
 	settings: {
 		heading: 'Configuración',
 		confirm: {
@@ -61,6 +66,7 @@ export const es: Messages = {
 			passwordLabel: 'Contraseña',
 			codeLabel: 'Código de 6 dígitos de tu app de autenticación',
 			submit: 'Confirmar',
+			cancel: 'Cancelar',
 		},
 		password: {
 			heading: 'Contraseña',
@@ -74,7 +80,7 @@ export const es: Messages = {
 		},
 		passkeys: {
 			heading: 'Llaves de acceso',
-			intro: 'Una llave de acceso te permite iniciar sesión sin contraseña ni código, y una copia falsa de esta página no la puede usar. Tu contraseña y tu app de autenticación siguen funcionando.',
+			intro: 'Una llave de acceso te permite iniciar sesión sin contraseña ni código. Tu contraseña y tu app de autenticación siguen funcionando.',
 			caption: 'Tus llaves de acceso',
 			empty: 'Todavía no hay llaves de acceso.',
 			nameColumn: 'Nombre',

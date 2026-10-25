@@ -1,22 +1,21 @@
 import { useState } from 'react';
 
-import { ApiError, endOtherSessions, endSession, errorMessage, type SessionInfo } from '../../../lib/utils/api';
+import { endOtherSessions, endSession, errorMessage, type SessionInfo } from '../../../lib/utils/api';
 import { describeUserAgent } from '../../../lib/utils/browser-label';
 import { useFormatTime, useMessages } from '../../../lib/utils/locale';
+import type { ConfirmThen } from '../settings-page';
 
 type SessionListProps = {
 	sessions: SessionInfo[];
-	isConfirmed: boolean;
-	onChange: () => void;
+	confirmThen: ConfirmThen;
 };
 
 /**
- * Every live session, and buttons to end one or all the others once the
- * session is confirmed (v5.0.0-7.5.2). This browser's own session ends with
- * logging out. A refusal because the confirmation
- * ran out reloads the page, which asks for it again.
+ * Every live session, and buttons to end one or all the others, which ask
+ * the admin to confirm first when the session isn't confirmed
+ * (v5.0.0-7.5.2). This browser's own session ends with logging out.
  */
-export function SessionList({ sessions, isConfirmed, onChange }: SessionListProps) {
+export function SessionList({ sessions, confirmThen }: SessionListProps) {
 	const messages = useMessages();
 	const [error, setError] = useState('');
 	const hasOtherSessions = sessions.some((session) => !session.isCurrent);
@@ -24,14 +23,8 @@ export function SessionList({ sessions, isConfirmed, onChange }: SessionListProp
 	const run = async (action: () => Promise<void>) => {
 		setError('');
 		try {
-			await action();
-			onChange();
+			await confirmThen(action);
 		} catch (failure) {
-			const isConfirmationOver = failure instanceof ApiError && failure.status === 403;
-			if (isConfirmationOver) {
-				onChange();
-				return;
-			}
 			setError(errorMessage(failure, messages.errors));
 		}
 	};
@@ -48,22 +41,17 @@ export function SessionList({ sessions, isConfirmed, onChange }: SessionListProp
 						<th scope="col">{messages.settings.sessions.startedColumn}</th>
 						<th scope="col">{messages.settings.sessions.lastUsedColumn}</th>
 						<th scope="col">{messages.settings.sessions.ipColumn}</th>
-						{isConfirmed && <th scope="col">{messages.settings.sessions.actionsColumn}</th>}
+						<th scope="col">{messages.settings.sessions.actionsColumn}</th>
 					</tr>
 				</thead>
 				<tbody>
 					{sessions.map((session) => (
-						<SessionRow
-							key={session.id}
-							session={session}
-							isConfirmed={isConfirmed}
-							onEnd={() => run(() => endSession(session.id))}
-						/>
+						<SessionRow key={session.id} session={session} onEnd={() => run(() => endSession(session.id))} />
 					))}
 				</tbody>
 			</table>
 			{error && <p role="alert">{error}</p>}
-			{isConfirmed && hasOtherSessions && (
+			{hasOtherSessions && (
 				<button type="button" onClick={() => run(endOtherSessions)}>
 					{messages.settings.sessions.endOthers}
 				</button>
@@ -72,13 +60,7 @@ export function SessionList({ sessions, isConfirmed, onChange }: SessionListProp
 	);
 }
 
-type SessionRowProps = {
-	session: SessionInfo;
-	isConfirmed: boolean;
-	onEnd: () => void;
-};
-
-function SessionRow({ session, isConfirmed, onEnd }: SessionRowProps) {
+function SessionRow({ session, onEnd }: { session: SessionInfo; onEnd: () => void }) {
 	const messages = useMessages();
 	const formatTime = useFormatTime();
 	const browser = useBrowserName(session.userAgent);
@@ -95,15 +77,13 @@ function SessionRow({ session, isConfirmed, onEnd }: SessionRowProps) {
 			<td>{formatTime(new Date(session.createdAt))}</td>
 			<td>{formatTime(new Date(session.lastSeenAt))}</td>
 			<td>{ip}</td>
-			{isConfirmed && (
-				<td>
-					{!session.isCurrent && (
-						<button type="button" onClick={onEnd} aria-label={`${messages.settings.sessions.end}: ${browser}`}>
-							{messages.settings.sessions.end}
-						</button>
-					)}
-				</td>
-			)}
+			<td>
+				{!session.isCurrent && (
+					<button type="button" onClick={onEnd} aria-label={`${messages.settings.sessions.end}: ${browser}`}>
+						{messages.settings.sessions.end}
+					</button>
+				)}
+			</td>
 		</tr>
 	);
 }

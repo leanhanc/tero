@@ -4,12 +4,14 @@ import { AppPage } from './features/app/app-page';
 import { HomePage } from './features/home/home-page';
 import { LoginPage } from './features/login/login-page';
 import { NewAppPage } from './features/new-app/new-app-page';
+import { PasskeyOfferPage } from './features/passkey-offer/passkey-offer-page';
 import { SettingsPage } from './features/settings/settings-page';
 import { SetupPage } from './features/setup/setup-page';
 import type { Messages } from './locales/en';
 import { type DashboardState, errorMessage, getState } from './lib/utils/api';
 import { useMessages } from './lib/utils/locale';
 import { usePath } from './lib/utils/navigation';
+import { takePasskeyOffer } from './lib/utils/passkeys';
 
 type LoadedState = { state: DashboardState } | { error: string } | null;
 
@@ -52,8 +54,15 @@ export function App() {
 
 const appPathPattern = /^\/apps\/([a-z][a-z0-9-]*)$/;
 
-/** Picks the signed-in page from the path. */
+/** Picks the signed-in page from the path, after the passkey offer when a login asked for it. */
 function SignedInPage({ path, onLogout }: { path: string; onLogout: () => void }) {
+	const [isOffering, setIsOffering] = useState(takePasskeyOffer);
+	const finishOffer = useCallback(() => setIsOffering(false), []);
+
+	if (isOffering) {
+		return <PasskeyOfferPage onDone={finishOffer} />;
+	}
+
 	if (path === '/apps/new') {
 		return <NewAppPage onLogout={onLogout} />;
 	}

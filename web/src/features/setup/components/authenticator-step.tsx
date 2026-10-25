@@ -3,6 +3,7 @@ import { type SubmitEvent, useEffect, useRef, useState } from 'react';
 import { ApiError, type Enrolment, errorMessage, finishSetup } from '../../../lib/utils/api';
 import { useMessages } from '../../../lib/utils/locale';
 import { navigate } from '../../../lib/utils/navigation';
+import { requestPasskeyOffer } from '../../../lib/utils/passkeys';
 
 type AuthenticatorStepProps = {
 	token: string;
@@ -28,6 +29,7 @@ export function AuthenticatorStep({ token, enrolment, onLinkError }: Authenticat
 
 		try {
 			await finishSetup(token, code);
+			requestPasskeyOffer();
 			navigate('/');
 		} catch (error) {
 			const isCodeProblem = error instanceof ApiError && (error.status === 422 || error.status === 429);

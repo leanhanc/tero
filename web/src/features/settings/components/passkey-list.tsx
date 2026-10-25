@@ -1,42 +1,41 @@
 import { type SubmitEvent, useState } from 'react';
 
-import { ApiError, errorMessage, type PasskeyInfo, removePasskey, renamePasskey } from '../../../lib/utils/api';
+import { errorMessage, type PasskeyInfo, removePasskey, renamePasskey } from '../../../lib/utils/api';
 import { useFormatTime, useMessages } from '../../../lib/utils/locale';
+import type { ConfirmThen } from '../settings-page';
 import { AddPasskeyForm } from './add-passkey-form';
 
 type PasskeyListProps = {
 	passkeys: PasskeyInfo[];
-	isConfirmed: boolean;
-	onChange: () => void;
+	confirmThen: ConfirmThen;
 };
 
 /**
- * The admin's passkeys. Adding, renaming and removing them need a confirmed
- * session; adding or removing one can end every other session
- * (v5.0.0-7.4.3).
+ * The admin's passkeys. Adding, renaming and removing one ask the admin to
+ * confirm first when the session isn't confirmed; adding or removing one can
+ * end every other session (v5.0.0-7.4.3).
  */
-export function PasskeyList({ passkeys, isConfirmed, onChange }: PasskeyListProps) {
+export function PasskeyList({ passkeys, confirmThen }: PasskeyListProps) {
 	const messages = useMessages();
 	const [isEndingOthers, setIsEndingOthers] = useState(true);
 	const [status, setStatus] = useState('');
 	const [error, setError] = useState('');
 
-	const run = async (action: () => Promise<void>, doneMessage: string) => {
+	const run = async (action: () => Promise<void>) => {
 		setError('');
 		setStatus('');
 		try {
-			await action();
-			setStatus(doneMessage);
-			onChange();
+			await confirmThen(action);
 		} catch (failure) {
-			const isConfirmationOver = failure instanceof ApiError && failure.status === 403;
-			if (isConfirmationOver) {
-				onChange();
-				return;
-			}
 			setError(errorMessage(failure, messages.errors));
 		}
 	};
+
+	const remove = (passkey: PasskeyInfo) =>
+		run(async () => {
+			await removePasskey(passkey.id, isEndingOthers);
+			setStatus(messages.settings.passkeys.removed(passkey.name));
+		});
 
 	return (
 		<section aria-labelledby="passkeys-heading">
@@ -52,7 +51,7 @@ export function PasskeyList({ passkeys, isConfirmed, onChange }: PasskeyListProp
 							<th scope="col">{messages.settings.passkeys.nameColumn}</th>
 							<th scope="col">{messages.settings.passkeys.addedColumn}</th>
 							<th scope="col">{messages.settings.passkeys.lastUsedColumn}</th>
-							{isConfirmed && <th scope="col">{messages.settings.passkeys.actionsColumn}</th>}
+							<th scope="col">{messages.settings.passkeys.actionsColumn}</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -60,11 +59,8 @@ export function PasskeyList({ passkeys, isConfirmed, onChange }: PasskeyListProp
 							<PasskeyRow
 								key={passkey.id}
 								passkey={passkey}
-								isConfirmed={isConfirmed}
-								onRename={(name) => run(() => renamePasskey(passkey.id, name), '')}
-								onRemove={() =>
-									run(() => removePasskey(passkey.id, isEndingOthers), messages.settings.passkeys.removed(passkey.name))
-								}
+								onRename={(name) => run(() => renamePasskey(passkey.id, name))}
+								onRemove={() => remove(passkey)}
 							/>
 						))}
 					</tbody>
@@ -72,38 +68,29 @@ export function PasskeyList({ passkeys, isConfirmed, onChange }: PasskeyListProp
 			)}
 			{error && <p role="alert">{error}</p>}
 			{status && <p role="status">{status}</p>}
-			{isConfirmed && (
-				<>
-					<input
-						id="passkey-end-others"
-						type="checkbox"
-						checked={isEndingOthers}
-						onChange={(event) => setIsEndingOthers(event.target.checked)}
-					/>
-					<label htmlFor="passkey-end-others">{messages.settings.passkeys.endOthers}</label>
-					<AddPasskeyForm
-						isEndingOthers={isEndingOthers}
-						onAdd={(name) => {
-							setError('');
-							setStatus(messages.settings.passkeys.added(name));
-							onChange();
-						}}
-						onConfirmationOver={onChange}
-					/>
-				</>
-			)}
+			<input
+				id="passkey-end-others"
+				type="checkbox"
+				checked={isEndingOthers}
+				onChange={(event) => setIsEndingOthers(event.target.checked)}
+			/>
+			<label htmlFor="passkey-end-others">{messages.settings.passkeys.endOthers}</label>
+			<AddPasskeyForm
+				isEndingOthers={isEndingOthers}
+				confirmThen={confirmThen}
+				onAdd={(name) => setStatus(messages.settings.passkeys.added(name))}
+			/>
 		</section>
 	);
 }
 
 type PasskeyRowProps = {
 	passkey: PasskeyInfo;
-	isConfirmed: boolean;
 	onRename: (name: string) => Promise<void>;
 	onRemove: () => void;
 };
 
-function PasskeyRow({ passkey, isConfirmed, onRename, onRemove }: PasskeyRowProps) {
+function PasskeyRow({ passkey, onRename, onRemove }: PasskeyRowProps) {
 	const messages = useMessages();
 	const formatTime = useFormatTime();
 	const [isRenaming, setIsRenaming] = useState(false);
@@ -127,18 +114,16 @@ function PasskeyRow({ passkey, isConfirmed, onRename, onRemove }: PasskeyRowProp
 			</th>
 			<td>{formatTime(new Date(passkey.createdAt))}</td>
 			<td>{lastUsed}</td>
-			{isConfirmed && (
-				<td>
-					{!isRenaming && (
-						<button type="button" onClick={() => setIsRenaming(true)}>
-							{messages.settings.passkeys.rename}
-						</button>
-					)}
-					<button type="button" onClick={onRemove}>
-						{messages.settings.passkeys.remove(passkey.name)}
+			<td>
+				{!isRenaming && (
+					<button type="button" onClick={() => setIsRenaming(true)}>
+						{messages.settings.passkeys.rename}
 					</button>
-				</td>
-			)}
+				)}
+				<button type="button" onClick={onRemove}>
+					{messages.settings.passkeys.remove(passkey.name)}
+				</button>
+			</td>
 		</tr>
 	);
 }

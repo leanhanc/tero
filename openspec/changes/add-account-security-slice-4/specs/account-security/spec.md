@@ -46,11 +46,19 @@ A new password, at setup or on change, SHALL be refused when it contains, ignori
 - **THEN** it is refused
 
 ### Requirement: Confirming it's you
-Ending sessions and adding, renaming or removing a passkey SHALL need the session to have been confirmed with the password and a current TOTP code in the last 5 minutes. A wrong confirmation SHALL count toward the login throttle and the code guessing limit, and a code SHALL confirm only once (ASVS v5.0.0-7.5.1).
+Ending sessions and adding, renaming or removing a passkey SHALL need the session to have been confirmed with the password and a current TOTP code in the last 5 minutes. A login or setup with the password and a code SHALL confirm the session it starts; a passkey login SHALL NOT. The dashboard SHALL ask for the password and a code only when the admin starts one of those actions on an unconfirmed session, and then carry the action out. A wrong confirmation SHALL count toward the login throttle and the code guessing limit, and a code SHALL confirm only once (ASVS v5.0.0-7.5.1).
 
 #### Scenario: Not confirmed
 - **WHEN** the admin, logged in for more than 5 minutes without confirming, asks to end a session
-- **THEN** the dashboard asks for the password and a code first, and the session is not ended until they pass
+- **THEN** the dashboard asks for the password and a code, the session is not ended until they pass, and then it is ended without asking again
+
+#### Scenario: Login confirms
+- **WHEN** the admin logs in with the password and a code and adds a passkey within 5 minutes
+- **THEN** no further password or code is asked for
+
+#### Scenario: Passkey login doesn't confirm
+- **WHEN** the admin logs in with a passkey and asks to add another passkey
+- **THEN** the key service refuses until the session is confirmed with the password and a code
 
 #### Scenario: Confirmation expires
 - **WHEN** 5 minutes have passed since the session was confirmed
@@ -105,6 +113,10 @@ After confirming, the admin SHALL be able to add up to 10 passkeys, each with a 
 #### Scenario: Passkey for another site
 - **WHEN** a registration or login answer was made for a relying party other than the dashboard domain
 - **THEN** the key service refuses it
+
+#### Scenario: Offered after login
+- **WHEN** the admin logs in with the password and a code, has no passkey, and hasn't chosen "Not now" in this browser
+- **THEN** the dashboard offers to add a passkey before the page the admin was going to, and "Not now" skips it in this browser from then on
 
 #### Scenario: Last passkey removed
 - **WHEN** the admin removes their only passkey

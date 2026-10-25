@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { PageHeader } from '../../components/page-header';
-import { type Account, errorMessage, getAccount } from '../../lib/utils/api';
+import { type Account, ApiError, errorMessage, getAccount } from '../../lib/utils/api';
 import { useMessages } from '../../lib/utils/locale';
 import { ConfirmForm } from './components/confirm-form';
 import { PasskeyList } from './components/passkey-list';
@@ -11,10 +11,13 @@ import { SessionList } from './components/session-list';
 type LoadedAccount = { account: Account } | { error: string } | null;
 
 /**
- * The admin's password, passkeys and sessions. Ending sessions and changing
- * passkeys need the session to be confirmed; until it is, the page asks for
- * the password and a code and leaves those actions out.
+ * Runs an action that needs a confirmed session. When the session isn't
+ * confirmed, the page asks for the password and a code first and then runs
+ * the action; errors other than that refusal are the caller's to show.
  */
+export type ConfirmThen = (action: () => Promise<void>) => Promise<void>;
+
+/** The admin's password, passkeys and sessions. */
 export function SettingsPage({ onLogout }: { onLogout: () => void }) {
 	const messages = useMessages();
 	const [loaded, reload] = useAccount(messages.errors);
@@ -33,6 +36,28 @@ export function SettingsPage({ onLogout }: { onLogout: () => void }) {
 
 function AccountSections({ loaded, onChange }: { loaded: LoadedAccount; onChange: () => void }) {
 	const messages = useMessages();
+	const [pendingAction, setPendingAction] = useState<(() => Promise<void>) | null>(null);
+	const [error, setError] = useState('');
+	const isConfirmed = loaded !== null && 'account' in loaded && loaded.account.isConfirmed;
+
+	const confirmThen: ConfirmThen = useCallback(
+		async (action) => {
+			if (!isConfirmed) {
+				setPendingAction(() => action);
+				return;
+			}
+			try {
+				await action();
+				onChange();
+			} catch (failure) {
+				if (!isConfirmationRefused(failure)) {
+					throw failure;
+				}
+				setPendingAction(() => action);
+			}
+		},
+		[isConfirmed, onChange],
+	);
 
 	if (loaded === null) {
 		return <p>{messages.common.loading}</p>;
@@ -42,14 +67,31 @@ function AccountSections({ loaded, onChange }: { loaded: LoadedAccount; onChange
 		return <p role="alert">{loaded.error}</p>;
 	}
 
+	const runPendingAction = async () => {
+		const action = pendingAction;
+		setPendingAction(null);
+		setError('');
+		try {
+			await action?.();
+		} catch (failure) {
+			setError(errorMessage(failure, messages.errors));
+		}
+		onChange();
+	};
+
 	const { account } = loaded;
 	return (
 		<>
-			{!account.isConfirmed && <ConfirmForm onConfirm={onChange} />}
-			<PasskeyList passkeys={account.passkeys} isConfirmed={account.isConfirmed} onChange={onChange} />
-			<SessionList sessions={account.sessions} isConfirmed={account.isConfirmed} onChange={onChange} />
+			{pendingAction && <ConfirmForm onConfirm={runPendingAction} onCancel={() => setPendingAction(null)} />}
+			{error && <p role="alert">{error}</p>}
+			<PasskeyList passkeys={account.passkeys} confirmThen={confirmThen} />
+			<SessionList sessions={account.sessions} confirmThen={confirmThen} />
 		</>
 	);
+}
+
+function isConfirmationRefused(failure: unknown): boolean {
+	return failure instanceof ApiError && failure.status === 403;
 }
 
 /** Loads the account, again whenever reload is called. */

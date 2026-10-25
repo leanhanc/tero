@@ -13,7 +13,7 @@ import (
 // testAccountSecurity runs after setup, with the admin logged in as "admin".
 func (d *dashboard) testAccountSecurity(t *testing.T) {
 	t.Run("process-isolation: Session planted by a tero process / Dashboard can't reach the sessions", testNoPlantedSession)
-	t.Run("account-security: List / End one session / Not confirmed (v5.0.0-7.5.2)", d.testEndOneSession)
+	t.Run("account-security: List / End one session (v5.0.0-7.5.2)", d.testEndOneSession)
 	t.Run("account-security: Password changed / Other sessions ended / Service name in the password (v5.0.0-6.2.3, v5.0.0-6.2.11)", d.testChangePassword)
 	t.Run("account-security: Add a passkey / dashboard-access: Log in with a passkey (v5.0.0-6.3.3)", d.testPasskeys)
 	t.Run("dashboard-access: Admin loses their authenticator (passkeys removed)", d.testResetRemovesPasskeys)
@@ -94,9 +94,8 @@ func (d *dashboard) testEndOneSession(t *testing.T) {
 		t.Fatal("the other browser's session isn't listed")
 	}
 
-	if response := postDashboard(t, "admin", "/api/sessions/end", map[string]any{"id": otherID}); response.status != 403 {
-		t.Errorf("ending a session without confirming = %d", response.status)
-	}
+	// The admin's session is confirmed by the setup that started it, or by
+	// this; the unit tests cover the refusal without it.
 	d.confirm(t, "admin")
 	if response := postDashboard(t, "admin", "/api/sessions/end", map[string]any{"id": otherID}); response.status != 204 {
 		t.Fatalf("ending a session = %d %s", response.status, response.body)
@@ -149,11 +148,6 @@ func newAuthenticator() *webauthntest.Authenticator {
 var authenticator = newAuthenticator()
 
 func (d *dashboard) testPasskeys(t *testing.T) {
-	// The admin's own session is still confirmed from the steps before.
-	d.login(t, "unconfirmed-browser")
-	if response := postDashboard(t, "unconfirmed-browser", "/api/passkeys/register/begin", map[string]any{}); response.status != 403 {
-		t.Errorf("adding a passkey without confirming = %d", response.status)
-	}
 	d.confirm(t, "admin")
 
 	begin := postDashboard(t, "admin", "/api/passkeys/register/begin", map[string]any{})
@@ -177,6 +171,10 @@ func (d *dashboard) testPasskeys(t *testing.T) {
 
 	if response := loginWithPasskey(t, "passkey-browser"); response.status != 204 {
 		t.Fatalf("passkey login = %d %s", response.status, response.body)
+	}
+	// A passkey login doesn't confirm the session; a password login does.
+	if response := postDashboard(t, "passkey-browser", "/api/passkeys/register/begin", map[string]any{}); response.status != 403 {
+		t.Errorf("adding a passkey from an unconfirmed session = %d", response.status)
 	}
 	for _, session := range account(t, "passkey-browser").Sessions {
 		if session.IsCurrent && session.Method != "passkey" {

@@ -5,8 +5,16 @@ import { confirmIdentity, errorMessage } from '../../../lib/utils/api';
 import { useMessages } from '../../../lib/utils/locale';
 import { CodeInput } from './code-input';
 
-/** Asks for the password and a code so this session may end sessions and change passkeys. */
-export function ConfirmForm({ onConfirm }: { onConfirm: () => void }) {
+type ConfirmFormProps = {
+	onConfirm: () => void;
+	onCancel: () => void;
+};
+
+/**
+ * Asks for the password and a code so this session may end sessions and
+ * change passkeys. It appears when the admin asks for one of those actions.
+ */
+export function ConfirmForm({ onConfirm, onCancel }: ConfirmFormProps) {
 	const messages = useMessages();
 	const [password, setPassword] = useState('');
 	const [code, setCode] = useState('');
@@ -55,6 +63,9 @@ export function ConfirmForm({ onConfirm }: { onConfirm: () => void }) {
 				)}
 				<button type="submit" disabled={isSubmitting}>
 					{messages.settings.confirm.submit}
+				</button>
+				<button type="button" onClick={onCancel}>
+					{messages.settings.confirm.cancel}
 				</button>
 			</form>
 		</section>

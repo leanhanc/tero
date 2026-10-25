@@ -90,6 +90,7 @@ func TestPasskeyAddAndLogin_v5_0_0_6_3_3(t *testing.T) {
 func TestPasskeyRegistrationNeedsConfirmation(t *testing.T) {
 	env := newTestEnv(t, map[int][]byte{1: testKey(1)})
 	env.setUp(t)
+	env.clock.Advance(confirmationLifetime)
 
 	if _, err := env.dashboard.BeginPasskeyRegistration(context.Background(), *env.session); !errors.Is(err, ErrNotConfirmed) {
 		t.Errorf("registration without confirming = %v", err)

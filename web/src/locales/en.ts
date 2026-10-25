@@ -58,6 +58,11 @@ export const en = {
 			afterReset: 'there for a new one.',
 		},
 	},
+	passkeyOffer: {
+		heading: 'Log in faster next time',
+		intro: 'Add a passkey and log in with your fingerprint, face or device PIN instead of your password and a code. Your password and authenticator app keep working.',
+		notNow: 'Not now',
+	},
 	settings: {
 		heading: 'Settings',
 		confirm: {
@@ -66,6 +71,7 @@ export const en = {
 			passwordLabel: 'Password',
 			codeLabel: '6-digit code from your authenticator app',
 			submit: 'Confirm',
+			cancel: 'Cancel',
 		},
 		password: {
 			heading: 'Password',
@@ -79,7 +85,7 @@ export const en = {
 		},
 		passkeys: {
 			heading: 'Passkeys',
-			intro: "A passkey logs you in without your password or a code, and a fake copy of this page can't use it. Your password and authenticator app keep working.",
+			intro: 'A passkey logs you in without your password or a code. Your password and authenticator app keep working.',
 			caption: 'Your passkeys',
 			empty: 'No passkeys yet.',
 			nameColumn: 'Name',

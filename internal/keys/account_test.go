@@ -124,6 +124,8 @@ func TestEndingSessionsNeedsConfirmation(t *testing.T) {
 	secret := env.setUp(t)
 	other := env.secondSession(t, secret)
 	ctx := context.Background()
+	// Logging in confirmed the session for confirmationLifetime.
+	env.clock.Advance(confirmationLifetime)
 
 	if _, err := env.dashboard.RevokeSession(ctx, *env.session, adminIP, "", true); !errors.Is(err, ErrNotConfirmed) {
 		t.Fatalf("revoke without confirming = %v", err)
@@ -196,6 +198,7 @@ func TestConfirmation_v5_0_0_7_5_1_ExpiresAndStaysOnItsSession(t *testing.T) {
 	env := newTestEnv(t, map[int][]byte{1: testKey(1)})
 	secret := env.setUp(t)
 	other := env.secondSession(t, secret)
+	env.clock.Advance(confirmationLifetime)
 	env.confirm(t, *env.session, secret)
 	ctx := context.Background()
 
@@ -321,5 +324,31 @@ func TestMadeUpIPsShareOneThrottle(t *testing.T) {
 	}
 	if rows := env.count("login_throttles"); rows > 2 {
 		t.Errorf("%d throttle rows for made-up IPs, want the shared one and the account", rows)
+	}
+}
+
+// Logging in with the password and a code is the confirmation, so the admin
+// can add a passkey right after; a passkey login isn't.
+func TestPasswordLoginStartsConfirmed(t *testing.T) {
+	env := newTestEnv(t, map[int][]byte{1: testKey(1)})
+	secret := env.setUp(t)
+	ctx := context.Background()
+
+	if state, _ := env.dashboard.CheckSession(ctx, *env.session, adminIP); !state.IsConfirmed {
+		t.Error("the setup session isn't confirmed")
+	}
+	other := env.secondSession(t, secret)
+	if state, _ := env.dashboard.CheckSession(ctx, other, adminIP); !state.IsConfirmed {
+		t.Error("a password login isn't confirmed")
+	}
+
+	authenticator := newAuthenticator()
+	env.addPasskey(t, authenticator, "Laptop")
+	result, err := env.loginWithPasskey(authenticator, adminIP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state, _ := env.dashboard.CheckSession(ctx, result.SessionToken, adminIP); state.IsConfirmed {
+		t.Error("a passkey login is confirmed")
 	}
 }

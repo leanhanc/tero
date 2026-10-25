@@ -52,7 +52,8 @@ Password and TOTP can't be turned off, so they always remain as the fallback to 
 ASVS 6.2.2, 6.2.3, 7.4.3, 7.4.5, 7.5.1 and 7.5.2. The settings page changes the password, lists sessions and manages passkeys. Every request names the browser's session, and `tero-keys` acts only for a live one.
 
 - **Password change** asks for the current password, a current TOTP code and the new password in one form. The new password goes through the same checks as at setup. "End every other session" is checked by default. The TOTP secret and passkeys are kept.
-- **Confirming it's you**: ending sessions and adding, renaming or removing a passkey need the password and a fresh TOTP code entered on this session in the last 5 minutes. Wrong attempts are charged to the login throttles and the code guessing limit, and a code that confirmed can't be used again.
+- **Confirming it's you**: ending sessions and adding, renaming or removing a passkey need the password and a fresh TOTP code entered on this session in the last 5 minutes, either to log in or when the page asks for them. A passkey login doesn't count. Wrong attempts are charged to the login throttles and the code guessing limit, and a code that confirmed can't be used again.
+- **Passkey offer**: after a login with the password and a code, an admin with no passkey is offered one; "Not now" is remembered in that browser.
 - **Sessions**: the list shows each session's start, last use, IP at login and latest IP, browser and login method, marks the current one, and ends any other or all the others. Sessions are named by a random id, never by their token.
 - **Passkeys**: up to 10, each named by the admin, verified by `tero-keys`. Adding or removing one offers "End every other session", checked by default. It records `password_changed`, `account_confirmed`, `confirm_failed`, `sessions_ended`, `passkey_added` and `passkey_removed`.
 
@@ -345,8 +346,8 @@ Tero accepts no file uploads and serves no user-supplied files.
 | 7.4.3 | 2 | Option to end sessions after a factor change | Met | Password change and adding or removing a passkey offer "End every other session", checked by default; `reset-login` ends every session | `TestChangePassword_v5_0_0_6_2_3_EndsOtherSessions`, `TestPasskeyRemovalCanEndOtherSessions_v5_0_0_7_4_3`, web `removes a passkey and ends other sessions by default (v5.0.0-7.4.3)` |
 | 7.4.4 | 2 | Visible logout | Met | Log out button on every signed-in page | — |
 | 7.4.5 | 2 | Admin can end sessions | Met | The one admin ends any other session, or all of them, from the settings page | `TestEndAllOtherSessions_v5_0_0_7_4_5`, `TestListAndEndOneSession_v5_0_0_7_5_2` |
-| 7.5.1 | 2 | Re-authentication before changing factors | Met | Password change asks for the password and a code itself; passkey changes need a confirmation with both in the last 5 minutes | `TestConfirmation_v5_0_0_7_5_1_ExpiresAndStaysOnItsSession`, `TestPasskeyRegistrationNeedsConfirmation` |
-| 7.5.2 | 2 | View and end active sessions | Met | Session list on the settings page; ending needs a confirmation with the password and a code | `TestListAndEndOneSession_v5_0_0_7_5_2`, `TestEndingSessionsNeedsConfirmation`, e2e `List / End one session / Not confirmed (v5.0.0-7.5.2)` |
+| 7.5.1 | 2 | Re-authentication before changing factors | Met | Password change asks for the password and a code itself; passkey changes need both on this session in the last 5 minutes, at login or when asked | `TestConfirmation_v5_0_0_7_5_1_ExpiresAndStaysOnItsSession`, `TestPasskeyRegistrationNeedsConfirmation` |
+| 7.5.2 | 2 | View and end active sessions | Met | Session list on the settings page; ending needs a confirmation with the password and a code | `TestListAndEndOneSession_v5_0_0_7_5_2`, `TestEndingSessionsNeedsConfirmation`, e2e `List / End one session (v5.0.0-7.5.2)` |
 | 7.6.1 | 2 | RP and IdP session lifetimes | N/A | No federation | — |
 | 7.6.2 | 2 | Sessions need user action | N/A | No federation | — |
 

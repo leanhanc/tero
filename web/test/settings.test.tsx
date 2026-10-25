@@ -64,13 +64,12 @@ afterEach(() => {
 });
 
 describe('settings page', () => {
-	it('asks to confirm before sessions can be ended, then ends one (v5.0.0-7.5.2)', async () => {
+	it('asks to confirm when ending a session, then ends it (v5.0.0-7.5.2)', async () => {
 		openSettings();
 		const calls = mockAPI({
 			'/api/state': [signedIn],
 			'/api/account': [
 				{ status: 200, body: account(false) },
-				{ status: 200, body: account(true) },
 				{ status: 200, body: account(true) },
 			],
 			'/api/account/confirm': [{ status: 204 }],
@@ -82,14 +81,17 @@ describe('settings page', () => {
 		expect(within(sessions).getByText('Firefox on macOS (This browser)')).toBeTruthy();
 		expect(within(sessions).getByText('curl/8.5.0')).toBeTruthy();
 		expect(within(sessions).getByText('192.0.2.81 (logged in from 192.0.2.80)')).toBeTruthy();
-		expect(screen.queryByRole('button', { name: /^End/ })).toBeNull();
+		expect(screen.queryByRole('region', { name: "Confirm it's you" })).toBeNull();
+
+		await userEvent.click(screen.getByRole('button', { name: 'End: curl/8.5.0' }));
+		expect(calls.some((call) => call.path === '/api/sessions/end')).toBe(false);
 
 		const confirm = screen.getByRole('region', { name: "Confirm it's you" });
 		await userEvent.type(within(confirm).getByLabelText('Password'), 'a long enough passphrase');
 		await userEvent.type(within(confirm).getByLabelText('6-digit code from your authenticator app'), '123456');
 		await userEvent.click(within(confirm).getByRole('button', { name: 'Confirm' }));
 
-		await userEvent.click(await screen.findByRole('button', { name: 'End: curl/8.5.0' }));
+		await screen.findByRole('table', { name: /Where you are logged in/ });
 		expect(calls.find((call) => call.path === '/api/sessions/end')?.body).toEqual({ id: 'other-id', isAllOthers: false });
 		expect(screen.queryByRole('region', { name: "Confirm it's you" })).toBeNull();
 	});
@@ -136,7 +138,7 @@ describe('settings page', () => {
 		expect((await within(form).findByRole('status')).textContent).toBe('Your password was changed.');
 	});
 
-	it('lists passkeys and offers passkey changes only once confirmed', async () => {
+	it('lists passkeys with their actions whether or not the session is confirmed', async () => {
 		openSettings();
 		mockAPI({ '/api/state': [signedIn], '/api/account': [{ status: 200, body: account(false) }] });
 		render(<App />);
@@ -144,8 +146,8 @@ describe('settings page', () => {
 		const passkeys = await screen.findByRole('table', { name: 'Your passkeys' });
 		expect(within(passkeys).getByText('Laptop')).toBeTruthy();
 		expect(within(passkeys).getByText('Never')).toBeTruthy();
-		expect(screen.queryByRole('button', { name: 'Add a passkey' })).toBeNull();
-		expect(screen.queryByRole('button', { name: 'Remove Laptop' })).toBeNull();
+		expect(screen.getByRole('button', { name: 'Remove Laptop' })).toBeTruthy();
+		expect(screen.queryByRole('region', { name: "Confirm it's you" })).toBeNull();
 	});
 
 	it('removes a passkey and ends other sessions by default (v5.0.0-7.4.3)', async () => {
@@ -182,6 +184,39 @@ describe('settings page', () => {
 		await userEvent.click(await screen.findByRole('button', { name: 'End all other sessions' }));
 
 		expect(await screen.findByRole('region', { name: "Confirm it's you" })).toBeTruthy();
+	});
+});
+
+describe('passkey offer after login', () => {
+	it('offers a passkey after a password login and remembers "Not now"', async () => {
+		window.history.replaceState(null, '', '/');
+		localStorage.clear();
+		vi.stubGlobal(
+			'PublicKeyCredential',
+			class {
+				static parseCreationOptionsFromJSON = (options: unknown) => options;
+			},
+		);
+		mockAPI({
+			'/api/state': [
+				{ status: 200, body: { isSetUp: true, isLoggedIn: false } },
+				{ status: 200, body: { isSetUp: true, isLoggedIn: true } },
+			],
+			'/api/login': [{ status: 204 }],
+			'/api/account': [{ status: 200, body: { ...account(true), passkeys: [] } }],
+			'/api/apps': [{ status: 200, body: { apps: [] } }],
+		});
+		render(<App />);
+
+		await userEvent.type(await screen.findByLabelText('Password'), 'a long enough passphrase');
+		await userEvent.type(screen.getByLabelText('6-digit code from your authenticator app'), '123456');
+		await userEvent.click(screen.getByRole('button', { name: 'Log in' }));
+
+		expect(await screen.findByRole('heading', { name: 'Log in faster next time' })).toBeTruthy();
+		await userEvent.click(screen.getByRole('button', { name: 'Not now' }));
+
+		expect(await screen.findByRole('heading', { name: 'Apps' })).toBeTruthy();
+		expect(localStorage.getItem('tero:passkey-offer-dismissed')).toBe('1');
 	});
 });
 

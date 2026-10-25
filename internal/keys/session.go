@@ -112,10 +112,17 @@ func (s *Service) createSession(ctx context.Context, tx *sql.Tx, method string, 
 
 	now := s.now().Unix()
 	ip := cutIP(browser.IP)
+	// A login with the password and a code is the same check confirming
+	// asks for, so the new session starts confirmed. A passkey login isn't:
+	// adding passkeys needs the password and a code.
+	var confirmedAt int64
+	if method != MethodPasskey {
+		confirmedAt = now
+	}
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO sessions (id, token_hash, method, created_at, last_seen_at, login_ip, last_ip, user_agent)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, hashToken(token), method, now, now, ip, ip, cutUserAgent(browser.UserAgent))
+		INSERT INTO sessions (id, token_hash, method, created_at, last_seen_at, login_ip, last_ip, user_agent, confirmed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, hashToken(token), method, now, now, ip, ip, cutUserAgent(browser.UserAgent), confirmedAt)
 	return token, err
 }
 

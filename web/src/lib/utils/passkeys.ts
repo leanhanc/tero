@@ -1,3 +1,5 @@
+import { beginPasskeyRegistration, finishPasskeyRegistration, type PasskeyInfo } from './api';
+
 // Passkeys go through the browser's WebAuthn API with the options the key
 // service issued as JSON, and the answer goes back as JSON. The key service
 // checks everything; the browser only carries the ceremony.
@@ -26,6 +28,17 @@ export async function getPasskey(options: unknown): Promise<unknown> {
 	return toJSON(credential);
 }
 
+/**
+ * Adds a passkey named name: the key service issues the options, the
+ * browser's authenticator creates it, and the key service checks and stores
+ * it. Needs a confirmed session.
+ */
+export async function registerPasskey(name: string, isEndingOthers: boolean): Promise<PasskeyInfo> {
+	const { challengeId, options } = await beginPasskeyRegistration();
+	const credential = await createPasskey(options);
+	return finishPasskeyRegistration(challengeId, name, credential, isEndingOthers);
+}
+
 /** Whether the person dismissed the browser's passkey prompt, which isn't worth an error. */
 export function isCancelled(error: unknown): boolean {
 	return error instanceof DOMException && (error.name === 'NotAllowedError' || error.name === 'AbortError');
@@ -37,4 +50,41 @@ function toJSON(credential: Credential | null): unknown {
 	}
 
 	return credential.toJSON();
+}
+
+// After a login with the password and a code, the dashboard offers to add a
+// passkey once. These flags live in the browser: whether to offer it on the
+// next page, and whether the admin said "Not now" in this browser. Storage
+// can be unavailable (private windows, blocked site data), so every access
+// is guarded and the offer is simply skipped.
+const offerKey = 'tero:offer-passkey';
+const dismissedKey = 'tero:passkey-offer-dismissed';
+
+/** Asks the next signed-in page to offer adding a passkey. */
+export function requestPasskeyOffer(): void {
+	try {
+		sessionStorage.setItem(offerKey, '1');
+	} catch {
+		// No storage: no offer.
+	}
+}
+
+/** Whether to offer a passkey now. Reading the request uses it up. */
+export function takePasskeyOffer(): boolean {
+	try {
+		const isRequested = sessionStorage.getItem(offerKey) === '1';
+		sessionStorage.removeItem(offerKey);
+		return isRequested && localStorage.getItem(dismissedKey) !== '1' && isPasskeySupported();
+	} catch {
+		return false;
+	}
+}
+
+/** Stops offering passkeys after login in this browser. */
+export function dismissPasskeyOffer(): void {
+	try {
+		localStorage.setItem(dismissedKey, '1');
+	} catch {
+		// No storage: the offer comes back next login.
+	}
 }

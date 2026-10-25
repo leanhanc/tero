@@ -143,6 +143,16 @@ An opt-in switch that turns the password and TOTP login off, for admins who want
 
 - Preview deploys for pull requests
 
+### Server footprint
+
+Measure what Tero really needs, so it can be pitched on smaller and cheaper servers than Coolify and Dokploy.
+
+- [ ] Idle RAM, CPU and disk of every Tero process: `tero`, the agent, `tero-keys`, Caddy, Podman and BuildKit
+- [ ] Peak usage during a Railpack build and deploy of a small JavaScript app, and steady usage with a few apps running
+- [ ] Find the smallest RAM that works (try 1 GB and 512 MB) and note what breaks first
+- [ ] Compare with Coolify's published minimum (2 CPU, 2 GB RAM) and Dokploy's, citing their docs
+- [ ] A repeatable benchmark script, so each release can be checked against the numbers
+
 ### Tero addresses
 
 Default addresses under a domain Tero owns, instead of a third-party wildcard DNS whose name means nothing to the admin or their visitors.

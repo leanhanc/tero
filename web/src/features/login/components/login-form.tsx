@@ -3,6 +3,7 @@ import { type SubmitEvent, useState } from 'react';
 import { AccountNameField } from '../../../components/account-name-field';
 import { errorMessage, login } from '../../../lib/utils/api';
 import { useMessages } from '../../../lib/utils/locale';
+import { requestPasskeyOffer } from '../../../lib/utils/passkeys';
 
 /**
  * The server never says which factor was wrong, so the error belongs to the
@@ -22,6 +23,7 @@ export function LoginForm({ onLogin }: { onLogin: () => void }) {
 
 		try {
 			await login(password, code);
+			requestPasskeyOffer();
 			onLogin();
 		} catch (error) {
 			setFormError(errorMessage(error, messages.errors));

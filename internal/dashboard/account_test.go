@@ -64,6 +64,8 @@ func TestSessionListAndEnd(t *testing.T) {
 	d := newTestDashboard(t)
 	first := d.setUp(t)
 	second := d.login(t)
+	// Setup confirmed the first session; that lasts 5 minutes.
+	*d.now = d.now.Add(5 * time.Minute)
 
 	account := d.account(t, first)
 	if len(account.Sessions) != 2 || account.IsConfirmed {

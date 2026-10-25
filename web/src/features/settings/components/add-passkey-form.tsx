@@ -1,22 +1,18 @@
 import { type SubmitEvent, useState } from 'react';
 
-import {
-	ApiError,
-	beginPasskeyRegistration,
-	errorMessage,
-	finishPasskeyRegistration,
-} from '../../../lib/utils/api';
+import { errorMessage } from '../../../lib/utils/api';
 import { useMessages } from '../../../lib/utils/locale';
-import { createPasskey, isCancelled, isPasskeySupported } from '../../../lib/utils/passkeys';
+import { isCancelled, isPasskeySupported, registerPasskey } from '../../../lib/utils/passkeys';
+import type { ConfirmThen } from '../settings-page';
 
 type AddPasskeyFormProps = {
 	isEndingOthers: boolean;
+	confirmThen: ConfirmThen;
 	onAdd: (name: string) => void;
-	onConfirmationOver: () => void;
 };
 
 /** Names a new passkey and has the browser create it for the key service to check. */
-export function AddPasskeyForm({ isEndingOthers, onAdd, onConfirmationOver }: AddPasskeyFormProps) {
+export function AddPasskeyForm({ isEndingOthers, confirmThen, onAdd }: AddPasskeyFormProps) {
 	const messages = useMessages();
 	const [name, setName] = useState(messages.settings.passkeys.defaultName);
 	const [error, setError] = useState('');
@@ -26,28 +22,24 @@ export function AddPasskeyForm({ isEndingOthers, onAdd, onConfirmationOver }: Ad
 		return <p>{messages.settings.passkeys.unsupported}</p>;
 	}
 
+	const add = async () => {
+		const added = await registerPasskey(name, isEndingOthers);
+		setName(messages.settings.passkeys.defaultName);
+		onAdd(added.name);
+	};
+
 	const submit = async (event: SubmitEvent<HTMLFormElement>) => {
 		event.preventDefault();
 		setIsAdding(true);
 		setError('');
 
 		try {
-			const { challengeId, options } = await beginPasskeyRegistration();
-			const credential = await createPasskey(options);
-			const added = await finishPasskeyRegistration(challengeId, name, credential, isEndingOthers);
-			setName(messages.settings.passkeys.defaultName);
-			onAdd(added.name);
+			await confirmThen(add);
 		} catch (failure) {
-			const isConfirmationOver = failure instanceof ApiError && failure.status === 403;
-			if (isConfirmationOver) {
-				onConfirmationOver();
-				return;
+			if (!isCancelled(failure)) {
+				const isFromAuthenticator = failure instanceof DOMException;
+				setError(isFromAuthenticator ? messages.settings.passkeys.failed : errorMessage(failure, messages.errors));
 			}
-			if (isCancelled(failure)) {
-				return;
-			}
-			const isFromAuthenticator = failure instanceof DOMException;
-			setError(isFromAuthenticator ? messages.settings.passkeys.failed : errorMessage(failure, messages.errors));
 		} finally {
 			setIsAdding(false);
 		}
