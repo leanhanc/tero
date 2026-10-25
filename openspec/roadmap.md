@@ -13,6 +13,8 @@ Change: [add-security-baseline-slice-1](changes/add-security-baseline-slice-1/)
 - [x] ASVS L2 mapping document
 - [ ] Signed releases with SBOMs and provenance, and `install.sh`
 - [ ] End-to-end CI on real cloud servers with a Lynis minimum
+- [ ] Check that ports 80 and 443 are reachable from the internet, since AWS, Google Cloud, Azure and Oracle Cloud block them by default and certificates can't be issued until they're open
+- [ ] When they're closed, explain it clearly and give step-by-step help for the leading providers (security groups, firewall rules, network security groups, security lists). Design with Cele when it shows (during `sudo tero init`, on first dashboard load, or in onboarding) and the wording
 
 ## Slice 2: First deploy of a JS backend
 
