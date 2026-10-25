@@ -2,12 +2,12 @@ import { type SubmitEvent, useState } from 'react';
 
 import { errorMessage, type PasskeyInfo, removePasskey, renamePasskey } from '../../../lib/utils/api';
 import { useFormatTime, useMessages } from '../../../lib/utils/locale';
-import type { ConfirmThen } from '../settings-page';
+import type { Confirmation } from '../settings-page';
 import { AddPasskeyForm } from './add-passkey-form';
 
 type PasskeyListProps = {
 	passkeys: PasskeyInfo[];
-	confirmThen: ConfirmThen;
+	confirmation: Confirmation;
 };
 
 /**
@@ -15,7 +15,7 @@ type PasskeyListProps = {
  * confirm first when the session isn't confirmed; adding or removing one can
  * end every other session (v5.0.0-7.4.3).
  */
-export function PasskeyList({ passkeys, confirmThen }: PasskeyListProps) {
+export function PasskeyList({ passkeys, confirmation }: PasskeyListProps) {
 	const messages = useMessages();
 	const [isEndingOthers, setIsEndingOthers] = useState(true);
 	const [status, setStatus] = useState('');
@@ -25,7 +25,7 @@ export function PasskeyList({ passkeys, confirmThen }: PasskeyListProps) {
 		setError('');
 		setStatus('');
 		try {
-			await confirmThen(action);
+			await confirmation.confirmThen(action);
 		} catch (failure) {
 			setError(errorMessage(failure, messages.errors));
 		}
@@ -59,6 +59,7 @@ export function PasskeyList({ passkeys, confirmThen }: PasskeyListProps) {
 							<PasskeyRow
 								key={passkey.id}
 								passkey={passkey}
+								isDisabled={confirmation.isAwaiting}
 								onRename={(name) => run(() => renamePasskey(passkey.id, name))}
 								onRemove={() => remove(passkey)}
 							/>
@@ -77,7 +78,7 @@ export function PasskeyList({ passkeys, confirmThen }: PasskeyListProps) {
 			<label htmlFor="passkey-end-others">{messages.settings.passkeys.endOthers}</label>
 			<AddPasskeyForm
 				isEndingOthers={isEndingOthers}
-				confirmThen={confirmThen}
+				confirmation={confirmation}
 				onAdd={(name) => setStatus(messages.settings.passkeys.added(name))}
 			/>
 		</section>
@@ -86,11 +87,12 @@ export function PasskeyList({ passkeys, confirmThen }: PasskeyListProps) {
 
 type PasskeyRowProps = {
 	passkey: PasskeyInfo;
+	isDisabled: boolean;
 	onRename: (name: string) => Promise<void>;
 	onRemove: () => void;
 };
 
-function PasskeyRow({ passkey, onRename, onRemove }: PasskeyRowProps) {
+function PasskeyRow({ passkey, isDisabled, onRename, onRemove }: PasskeyRowProps) {
 	const messages = useMessages();
 	const formatTime = useFormatTime();
 	const [isRenaming, setIsRenaming] = useState(false);
@@ -116,11 +118,11 @@ function PasskeyRow({ passkey, onRename, onRemove }: PasskeyRowProps) {
 			<td>{lastUsed}</td>
 			<td>
 				{!isRenaming && (
-					<button type="button" onClick={() => setIsRenaming(true)}>
+					<button type="button" onClick={() => setIsRenaming(true)} disabled={isDisabled}>
 						{messages.settings.passkeys.rename}
 					</button>
 				)}
-				<button type="button" onClick={onRemove}>
+				<button type="button" onClick={onRemove} disabled={isDisabled}>
 					{messages.settings.passkeys.remove(passkey.name)}
 				</button>
 			</td>

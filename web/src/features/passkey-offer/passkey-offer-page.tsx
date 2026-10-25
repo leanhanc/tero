@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 
-import { errorMessage, getAccount } from '../../lib/utils/api';
+import { errorMessage, getAccount, isConfirmationRequired } from '../../lib/utils/api';
 import { useMessages } from '../../lib/utils/locale';
 import { dismissPasskeyOffer, isCancelled, registerPasskey } from '../../lib/utils/passkeys';
+import type { Messages } from '../../locales/en';
 
 /**
  * Shown once after a login with the password and a code when the admin has
@@ -32,10 +33,7 @@ export function PasskeyOfferPage({ onDone }: { onDone: () => void }) {
 			await registerPasskey(messages.settings.passkeys.defaultName, false);
 			onDone();
 		} catch (failure) {
-			if (!isCancelled(failure)) {
-				const isFromAuthenticator = failure instanceof DOMException;
-				setError(isFromAuthenticator ? messages.settings.passkeys.failed : errorMessage(failure, messages.errors));
-			}
+			setError(offerErrorMessage(failure, messages));
 		} finally {
 			setIsAdding(false);
 		}
@@ -59,4 +57,23 @@ export function PasskeyOfferPage({ onDone }: { onDone: () => void }) {
 			</button>
 		</main>
 	);
+}
+
+/**
+ * The message for a failed offer, or none when the admin dismissed the
+ * browser's prompt. The login's confirmation lasts 5 minutes, so a page left
+ * open longer can only point to Settings, which asks for it again.
+ */
+function offerErrorMessage(failure: unknown, messages: Messages): string {
+	if (isCancelled(failure)) {
+		return '';
+	}
+	if (isConfirmationRequired(failure)) {
+		return messages.passkeyOffer.expired;
+	}
+	if (failure instanceof DOMException) {
+		return messages.settings.passkeys.failed;
+	}
+
+	return errorMessage(failure, messages.errors);
 }

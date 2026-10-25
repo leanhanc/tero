@@ -62,6 +62,7 @@ export const en = {
 		heading: 'Log in faster next time',
 		intro: 'Add a passkey and log in with your fingerprint, face or device PIN instead of your password and a code. Your password and authenticator app keep working.',
 		notNow: 'Not now',
+		expired: 'This page was open too long to add a passkey from it. You can add one from Settings.',
 	},
 	settings: {
 		heading: 'Settings',
@@ -72,6 +73,7 @@ export const en = {
 			codeLabel: '6-digit code from your authenticator app',
 			submit: 'Confirm',
 			cancel: 'Cancel',
+			addPasskeyNow: "You're confirmed. Press Add a passkey to create it.",
 		},
 		password: {
 			heading: 'Password',

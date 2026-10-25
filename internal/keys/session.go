@@ -112,11 +112,13 @@ func (s *Service) createSession(ctx context.Context, tx *sql.Tx, method string, 
 
 	now := s.now().Unix()
 	ip := cutIP(browser.IP)
-	// A login with the password and a code is the same check confirming
-	// asks for, so the new session starts confirmed. A passkey login isn't:
-	// adding passkeys needs the password and a code.
+	// A login or setup with the password and a code is the same check
+	// confirming asks for, so the new session starts confirmed. Any other
+	// method, a passkey login among them, starts unconfirmed: adding
+	// passkeys needs the password and a code.
 	var confirmedAt int64
-	if method != MethodPasskey {
+	isPasswordAndCode := method == MethodPassword || method == MethodSetup
+	if isPasswordAndCode {
 		confirmedAt = now
 	}
 	_, err = tx.ExecContext(ctx, `

@@ -109,12 +109,20 @@ export class ApiError extends Error {
 	readonly status: number;
 	/** The form field the error is about, when the server names one. */
 	readonly field: string;
+	/** What kind of refusal it is, when the server says, such as not_confirmed. */
+	readonly code: string;
 
-	constructor(status: number, message: string, field = '') {
+	constructor(status: number, message: string, field = '', code = '') {
 		super(message);
 		this.status = status;
 		this.field = field;
+		this.code = code;
 	}
+}
+
+/** Whether the server refused because the session must be confirmed with the password and a code first. */
+export function isConfirmationRequired(error: unknown): boolean {
+	return error instanceof ApiError && error.code === 'not_confirmed';
 }
 
 export function getState(): Promise<DashboardState> {
@@ -231,8 +239,8 @@ async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown):
 	});
 
 	if (!response.ok) {
-		const { message, field } = await readError(response);
-		throw new ApiError(response.status, message, field);
+		const { message, field, code } = await readError(response);
+		throw new ApiError(response.status, message, field, code);
 	}
 
 	const hasNoContent = response.status === 204;
@@ -245,12 +253,12 @@ async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown):
 
 // An empty message means the server gave no explanation; errorMessage turns
 // it into a generic one in the dashboard's language.
-async function readError(response: Response): Promise<{ message: string; field: string }> {
+async function readError(response: Response): Promise<{ message: string; field: string; code: string }> {
 	try {
-		const body = (await response.json()) as { error?: string; field?: string };
-		return { message: body.error ?? '', field: body.field ?? '' };
+		const body = (await response.json()) as { error?: string; field?: string; code?: string };
+		return { message: body.error ?? '', field: body.field ?? '', code: body.code ?? '' };
 	} catch {
-		return { message: '', field: '' };
+		return { message: '', field: '', code: '' };
 	}
 }
 

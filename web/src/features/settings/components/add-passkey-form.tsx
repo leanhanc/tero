@@ -3,16 +3,16 @@ import { type SubmitEvent, useState } from 'react';
 import { errorMessage } from '../../../lib/utils/api';
 import { useMessages } from '../../../lib/utils/locale';
 import { isCancelled, isPasskeySupported, registerPasskey } from '../../../lib/utils/passkeys';
-import type { ConfirmThen } from '../settings-page';
+import type { Confirmation } from '../settings-page';
 
 type AddPasskeyFormProps = {
 	isEndingOthers: boolean;
-	confirmThen: ConfirmThen;
+	confirmation: Confirmation;
 	onAdd: (name: string) => void;
 };
 
 /** Names a new passkey and has the browser create it for the key service to check. */
-export function AddPasskeyForm({ isEndingOthers, confirmThen, onAdd }: AddPasskeyFormProps) {
+export function AddPasskeyForm({ isEndingOthers, confirmation, onAdd }: AddPasskeyFormProps) {
 	const messages = useMessages();
 	const [name, setName] = useState(messages.settings.passkeys.defaultName);
 	const [error, setError] = useState('');
@@ -34,7 +34,7 @@ export function AddPasskeyForm({ isEndingOthers, confirmThen, onAdd }: AddPasske
 		setError('');
 
 		try {
-			await confirmThen(add);
+			await confirmation.confirmThen(add, { needsFreshClick: true });
 		} catch (failure) {
 			if (!isCancelled(failure)) {
 				const isFromAuthenticator = failure instanceof DOMException;
@@ -61,7 +61,7 @@ export function AddPasskeyForm({ isEndingOthers, confirmThen, onAdd }: AddPasske
 					{error}
 				</p>
 			)}
-			<button type="submit" disabled={isAdding}>
+			<button type="submit" disabled={isAdding || confirmation.isAwaiting}>
 				{messages.settings.passkeys.add}
 			</button>
 		</form>

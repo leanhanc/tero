@@ -78,8 +78,11 @@ func TestSessionListAndEnd(t *testing.T) {
 			otherID = session.ID
 		}
 	}
-	if response := d.post("/api/sessions/end", map[string]string{"id": otherID}, first); response.Code != http.StatusForbidden {
-		t.Errorf("end a session without confirming = %d", response.Code)
+	notConfirmed := d.post("/api/sessions/end", map[string]string{"id": otherID}, first)
+	var refusal struct{ Code string }
+	json.Unmarshal(notConfirmed.Body.Bytes(), &refusal)
+	if notConfirmed.Code != http.StatusForbidden || refusal.Code != notConfirmedCode {
+		t.Errorf("end a session without confirming = %d %s", notConfirmed.Code, notConfirmed.Body)
 	}
 
 	d.confirm(t, first)

@@ -301,6 +301,12 @@ func (h *Handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusTooManyRequests, err)
 		return
 	}
+	// The web app opens the confirmation form for this refusal only, so it
+	// carries a code no other 403 has.
+	if errors.Is(err, auth.ErrNotConfirmed) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": auth.ErrNotConfirmed.Error(), "code": notConfirmedCode})
+		return
+	}
 	if errors.Is(err, password.ErrBusy) {
 		w.Header().Set("Retry-After", "5")
 		writeError(w, http.StatusServiceUnavailable, password.ErrBusy)
@@ -316,7 +322,6 @@ func (h *Handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		auth.ErrSessionExpired:     http.StatusUnauthorized,
 		auth.ErrKeysUnavailable:    http.StatusServiceUnavailable,
 		auth.ErrLoginLocked:        http.StatusTooManyRequests,
-		auth.ErrNotConfirmed:       http.StatusForbidden,
 		auth.ErrPasskeyFailed:      http.StatusUnauthorized,
 		auth.ErrPasskeyLimit:       http.StatusConflict,
 		auth.ErrInvalidPasskeyName: http.StatusUnprocessableEntity,
@@ -429,6 +434,10 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(body)
 }
+
+// notConfirmedCode marks a request refused because the session must be
+// confirmed with the password and a code first.
+const notConfirmedCode = "not_confirmed"
 
 func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, map[string]string{"error": err.Error()})

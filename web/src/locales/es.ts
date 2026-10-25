@@ -57,6 +57,7 @@ export const es: Messages = {
 		heading: 'Iniciá sesión más rápido la próxima vez',
 		intro: 'Agregá una llave de acceso e iniciá sesión con tu huella, tu cara o el PIN del dispositivo en lugar de tu contraseña y un código. Tu contraseña y tu app de autenticación siguen funcionando.',
 		notNow: 'Ahora no',
+		expired: 'Esta página estuvo abierta demasiado tiempo para agregar una llave de acceso desde acá. Podés agregarla desde Configuración.',
 	},
 	settings: {
 		heading: 'Configuración',
@@ -67,6 +68,7 @@ export const es: Messages = {
 			codeLabel: 'Código de 6 dígitos de tu app de autenticación',
 			submit: 'Confirmar',
 			cancel: 'Cancelar',
+			addPasskeyNow: 'Ya confirmaste. Tocá Agregar una llave de acceso para crearla.',
 		},
 		password: {
 			heading: 'Contraseña',

@@ -169,22 +169,80 @@ describe('settings page', () => {
 		expect(await screen.findByText('No passkeys yet.')).toBeTruthy();
 	});
 
-	it('asks to confirm again when the confirmation ran out', async () => {
+	it('asks to confirm again when the confirmation ran out, then runs the action', async () => {
 		openSettings();
-		mockAPI({
+		const calls = mockAPI({
 			'/api/state': [signedIn],
 			'/api/account': [
 				{ status: 200, body: account(true) },
-				{ status: 200, body: account(false) },
+				{ status: 200, body: account(true) },
+				{ status: 200, body: account(true) },
 			],
-			'/api/sessions/end': [{ status: 403, body: { error: "Confirm it's you with your password and a code first" } }],
+			'/api/sessions/end': [
+				{ status: 403, body: { error: "Confirm it's you with your password and a code first", code: 'not_confirmed' } },
+				{ status: 204 },
+			],
+			'/api/account/confirm': [{ status: 204 }],
 		});
 		render(<App />);
 
 		await userEvent.click(await screen.findByRole('button', { name: 'End all other sessions' }));
 
-		expect(await screen.findByRole('region', { name: "Confirm it's you" })).toBeTruthy();
+		const confirm = await screen.findByRole('region', { name: "Confirm it's you" });
+		expect(screen.getByRole('button', { name: 'End: curl/8.5.0' })).toHaveProperty('disabled', true);
+		await userEvent.type(within(confirm).getByLabelText('Password'), 'a long enough passphrase');
+		await userEvent.type(within(confirm).getByLabelText('6-digit code from your authenticator app'), '123456');
+		await userEvent.click(within(confirm).getByRole('button', { name: 'Confirm' }));
+
+		await screen.findByRole('button', { name: 'End all other sessions' });
+		const ends = calls.filter((call) => call.path === '/api/sessions/end');
+		expect(ends).toHaveLength(2);
+		expect(ends[1]?.body).toEqual({ id: '', isAllOthers: true });
 	});
+
+	it('shows other refusals as errors without asking to confirm', async () => {
+		openSettings();
+		mockAPI({
+			'/api/state': [signedIn],
+			'/api/account': [{ status: 200, body: account(true) }],
+			'/api/sessions/end': [{ status: 403, body: { error: 'Cross-site requests are not allowed' } }],
+		});
+		render(<App />);
+
+		await userEvent.click(await screen.findByRole('button', { name: 'End all other sessions' }));
+
+		expect((await screen.findByRole('alert')).textContent).toBe('Cross-site requests are not allowed');
+		expect(screen.queryByRole('region', { name: "Confirm it's you" })).toBeNull();
+	});
+
+	it('asks for a fresh click to add a passkey after confirming, as Safari needs', async () => {
+		openSettings();
+		vi.stubGlobal(
+			'PublicKeyCredential',
+			class {
+				static parseCreationOptionsFromJSON = (options: unknown) => options;
+			},
+		);
+		const calls = mockAPI({
+			'/api/state': [signedIn],
+			'/api/account': [
+				{ status: 200, body: account(false) },
+				{ status: 200, body: account(true) },
+			],
+			'/api/account/confirm': [{ status: 204 }],
+		});
+		render(<App />);
+
+		await userEvent.click(await screen.findByRole('button', { name: 'Add a passkey' }));
+		const confirm = screen.getByRole('region', { name: "Confirm it's you" });
+		await userEvent.type(within(confirm).getByLabelText('Password'), 'a long enough passphrase');
+		await userEvent.type(within(confirm).getByLabelText('6-digit code from your authenticator app'), '123456');
+		await userEvent.click(within(confirm).getByRole('button', { name: 'Confirm' }));
+
+		expect((await screen.findByRole('status')).textContent).toBe("You're confirmed. Press Add a passkey to create it.");
+		expect(calls.some((call) => call.path === '/api/passkeys/register/begin')).toBe(false);
+	});
+
 });
 
 describe('passkey offer after login', () => {
@@ -217,6 +275,48 @@ describe('passkey offer after login', () => {
 
 		expect(await screen.findByRole('heading', { name: 'Apps' })).toBeTruthy();
 		expect(localStorage.getItem('tero:passkey-offer-dismissed')).toBe('1');
+	});
+});
+
+describe('passkey offer is skipped', () => {
+	async function logIn(passkeys: Account['passkeys']) {
+		window.history.replaceState(null, '', '/');
+		vi.stubGlobal(
+			'PublicKeyCredential',
+			class {
+				static parseCreationOptionsFromJSON = (options: unknown) => options;
+			},
+		);
+		mockAPI({
+			'/api/state': [
+				{ status: 200, body: { isSetUp: true, isLoggedIn: false } },
+				{ status: 200, body: { isSetUp: true, isLoggedIn: true } },
+			],
+			'/api/login': [{ status: 204 }],
+			'/api/account': [{ status: 200, body: { ...account(true), passkeys } }],
+			'/api/apps': [{ status: 200, body: { apps: [] } }],
+		});
+		render(<App />);
+
+		await userEvent.type(await screen.findByLabelText('Password'), 'a long enough passphrase');
+		await userEvent.type(screen.getByLabelText('6-digit code from your authenticator app'), '123456');
+		await userEvent.click(screen.getByRole('button', { name: 'Log in' }));
+	}
+
+	it('when the admin already has a passkey', async () => {
+		localStorage.clear();
+		await logIn(account(true).passkeys);
+
+		expect(await screen.findByRole('heading', { name: 'Apps' })).toBeTruthy();
+		expect(screen.queryByRole('heading', { name: 'Log in faster next time' })).toBeNull();
+	});
+
+	it('when the admin chose "Not now" in this browser', async () => {
+		localStorage.setItem('tero:passkey-offer-dismissed', '1');
+		await logIn([]);
+
+		expect(await screen.findByRole('heading', { name: 'Apps' })).toBeTruthy();
+		expect(screen.queryByRole('heading', { name: 'Log in faster next time' })).toBeNull();
 	});
 });
 

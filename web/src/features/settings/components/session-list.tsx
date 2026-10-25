@@ -3,11 +3,11 @@ import { useState } from 'react';
 import { endOtherSessions, endSession, errorMessage, type SessionInfo } from '../../../lib/utils/api';
 import { describeUserAgent } from '../../../lib/utils/browser-label';
 import { useFormatTime, useMessages } from '../../../lib/utils/locale';
-import type { ConfirmThen } from '../settings-page';
+import type { Confirmation } from '../settings-page';
 
 type SessionListProps = {
 	sessions: SessionInfo[];
-	confirmThen: ConfirmThen;
+	confirmation: Confirmation;
 };
 
 /**
@@ -15,7 +15,7 @@ type SessionListProps = {
  * the admin to confirm first when the session isn't confirmed
  * (v5.0.0-7.5.2). This browser's own session ends with logging out.
  */
-export function SessionList({ sessions, confirmThen }: SessionListProps) {
+export function SessionList({ sessions, confirmation }: SessionListProps) {
 	const messages = useMessages();
 	const [error, setError] = useState('');
 	const hasOtherSessions = sessions.some((session) => !session.isCurrent);
@@ -23,7 +23,7 @@ export function SessionList({ sessions, confirmThen }: SessionListProps) {
 	const run = async (action: () => Promise<void>) => {
 		setError('');
 		try {
-			await confirmThen(action);
+			await confirmation.confirmThen(action);
 		} catch (failure) {
 			setError(errorMessage(failure, messages.errors));
 		}
@@ -46,13 +46,18 @@ export function SessionList({ sessions, confirmThen }: SessionListProps) {
 				</thead>
 				<tbody>
 					{sessions.map((session) => (
-						<SessionRow key={session.id} session={session} onEnd={() => run(() => endSession(session.id))} />
+						<SessionRow
+							key={session.id}
+							session={session}
+							isDisabled={confirmation.isAwaiting}
+							onEnd={() => run(() => endSession(session.id))}
+						/>
 					))}
 				</tbody>
 			</table>
 			{error && <p role="alert">{error}</p>}
 			{hasOtherSessions && (
-				<button type="button" onClick={() => run(endOtherSessions)}>
+				<button type="button" onClick={() => run(endOtherSessions)} disabled={confirmation.isAwaiting}>
 					{messages.settings.sessions.endOthers}
 				</button>
 			)}
@@ -60,7 +65,13 @@ export function SessionList({ sessions, confirmThen }: SessionListProps) {
 	);
 }
 
-function SessionRow({ session, onEnd }: { session: SessionInfo; onEnd: () => void }) {
+type SessionRowProps = {
+	session: SessionInfo;
+	isDisabled: boolean;
+	onEnd: () => void;
+};
+
+function SessionRow({ session, isDisabled, onEnd }: SessionRowProps) {
 	const messages = useMessages();
 	const formatTime = useFormatTime();
 	const browser = useBrowserName(session.userAgent);
@@ -79,7 +90,12 @@ function SessionRow({ session, onEnd }: { session: SessionInfo; onEnd: () => voi
 			<td>{ip}</td>
 			<td>
 				{!session.isCurrent && (
-					<button type="button" onClick={onEnd} aria-label={`${messages.settings.sessions.end}: ${browser}`}>
+					<button
+						type="button"
+						onClick={onEnd}
+						disabled={isDisabled}
+						aria-label={`${messages.settings.sessions.end}: ${browser}`}
+					>
 						{messages.settings.sessions.end}
 					</button>
 				)}
