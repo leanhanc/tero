@@ -2,6 +2,8 @@
 
 The dashboard and its HTTP endpoints are built to Level 2 of the [OWASP Application Security Verification Standard 5.0.0](https://github.com/OWASP/ASVS/tree/v5.0.0/5.0). ADR 0001 explains why ASVS is the standard for this surface. This file has one row for every Level 1 and Level 2 requirement (Level 2 includes Level 1). Each row says whether Tero meets it, where, and which test checks it.
 
+Authentication and sessions also follow [NIST SP 800-63B-4](https://pages.nist.gov/800-63-4/sp800-63b.html), which ASVS chapter V6 is built on. Where the two differ, 63B-4 decides; see [NIST SP 800-63B-4](#nist-sp-800-63b-4).
+
 Specs cite requirements as `v5.0.0-<id>`, for example `v5.0.0-6.5.1`. A test that checks a requirement cited by a spec has the ID in its name: `TestLogin_v5_0_0_6_5_1_ReplayedCodeFails` in Go, or `(v5.0.0-6.5.1)` in an end-to-end subtest name.
 
 The [sections before the matrix](#documentation-asvs-asks-for) are the documentation ASVS requires (rate limiting, login paths, sessions, cryptography, logging and so on). Matrix rows point to them.
@@ -30,6 +32,8 @@ Gaps, in the order they matter most:
 | 16.4.3 | Logs stay on the server. Nothing ships them to a separate system. |
 
 Deviation: TOTP codes from the previous and next 30-second step are accepted for clock drift (6.5.5), as explained in its row.
+
+Against NIST SP 800-63B-4, Tero has two gaps (no authenticator is disabled after 100 failed attempts, and no notification when a passkey is added) and one deviation (recovery through root on the server). See [NIST SP 800-63B-4](#nist-sp-800-63b-4).
 
 Requirements met with no automated test yet: 1.2.4, 3.4.4, 3.4.5, 6.2.6, 6.2.8, 11.4.3, 12.1.1, 12.1.2, 13.4.2, 13.4.4 and 14.3.3. The matrix marks them with "—" in the Test column, along with rows that are checked by design or documentation rather than behaviour.
 
@@ -183,6 +187,31 @@ ASVS 16.1.1.
 
 Events never contain a password, TOTP code, TOTP secret or token. The journal is written by journald, so the `tero` user can't change past entries, and journald adds the trusted `_SYSTEMD_UNIT` field that tells the key service's entries apart from the dashboard's. If the key service can't be reached, the dashboard writes the event to the journal with `TERO_EVENT_UNSTORED=1`.
 
+### NIST SP 800-63B-4
+
+ASVS chapter V6 is built on [NIST SP 800-63B-4](https://pages.nist.gov/800-63-4/sp800-63b.html) (Digital Identity Guidelines: Authentication and Authenticator Management, August 2025), so 63B-4 sits under ASVS for authentication and sessions. Where the two differ, 63B-4 decides. The V6 and V7 rows of the matrix name the 63B-4 section they rely on.
+
+Tero targets authentication assurance level 2 (AAL2, section 2.2): every login uses a password and a TOTP code, or a passkey with user verification.
+
+| 63B-4 | Rule | Tero | Status | ASVS |
+|---|---|---|---|---|
+| 2.2.2, 3.2.5 | At AAL2, offer at least one phishing-resistant option, which means cryptographic authentication | Passkeys bound to the dashboard domain | Met | 6.3.3 (L3) |
+| 2.2.3 | Reauthenticate at least every 24 hours and after 1 hour without activity (SHOULD) | 12 hours and 30 minutes | Met | 7.3.1, 7.3.2 |
+| 3.1.1.2 | At least 15 characters for a password used alone, at least 8 for one used only with another factor | 8, always with TOTP | Met | 6.2.1 |
+| 3.1.1.2 | No composition rules, no periodic change, a blocklist of common and compromised passwords, paste allowed | As required | Met | 6.2.4, 6.2.5, 6.2.7, 6.2.10, 6.2.12 |
+| 3.1.4.2 | An OTP is accepted only once, and its lifetime is set by the expected clock drift in either direction | Each code works once; the steps before and after are accepted for drift | Met | 6.5.1, 6.5.5 |
+| 3.1.7.4, Appendix B | Syncable passkeys are allowed at AAL2 when the verifier asks for and checks user verification | Synced and device-bound passkeys accepted; user verification required | Met | 6.3.3 |
+| 3.2.2 | At most 100 consecutive failed attempts per account, then the authenticator is disabled until it is bound again; growing waits are allowed on top | Growing lockouts up to 15 minutes, and a 24-hour lock on code checks after 20 wrong codes; nothing is disabled | Gap | 6.3.1 |
+| 4.1.2.1 | Binding a new authenticator needs authentication at the account's AAL | Adding a passkey needs the password and a fresh TOTP code | Met | 7.5.1 |
+| 4.2 | Account recovery through saved or issued recovery codes, recovery contacts, or repeated identity proofing, followed by a notification | `sudo tero reset-login` on the server, recorded as `login_reset`; no recovery codes | Deviation | 6.4.3, 6.4.4 |
+| 4.6 | Notify the subscriber through a channel other than the one used for the change when an authenticator is bound (SHALL) or removed (SHOULD) | Recorded as `passkey_added` and `passkey_removed`; nothing is shown or sent | Gap | 6.3.7 (L3) |
+| 5.1 | Session secrets of at least 64 bits from an approved random generator, erased or invalidated on logout | 256 bits from `crypto/rand`, deleted on logout | Met | 7.2.3, 7.4.1 |
+| 5.1.1 | Session cookies `Secure`, not readable from JavaScript, `__Host-` prefix, `Path=/` | `__Host-tero_session` with `Secure`, `HttpOnly`, `Path=/` | Met | 7.2.1 |
+
+- **Throttling (3.2.2).** Tero delays guesses but never disables a factor, so an attacker who keeps failing still gets about four password and code checks an hour on the account, and passes 100 consecutive failures after about a day. The admin's own browsers stay usable through the `__Host-tero_device` cookie (see [Brute-force protection](#brute-force-protection)).
+- **Recovery (4.2).** The methods in 4.2 assume an online service that can't otherwise tell the subscriber apart from an attacker. Tero's only admin also controls the server, and root on it is stronger proof than a recovery code, which Tero would otherwise have to store.
+- **Notifications (4.6).** Tero has no channel apart from the dashboard. The same events are what ASVS 6.3.5 and 6.3.7 ask to show, which are Later in [Level 3 items Tero adopts](#level-3-items-tero-adopts).
+
 ## Matrix
 
 ### V1 Encoding and Sanitization
@@ -295,31 +324,31 @@ Tero accepts no file uploads and serves no user-supplied files.
 | 6.1.1 | 1 | Brute-force controls documented | Met | [Brute-force protection](#brute-force-protection) | — |
 | 6.1.2 | 2 | Context-specific words documented | Met | [Passwords](#passwords) | `TestContextWords_v5_0_0_6_2_11_ListsDomainLabels` |
 | 6.1.3 | 2 | All login paths documented | Met | [Login paths](#login-paths) | — |
-| 6.2.1 | 1 | At least 8 characters | Met | Minimum is 8, as NIST allows for a password that is always paired with TOTP; see [Passwords](#passwords) | `TestPolicy_v5_0_0_6_2_1_RejectsSevenCharacters`, e2e `Password too short (v5.0.0-6.2.1)` |
+| 6.2.1 | 1 | At least 8 characters | Met | Minimum is 8, as NIST allows for a password that is always paired with TOTP; see [Passwords](#passwords); 63B-4 3.1.1.2 | `TestPolicy_v5_0_0_6_2_1_RejectsSevenCharacters`, e2e `Password too short (v5.0.0-6.2.1)` |
 | 6.2.2 | 1 | Users can change their password | Met | Settings page; see [Changing factors and ending sessions](#changing-factors-and-ending-sessions) | `TestChangePassword_v5_0_0_6_2_3_EndsOtherSessions`, e2e `Password changed / Other sessions ended / Service name in the password (v5.0.0-6.2.3, v5.0.0-6.2.11)` |
 | 6.2.3 | 1 | Password change needs current and new password | Met | Current password, a TOTP code and the new password in one request | `TestChangePassword_v5_0_0_6_2_3_EndsOtherSessions`, `TestChangePasswordNeedsTheCurrentFactors`, web `changes the password and ends other sessions by default (v5.0.0-6.2.3)` |
-| 6.2.4 | 1 | Checked against the top 3,000 passwords | Met | Bundled list | `TestBundledList_v5_0_0_6_2_4_CoversTopThreeThousandPolicyPasswords` |
-| 6.2.5 | 1 | No composition rules | Met | Only length and breach checks | `TestPolicy_v5_0_0_6_2_5_HasNoCompositionRules` |
+| 6.2.4 | 1 | Checked against the top 3,000 passwords | Met | Bundled list; 63B-4 3.1.1.2 | `TestBundledList_v5_0_0_6_2_4_CoversTopThreeThousandPolicyPasswords` |
+| 6.2.5 | 1 | No composition rules | Met | Only length and breach checks; 63B-4 3.1.1.2 | `TestPolicy_v5_0_0_6_2_5_HasNoCompositionRules` |
 | 6.2.6 | 1 | Password fields masked | Met | `type="password"` on setup, login, confirmation and password change | — |
-| 6.2.7 | 1 | Paste and password managers allowed | Met | `autocomplete` set, paste not blocked | web `labels the password field for password managers and sends the token from the fragment (v5.0.0-6.2.7)` |
+| 6.2.7 | 1 | Paste and password managers allowed | Met | `autocomplete` set, paste not blocked; 63B-4 3.1.1.2 | web `labels the password field for password managers and sends the token from the fragment (v5.0.0-6.2.7)` |
 | 6.2.8 | 1 | Password checked exactly as typed | Met | No trimming or case-folding | — |
 | 6.2.9 | 2 | 64-character passwords allowed | Met | Up to 1024 | `TestPolicy_v5_0_0_6_2_9_AcceptsSixtyFourLowercaseLetters`, e2e `Long password accepted (v5.0.0-6.2.9)` |
-| 6.2.10 | 2 | No forced rotation | Met | Passwords never expire | — |
+| 6.2.10 | 2 | No forced rotation | Met | Passwords never expire; 63B-4 3.1.1.2 | — |
 | 6.2.11 | 2 | Context-specific words refused | Met | [Passwords](#passwords) | `TestPolicy_v5_0_0_6_2_11_RefusesContextWords`, `TestSetupRefusesContextWords_v5_0_0_6_2_11`, e2e `Password changed / Other sessions ended / Service name in the password (v5.0.0-6.2.3, v5.0.0-6.2.11)` |
-| 6.2.12 | 2 | Breached passwords refused | Met | Bundled list plus Have I Been Pwned | `TestPolicy_v5_0_0_6_2_12_RejectsPasswordFromBreachAPI`, `TestPwnedPasswords_v5_0_0_6_2_12_SendsOnlyHashPrefix`, e2e `Breached password (v5.0.0-6.2.12)` |
-| 6.3.1 | 1 | Brute-force controls in place | Met | [Brute-force protection](#brute-force-protection) | `TestLogin_v5_0_0_6_3_1_*`, e2e `Repeated failures from one IP (v5.0.0-6.3.1)` |
+| 6.2.12 | 2 | Breached passwords refused | Met | Bundled list plus Have I Been Pwned; 63B-4 3.1.1.2 | `TestPolicy_v5_0_0_6_2_12_RejectsPasswordFromBreachAPI`, `TestPwnedPasswords_v5_0_0_6_2_12_SendsOnlyHashPrefix`, e2e `Breached password (v5.0.0-6.2.12)` |
+| 6.3.1 | 1 | Brute-force controls in place | Met | [Brute-force protection](#brute-force-protection); 63B-4 3.2.2, which Tero doesn't fully meet; see [NIST SP 800-63B-4](#nist-sp-800-63b-4) | `TestLogin_v5_0_0_6_3_1_*`, e2e `Repeated failures from one IP (v5.0.0-6.3.1)` |
 | 6.3.2 | 1 | No default accounts | Met | No account exists until setup | `TestNoLoginBeforeSetup` |
-| 6.3.3 | 2 | Multi-factor authentication | Met | Password and TOTP, or a passkey with user verification, on every login; setup can't finish without TOTP | `TestSetupWithoutTOTPCreatesNoAccount`, `TestWrongCodeDoesNotSayWhichFactor`, `TestPasskeyNeedsUserVerification` |
+| 6.3.3 | 2 | Multi-factor authentication | Met | Password and TOTP, or a passkey with user verification, on every login; setup can't finish without TOTP; AAL2 in 63B-4 2.2 | `TestSetupWithoutTOTPCreatesNoAccount`, `TestWrongCodeDoesNotSayWhichFactor`, `TestPasskeyNeedsUserVerification` |
 | 6.3.4 | 2 | No undocumented login paths | Met | Three paths, all documented and recorded | `TestEventsRecordedWithoutSecrets`, e2e `Events recorded / No secrets in events (v5.0.0-6.3.4, v5.0.0-6.3.5, v5.0.0-6.3.7)` |
 | 6.4.1 | 1 | Activation codes random, short-lived, single use | Met | Setup links: 256 bits, 24 hours, single use | `TestSetupLinkReusedIsRejected`, `TestSetupLinkExpires`, `TestNewSetupLinkReplacesTheOldOne` |
 | 6.4.2 | 1 | No hints or security questions | Met | None | — |
-| 6.4.3 | 2 | Password reset doesn't bypass MFA | Met | The only reset needs root and makes the admin enrol TOTP again | `TestResetLoginRevokesSessionsAndCredentials` |
-| 6.4.4 | 2 | Lost factor needs the same proof as enrolment | Met | Same path as first setup: a link printed on the server | `TestResetLoginRevokesSessionsAndCredentials` |
-| 6.5.1 | 2 | TOTP codes usable once | Met | The last accepted time step is stored and only later steps are accepted | `TestLogin_v5_0_0_6_5_1_ReplayedCodeFails`, `TestVerify_v5_0_0_6_5_1_RefusesReplayedCode`, e2e `Replayed code (v5.0.0-6.5.1)` |
+| 6.4.3 | 2 | Password reset doesn't bypass MFA | Met | The only reset needs root and makes the admin enrol TOTP again; 63B-4 4.2 lists other recovery methods; see [NIST SP 800-63B-4](#nist-sp-800-63b-4) | `TestResetLoginRevokesSessionsAndCredentials` |
+| 6.4.4 | 2 | Lost factor needs the same proof as enrolment | Met | Same path as first setup: a link printed on the server; 63B-4 4.2 lists other recovery methods; see [NIST SP 800-63B-4](#nist-sp-800-63b-4) | `TestResetLoginRevokesSessionsAndCredentials` |
+| 6.5.1 | 2 | TOTP codes usable once | Met | The last accepted time step is stored and only later steps are accepted; 63B-4 3.1.4.2 | `TestLogin_v5_0_0_6_5_1_ReplayedCodeFails`, `TestVerify_v5_0_0_6_5_1_RefusesReplayedCode`, e2e `Replayed code (v5.0.0-6.5.1)` |
 | 6.5.2 | 2 | Weak lookup secrets hashed | N/A | No recovery codes | — |
 | 6.5.3 | 2 | TOTP seeds from a CSPRNG | Met | 160 bits from `crypto/rand` | — |
 | 6.5.4 | 2 | Lookup and out-of-band codes have 20 bits | N/A | Neither exists | — |
-| 6.5.5 | 2 | TOTP lifetime of 30 seconds | Deviation | The step is 30 seconds, and the steps before and after are also accepted for clock drift between server and phone (RFC 6238 section 5.2). Each code still works only once | `TestVerifyAcceptsAdjacentStepsForClockDrift`, `TestVerifyRefusesOldCodes` |
+| 6.5.5 | 2 | TOTP lifetime of 30 seconds | Deviation | The step is 30 seconds, and the steps before and after are also accepted for clock drift between server and phone (RFC 6238 section 5.2). Each code still works only once; 63B-4 3.1.4.2 sets the lifetime by the expected clock drift, so this follows NIST | `TestVerifyAcceptsAdjacentStepsForClockDrift`, `TestVerifyRefusesOldCodes` |
 | 6.6.1 | 2 | SMS codes only with safeguards | N/A | No SMS | — |
 | 6.6.2 | 2 | Out-of-band codes bound to the request | N/A | No out-of-band codes | — |
 | 6.6.3 | 2 | Out-of-band codes rate limited | N/A | No out-of-band codes | — |
@@ -337,16 +366,16 @@ Tero accepts no file uploads and serves no user-supplied files.
 | 7.1.3 | 2 | Federated sessions documented | N/A | No federation | — |
 | 7.2.1 | 1 | Tokens verified by the backend | Met | Checked by `tero-keys` on every protected route | `TestEventsNeedSession`, `TestInventedTokenIsRefused`, e2e `Session planted by a tero process / Dashboard can't reach the sessions` |
 | 7.2.2 | 1 | Dynamic session tokens | Met | A new random token per session | — |
-| 7.2.3 | 1 | 128-bit tokens from a CSPRNG | Met | 256 bits from `crypto/rand` | — |
+| 7.2.3 | 1 | 128-bit tokens from a CSPRNG | Met | 256 bits from `crypto/rand`; 63B-4 5.1 asks for 64 | — |
 | 7.2.4 | 1 | New token on login, old one ended | Met | Every login issues a new token and ends the session the browser sent | `TestLogin_v5_0_0_7_2_4_EndsThePreviousSession` |
-| 7.3.1 | 2 | Inactivity timeout | Met | 30 minutes | `TestSessionIdleTimeout` |
-| 7.3.2 | 2 | Absolute lifetime | Met | 12 hours | `TestSessionAbsoluteTimeout` |
-| 7.4.1 | 1 | Ended sessions can't be used | Met | Logout and expiry delete the session on the server | `TestLogout_v5_0_0_7_4_1_EndsTheSession`, `TestSessionIdleTimeout` |
+| 7.3.1 | 2 | Inactivity timeout | Met | 30 minutes; 63B-4 2.2.3 allows 1 hour | `TestSessionIdleTimeout` |
+| 7.3.2 | 2 | Absolute lifetime | Met | 12 hours; 63B-4 2.2.3 allows 24 hours | `TestSessionAbsoluteTimeout` |
+| 7.4.1 | 1 | Ended sessions can't be used | Met | Logout and expiry delete the session on the server; 63B-4 5.1 | `TestLogout_v5_0_0_7_4_1_EndsTheSession`, `TestSessionIdleTimeout` |
 | 7.4.2 | 1 | Sessions end when the account is disabled | Met | `reset-login` deletes every session | `TestResetLoginRevokesSessionsAndCredentials` |
 | 7.4.3 | 2 | Option to end sessions after a factor change | Met | Password change and adding or removing a passkey offer "End every other session", checked by default; `reset-login` ends every session | `TestChangePassword_v5_0_0_6_2_3_EndsOtherSessions`, `TestPasskeyRemovalCanEndOtherSessions_v5_0_0_7_4_3`, web `removes a passkey and ends other sessions by default (v5.0.0-7.4.3)` |
 | 7.4.4 | 2 | Visible logout | Met | Log out button on every signed-in page | — |
 | 7.4.5 | 2 | Admin can end sessions | Met | The one admin ends any other session, or all of them, from the settings page | `TestEndAllOtherSessions_v5_0_0_7_4_5`, `TestListAndEndOneSession_v5_0_0_7_5_2` |
-| 7.5.1 | 2 | Re-authentication before changing factors | Met | Password change asks for the password and a code itself; passkey changes need both on this session in the last 5 minutes, at login or when asked | `TestConfirmation_v5_0_0_7_5_1_ExpiresAndStaysOnItsSession`, `TestPasskeyRegistrationNeedsConfirmation` |
+| 7.5.1 | 2 | Re-authentication before changing factors | Met | Password change asks for the password and a code itself; passkey changes need both on this session in the last 5 minutes, at login or when asked; 63B-4 4.1.2.1 | `TestConfirmation_v5_0_0_7_5_1_ExpiresAndStaysOnItsSession`, `TestPasskeyRegistrationNeedsConfirmation` |
 | 7.5.2 | 2 | View and end active sessions | Met | Session list on the settings page; ending needs a confirmation with the password and a code | `TestListAndEndOneSession_v5_0_0_7_5_2`, `TestEndingSessionsNeedsConfirmation`, e2e `List / End one session (v5.0.0-7.5.2)` |
 | 7.6.1 | 2 | RP and IdP session lifetimes | N/A | No federation | — |
 | 7.6.2 | 2 | Sessions need user action | N/A | No federation | — |
@@ -538,7 +567,7 @@ ADR 0001 adopts a few Level 3 requirements because they are cheap.
 | ID | Requirement | Status | How | Test |
 |---|---|---|---|---|
 | 6.3.5 | Tell the user about suspicious logins | Later | Failed logins, rate limits and resets are recorded in the database and the journal, but the dashboard doesn't show them until it has more to show; v1 has no email | `TestEventsRecordedWithoutSecrets`, e2e `Events recorded / No secrets in events (v5.0.0-6.3.4, v5.0.0-6.3.5, v5.0.0-6.3.7)` |
-| 6.3.7 | Tell the user after a credential change | Later | Resets, password changes and passkey changes are recorded, but not shown at the next login until the dashboard lists events again | e2e `Recovery visible after the fact` checks the event is recorded |
-| 6.3.3 | A phishing-resistant factor | Met | Passkeys bound to the dashboard domain, verified by `tero-keys`; one logs in alone | `TestPasskeyAddAndLogin_v5_0_0_6_3_3`, `TestPasskeyForAnotherSiteIsRefused`, e2e `Add a passkey / dashboard-access: Log in with a passkey (v5.0.0-6.3.3)` |
+| 6.3.7 | Tell the user after a credential change | Later | Resets, password changes and passkey changes are recorded, but not shown at the next login until the dashboard lists events again; 63B-4 4.6 requires a notice when a passkey is added | e2e `Recovery visible after the fact` checks the event is recorded |
+| 6.3.3 | A phishing-resistant factor | Met | Passkeys bound to the dashboard domain, verified by `tero-keys`; one logs in alone; 63B-4 2.2.2 requires one at AAL2, and 3.1.7.4 allows syncable passkeys | `TestPasskeyAddAndLogin_v5_0_0_6_3_3`, `TestPasskeyForAnotherSiteIsRefused`, e2e `Add a passkey / dashboard-access: Log in with a passkey (v5.0.0-6.3.3)` |
 | 13.3.3 | Keys in an isolated module | Met on servers with a TPM2 | The key is sealed with `systemd-creds` to the TPM2 when there is one and is only ever in the memory of `tero-keys`. Without a TPM2, the seal uses a host key that root can read; `assume-breach` says so | — |
 | 13.3.4 | Secret rotation | Met | `sudo tero rotate-key` reseals every value under a new key, then deletes the old one | `TestRotationResealsTheAdmin`, `TestRotateLeavesOnlyTheNewKey` |

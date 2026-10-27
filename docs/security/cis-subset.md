@@ -2,6 +2,8 @@
 
 `sudo tero init` applies the controls below from the CIS Benchmark Level 1 Server profile. Tero doesn't claim CIS compliance: this is a chosen subset, and the controls it leaves out are listed with the reason. ADR 0001 explains why CIS is the standard for the host.
 
+The builds and app containers that run on the host follow NIST SP 800-190 instead, in [sp800-190.md](sp800-190.md).
+
 The Ubuntu column maps to the CIS Ubuntu Linux 24.04 LTS benchmark, by section, and covers both tested releases, 24.04 and 26.04. CIS has no 26.04 benchmark yet. The section numbers follow v1.0.0 of that benchmark and need to be checked against v2.0.0, which renumbers some controls. Adding a distro means adding a column here and a row in `internal/platform`.
 
 The end-to-end suite (`e2e/init_test.go`) checks every applied control and reports the Lynis hardening index.
