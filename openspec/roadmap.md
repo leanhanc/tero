@@ -13,8 +13,10 @@ Change: [add-security-baseline-slice-1](changes/add-security-baseline-slice-1/)
 - [x] ASVS L2 mapping document
 - [ ] Signed releases with SBOMs and provenance, and `install.sh`
 - [ ] End-to-end CI on real cloud servers with a Lynis minimum
+- [ ] Vulnerability checks in CI: `govulncheck ./...` for Go and `bun audit` for the dashboard, failing the build on a reachable vulnerability
 - [ ] Check that ports 80 and 443 are reachable from the internet, since AWS, Google Cloud, Azure and Oracle Cloud block them by default and certificates can't be issued until they're open
 - [ ] When they're closed, explain it clearly and give step-by-step help for the leading providers (security groups, firewall rules, network security groups, security lists). Design with Cele when it shows (during `sudo tero init`, on first dashboard load, or in onboarding) and the wording
+- [ ] Firewall output rule that drops traffic from the `tero` user to the cloud metadata addresses (169.254.0.0/16 and AWS's IPv6 fd00:ec2::254), so builds and apps can't read the cloud metadata service and its instance credentials
 
 ## Slice 2: First deploy of a JS backend
 
@@ -141,6 +143,7 @@ An opt-in switch that turns the password and TOTP login off, for admins who want
 ## Open decisions
 
 - [ ] Decide what the admin can configure, where (dashboard or `sudo tero ...`), and the defaults. Candidates: log retention (security events, kept one year today, and each app's runtime logs), how many images are kept for rollback, and resource limits per app
+- [ ] Decide the outbound policy for builds and apps (ASVS 13.2.4, 13.2.5): default-deny for builds with an allowlist of the package registries they use, and whether app egress is open or set per app
 
 ## After v1
 
