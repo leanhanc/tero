@@ -14,6 +14,7 @@ import (
 	"github.com/leanhanc/tero/internal/apps"
 	"github.com/leanhanc/tero/internal/deploylog"
 	"github.com/leanhanc/tero/internal/deploys"
+	"github.com/leanhanc/tero/internal/githubapp"
 	"github.com/leanhanc/tero/internal/source"
 )
 
@@ -34,6 +35,8 @@ var fieldErrors = map[error]string{
 	apps.ErrInvalidDisplayName:   "displayName",
 	apps.ErrInvalidName:          "name",
 	apps.ErrNameTaken:            "name",
+	apps.ErrRepositoryNotCovered: "repository",
+	githubapp.ErrNotInstalled:    "repository",
 }
 
 func (h *Handler) registerAppRoutes() {
@@ -110,8 +113,10 @@ func (h *Handler) redeploy(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
+// settingsRequest changes the settings it names and leaves the rest.
 type settingsRequest struct {
-	RunTogether bool `json:"runTogether"`
+	RunTogether  *bool `json:"runTogether"`
+	DeployOnPush *bool `json:"deployOnPush"`
 }
 
 func (h *Handler) changeSettings(w http.ResponseWriter, r *http.Request) {
@@ -120,9 +125,18 @@ func (h *Handler) changeSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.apps.SetRunTogether(r.Context(), r.PathValue("name"), request.RunTogether); err != nil {
-		h.failApps(w, r, err)
-		return
+	name := r.PathValue("name")
+	if request.RunTogether != nil {
+		if err := h.apps.SetRunTogether(r.Context(), name, *request.RunTogether); err != nil {
+			h.failApps(w, r, err)
+			return
+		}
+	}
+	if request.DeployOnPush != nil {
+		if err := h.apps.SetDeployOnPush(r.Context(), name, *request.DeployOnPush); err != nil {
+			h.failApps(w, r, err)
+			return
+		}
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -250,10 +264,9 @@ func (h *Handler) failApps(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusNotFound, apps.ErrNotFound)
 		return
 	}
-	if errors.Is(err, deploys.ErrInProgress) {
-		writeError(w, http.StatusConflict, deploys.ErrInProgress)
+	if errors.Is(err, apps.ErrAgentNotAnswering) {
+		writeError(w, http.StatusServiceUnavailable, apps.ErrAgentNotAnswering)
 		return
 	}
-
 	h.fail(w, r, err)
 }

@@ -180,31 +180,66 @@ func TestSSHLockoutAppliesAllowAndDenyLists(t *testing.T) {
 }
 
 // Review finding: an existing tero account was taken over.
-func TestTeroAccountCheckRefusesForeignAccounts(t *testing.T) {
-	cases := map[string]string{
-		"regular user":        "tero:x:1005:1005::/home/tero:/bin/bash\n",
-		"system user in sudo": "tero:x:998:998::/var/lib/tero:/usr/sbin/nologin\n",
+func TestServiceAccountCheckRefusesForeignAccounts(t *testing.T) {
+	cases := map[string]struct {
+		service    serviceAccount
+		passwdLine string
+	}{
+		"regular tero user":         {teroAccount, "tero:x:1005:1005::/home/tero:/bin/bash\n"},
+		"tero in sudo":              {teroAccount, "tero:x:998:998::/var/lib/tero:/usr/sbin/nologin\n"},
+		"regular tero-agent user":   {agentAccount, "tero-agent:x:1007:1007::/home/tero-agent:/bin/bash\n"},
+		"tero-agent in sudo":        {agentAccount, "tero-agent:x:996:996::/var/lib/tero-agent:/usr/sbin/nologin\n"},
+		"tero-agent with tero home": {agentAccount, "tero-agent:x:995:995::/var/lib/tero:/usr/sbin/nologin\n"},
 	}
-	for name, passwdLine := range cases {
+	for name, test := range cases {
 		t.Run(name, func(t *testing.T) {
 			h := newGuardHost(t)
-			writeHostFile(t, h.files, "/etc/passwd", "root:x:0:0::/root:/bin/bash\n"+passwdLine)
-			writeHostFile(t, h.files, "/etc/group", "sudo:x:27:tero\ntero:x:998:\n")
+			writeHostFile(t, h.files, "/etc/passwd", "root:x:0:0::/root:/bin/bash\n"+test.passwdLine)
+			writeHostFile(t, h.files, "/etc/group", "sudo:x:27:tero,tero-agent\ntero:x:998:\ntero-agent:x:996:\n")
 
-			if err := checkTeroAccount(h); err == nil {
-				t.Fatal("init would take over an existing tero account")
+			if err := checkServiceAccount(h, test.service); err == nil {
+				t.Fatalf("init would take over an existing %s account", test.service.name)
 			}
 		})
 	}
 }
 
-func TestTeroAccountCheckAcceptsOneInitCreated(t *testing.T) {
+func TestServiceAccountCheckAcceptsOnesInitCreated(t *testing.T) {
 	h := newGuardHost(t)
-	writeHostFile(t, h.files, "/etc/passwd", "tero:x:998:998::/var/lib/tero:/usr/sbin/nologin\n")
-	writeHostFile(t, h.files, "/etc/group", "sudo:x:27:ana\ntero:x:998:\n")
+	writeHostFile(t, h.files, "/etc/passwd", "tero:x:998:998::/var/lib/tero:/usr/sbin/nologin\ntero-agent:x:996:996::/var/lib/tero-agent:/usr/sbin/nologin\n")
+	writeHostFile(t, h.files, "/etc/group", "sudo:x:27:ana\ntero:x:998:\ntero-agent:x:996:\n")
 
-	if err := checkTeroAccount(h); err != nil {
-		t.Fatalf("checkTeroAccount() = %v", err)
+	for _, service := range []serviceAccount{teroAccount, agentAccount} {
+		if err := checkServiceAccount(h, service); err != nil {
+			t.Fatalf("checkServiceAccount(%s) = %v", service.name, err)
+		}
+	}
+}
+
+func TestSharedGroupsCheckRefusesOtherMembers(t *testing.T) {
+	cases := map[string]string{
+		"foreign member":   "tero-shared:x:994:tero,ana\n",
+		"regular group":    "tero-keys-callers:x:1010:\n",
+		"only an outsider": "tero-keys-callers:x:993:bo\n",
+	}
+	for name, groupLine := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newGuardHost(t)
+			writeHostFile(t, h.files, "/etc/group", "sudo:x:27:ana\n"+groupLine)
+
+			if err := checkSharedGroups(h); err == nil {
+				t.Fatal("init would share Tero's database or key socket with another user")
+			}
+		})
+	}
+}
+
+func TestSharedGroupsCheckAcceptsOnesInitCreated(t *testing.T) {
+	h := newGuardHost(t)
+	writeHostFile(t, h.files, "/etc/group", "tero-shared:x:994:tero,tero-agent\ntero-keys-callers:x:993:tero,tero-agent\n")
+
+	if err := checkSharedGroups(h); err != nil {
+		t.Fatalf("checkSharedGroups() = %v", err)
 	}
 }
 
@@ -212,12 +247,49 @@ func TestEnsureAccountReusesLeftoverGroup(t *testing.T) {
 	h := newGuardHost(t)
 	writeHostFile(t, h.files, "/etc/group", "tero:x:998:\n")
 
-	if err := ensureAccount(context.Background(), h); err != nil {
+	if err := ensureAccount(context.Background(), h, teroAccount); err != nil {
 		t.Fatal(err)
 	}
 	commands := strings.Join(h.run.(*sysexec.Recorder).Commands, "\n")
 	if !strings.Contains(commands, "useradd --system --gid tero ") {
 		t.Errorf("useradd doesn't reuse the existing group:\n%s", commands)
+	}
+}
+
+// server-init: tero has no containers
+func TestTeroUserGetsNoContainers(t *testing.T) {
+	h := newGuardHost(t)
+
+	if err := createTeroUser(context.Background(), h); err != nil {
+		t.Fatal(err)
+	}
+	commands := strings.Join(h.run.(*sysexec.Recorder).Commands, "\n")
+	for _, forbidden := range []string{"--add-subuids", "enable-linger", "podman"} {
+		if strings.Contains(commands, forbidden) {
+			t.Errorf("creating tero ran %q:\n%s", forbidden, commands)
+		}
+	}
+}
+
+// server-init: State shared by the service and the agent
+func TestShareStateCreatesGroupsAndSetgidDirectory(t *testing.T) {
+	h := newGuardHost(t)
+
+	if err := shareState(context.Background(), h); err != nil {
+		t.Fatal(err)
+	}
+	commands := strings.Join(h.run.(*sysexec.Recorder).Commands, "\n")
+	for _, want := range []string{
+		"groupadd --system tero-shared",
+		"groupadd --system tero-keys-callers",
+		"usermod --append --groups tero-shared,tero-keys-callers tero",
+		"usermod --append --groups tero-shared,tero-keys-callers tero-agent",
+		"install -d -o root -g tero-shared -m 2770 /var/lib/tero-shared",
+		"install -d -o tero-agent -g tero-shared -m 2750 /var/lib/tero-shared/logs /var/lib/tero-shared/logs/deploys",
+	} {
+		if !strings.Contains(commands, want) {
+			t.Errorf("missing %q in:\n%s", want, commands)
+		}
 	}
 }
 
@@ -522,7 +594,7 @@ func TestKeyServiceUnitsAreLockedDown(t *testing.T) {
 			t.Errorf("tero-keys.service sets %q, which hides its callers", forbidden)
 		}
 	}
-	for _, want := range []string{"ListenStream=/run/tero-keys/keys.sock", "SocketUser=tero-keys", "SocketGroup=tero\n", "SocketMode=0660"} {
+	for _, want := range []string{"ListenStream=/run/tero-keys/keys.sock", "SocketUser=tero-keys", "SocketGroup=tero-keys-callers\n", "SocketMode=0660"} {
 		if !strings.Contains(string(socketUnit), want) {
 			t.Errorf("tero-keys.socket is missing %q", want)
 		}
@@ -543,6 +615,20 @@ func TestKeysAccountCheckRefusesForeignAccounts(t *testing.T) {
 
 			if err := checkKeysAccount(h); err == nil {
 				t.Fatal("init would take over an existing tero-keys account")
+			}
+		})
+	}
+}
+
+func TestKeysAccountCheckRefusesSharedGroups(t *testing.T) {
+	for _, groupName := range []string{"tero-agent", "tero-shared", "tero-keys-callers"} {
+		t.Run(groupName, func(t *testing.T) {
+			h := newGuardHost(t)
+			writeHostFile(t, h.files, "/etc/passwd", "tero-keys:x:997:997::/var/lib/tero-keys:/usr/sbin/nologin\n")
+			writeHostFile(t, h.files, "/etc/group", groupName+":x:990:tero-keys\ntero-keys:x:997:\n")
+
+			if err := checkKeysAccount(h); err == nil {
+				t.Fatalf("the key service's user would share %s", groupName)
 			}
 		})
 	}
@@ -585,6 +671,24 @@ func TestKeyServiceStartsBeforeTheDashboard(t *testing.T) {
 	sealAt := slices.Index(titles, "sealing the master key")
 	dashboardAt := slices.Index(titles, "starting the Tero service")
 	if sealAt < 0 || keysAt < sealAt || dashboardAt < keysAt {
+		t.Errorf("steps in the wrong order: %v", titles)
+	}
+}
+
+// e2e finding: a user manager keeps the groups it started with, so the agent
+// couldn't open the shared database when tero-agent joined tero-shared after
+// its manager started.
+func TestAgentManagerStartsAfterTheSharedGroups(t *testing.T) {
+	var titles []string
+	for _, s := range steps(config.Config{}) {
+		titles = append(titles, s.title)
+	}
+
+	shareAt := slices.Index(titles, "sharing the database between tero and tero-agent")
+	managerAt := slices.Index(titles, "starting tero-agent's user manager")
+	keysAt := slices.Index(titles, "starting the key service")
+	agentAt := slices.Index(titles, "starting the Tero agent")
+	if shareAt < 0 || managerAt < shareAt || keysAt < managerAt || agentAt < keysAt {
 		t.Errorf("steps in the wrong order: %v", titles)
 	}
 }

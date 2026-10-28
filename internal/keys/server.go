@@ -23,6 +23,9 @@ import (
 const (
 	// User is the system user the key service runs as.
 	User = "tero-keys"
+	// AgentUser is the system user the agent runs as, which the key service
+	// answers by uid.
+	AgentUser = "tero-agent"
 	// SocketPath is where tero-keys.socket listens.
 	SocketPath = "/run/tero-keys/keys.sock"
 
@@ -58,6 +61,11 @@ func Run(ctx context.Context) error {
 		return fmt.Errorf("find the tero user: %w", err)
 	}
 	teroUID, _ := strconv.Atoi(tero.Uid)
+	agent, err := user.Lookup(AgentUser)
+	if err != nil {
+		return fmt.Errorf("find the %s user: %w", AgentUser, err)
+	}
+	agentUID, _ := strconv.Atoi(agent.Uid)
 
 	keys, err := LoadKeys(os.Getenv("CREDENTIALS_DIRECTORY"))
 	if err != nil {
@@ -86,7 +94,7 @@ func Run(ctx context.Context) error {
 	}
 	go service.maintain(ctx)
 
-	return service.Serve(ctx, listener, peers{teroUID: teroUID, dashboard: dashboardCgroup})
+	return service.Serve(ctx, listener, peers{teroUID: teroUID, agentUID: agentUID, dashboard: dashboardCgroup})
 }
 
 // LoadKeys reads every master key version systemd decrypted into dir.
@@ -163,6 +171,7 @@ func (s *Service) Serve(ctx context.Context, listener *net.UnixListener, peers p
 
 	slots := map[Caller]chan struct{}{
 		CallerDashboard: make(chan struct{}, maxConnections),
+		CallerAgent:     make(chan struct{}, maxConnections),
 		CallerRoot:      make(chan struct{}, maxConnections),
 	}
 	for {

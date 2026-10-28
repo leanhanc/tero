@@ -3,12 +3,14 @@ package apps
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/leanhanc/tero/internal/deploys"
+	"github.com/leanhanc/tero/internal/githubapp"
 	"github.com/leanhanc/tero/internal/source"
 )
 
@@ -18,8 +20,20 @@ var ErrNameTaken = errors.New("Another app already uses this address")
 // ErrNotFound means no app or deploy matches.
 var ErrNotFound = errors.New("Not found")
 
+// ErrRepositoryNotCovered means the repository picked from the list is no
+// longer one the GitHub App covers.
+var ErrRepositoryNotCovered = errors.New("The GitHub App no longer covers that repository. Refresh the list and pick it again")
+
+// ErrAgentNotAnswering means the agent didn't check a private repository in
+// time.
+var ErrAgentNotAnswering = errors.New("Tero couldn't check the repository in time. Try again in a moment")
+
 // recentDeploys is how many deploys an app's page lists.
 const recentDeploys = 20
+
+// MaxPollFailures failed polls in a row stop polling an app until it is
+// redeployed.
+const MaxPollFailures = 3
 
 // Service is the dashboard's view of apps and their deploys. It reads and
 // writes the store; the agent does the deploying.
@@ -50,7 +64,7 @@ func (s *Service) LookUpRepository(ctx context.Context, rawURL string) (Lookup, 
 		return Lookup{}, err
 	}
 
-	defaultBranch, err := source.DefaultBranch(ctx, repository)
+	defaultBranch, err := source.DefaultBranch(ctx, repository, "")
 	if err != nil {
 		return Lookup{}, err
 	}
@@ -67,20 +81,19 @@ func (s *Service) LookUpRepository(ctx context.Context, rawURL string) (Lookup, 
 // NewApp is what the admin enters to create an app. Name is the first label
 // of the app's address; DisplayName is what the dashboard shows.
 type NewApp struct {
-	Repository    string `json:"repository"`
-	Branch        string `json:"branch"`
-	DisplayName   string `json:"displayName"`
-	Name          string `json:"name"`
-	RootDirectory string `json:"rootDirectory"`
+	Repository string `json:"repository"`
+	// GitHubRepositoryID is set when the admin picked a repository the
+	// GitHub App covers, and then Repository is ignored.
+	GitHubRepositoryID int64  `json:"githubRepositoryId"`
+	Branch             string `json:"branch"`
+	DisplayName        string `json:"displayName"`
+	Name               string `json:"name"`
+	RootDirectory      string `json:"rootDirectory"`
 }
 
 // Create checks the new app against GitHub, stores it, and queues its first
 // deploy.
 func (s *Service) Create(ctx context.Context, newApp NewApp) (string, error) {
-	repository, err := source.ParseRepository(newApp.Repository)
-	if err != nil {
-		return "", err
-	}
 	displayName, err := CleanDisplayName(newApp.DisplayName)
 	if err != nil {
 		return "", err
@@ -92,46 +105,151 @@ func (s *Service) Create(ctx context.Context, newApp NewApp) (string, error) {
 		return "", err
 	}
 
-	hasBranch, err := source.BranchExists(ctx, repository, newApp.Branch)
-	if err != nil {
-		return "", err
-	}
-	if !hasBranch {
-		return "", source.ErrBranchNotFound
-	}
-
-	rootDirectory, err := source.CheckRootDirectory(ctx, repository, newApp.Branch, newApp.RootDirectory)
+	checked, err := s.checkSource(ctx, newApp)
 	if err != nil {
 		return "", err
 	}
 
 	stored := storedApp{
-		name:          newApp.Name,
-		displayName:   displayName,
-		repositoryURL: repository.URL(),
-		branch:        newApp.Branch,
-		rootDirectory: rootDirectory,
+		name:               newApp.Name,
+		displayName:        displayName,
+		repositoryURL:      checked.repository.URL(),
+		branch:             newApp.Branch,
+		rootDirectory:      checked.rootDirectory,
+		gitHubRepositoryID: checked.gitHubRepositoryID,
 	}
 	appID, err := s.insertApp(ctx, stored)
 	if err != nil {
 		return "", err
 	}
 
-	if _, err := deploys.Enqueue(ctx, s.db, appID, s.now()); err != nil {
+	if _, err := deploys.Enqueue(ctx, s.db, appID, deploys.Trigger{Type: deploys.TriggerCreate}, s.now()); err != nil {
 		return "", err
 	}
 
 	return newApp.Name, nil
 }
 
-// Redeploy queues a deploy of the app's branch.
+// checkedSource is a repository, branch and folder that were found.
+type checkedSource struct {
+	repository         source.Repository
+	rootDirectory      string
+	gitHubRepositoryID int64
+}
+
+// checkSource checks the branch and folder: through the agent for a
+// repository the GitHub App covers, private ones included, and directly on
+// GitHub for any other public repository.
+func (s *Service) checkSource(ctx context.Context, newApp NewApp) (checkedSource, error) {
+	covered, isCovered, err := s.coveredRepository(ctx, newApp)
+	if err != nil {
+		return checkedSource{}, err
+	}
+	if isCovered {
+		return s.checkThroughAgent(ctx, covered, newApp)
+	}
+
+	repository, err := source.ParseRepository(newApp.Repository)
+	if err != nil {
+		return checkedSource{}, err
+	}
+	hasBranch, err := source.BranchExists(ctx, repository, "", newApp.Branch)
+	if err != nil {
+		return checkedSource{}, err
+	}
+	if !hasBranch {
+		return checkedSource{}, source.ErrBranchNotFound
+	}
+	rootDirectory, err := source.CheckRootDirectory(ctx, repository, "", newApp.Branch, newApp.RootDirectory)
+	if err != nil {
+		return checkedSource{}, err
+	}
+
+	return checkedSource{repository: repository, rootDirectory: rootDirectory}, nil
+}
+
+// coveredRepository finds the repository among those the GitHub App covers:
+// by GitHub's id when the admin picked it from the list, or by the URL's
+// owner and name.
+func (s *Service) coveredRepository(ctx context.Context, newApp NewApp) (githubapp.Repository, bool, error) {
+	if newApp.GitHubRepositoryID != 0 {
+		covered, isCovered, err := githubapp.FindRepository(ctx, s.db, newApp.GitHubRepositoryID)
+		if err == nil && !isCovered {
+			return githubapp.Repository{}, false, ErrRepositoryNotCovered
+		}
+		return covered, isCovered, err
+	}
+
+	repository, err := source.ParseRepository(newApp.Repository)
+	if err != nil {
+		return githubapp.Repository{}, false, err
+	}
+
+	return githubapp.FindRepositoryByName(ctx, s.db, repository.Owner, repository.Name)
+}
+
+// sourceCheckTimeout bounds the wait for the agent, which checks each
+// request within a second or two.
+const sourceCheckTimeout = 15 * time.Second
+
+func (s *Service) checkThroughAgent(ctx context.Context, covered githubapp.Repository, newApp NewApp) (checkedSource, error) {
+	requestID, err := githubapp.QueueSourceCheck(ctx, s.db, covered.ID, newApp.Branch, newApp.RootDirectory, s.now())
+	if err != nil {
+		return checkedSource{}, err
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, sourceCheckTimeout)
+	defer cancel()
+	answer, err := githubapp.WaitForAnswer(waitCtx, s.db, requestID)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return checkedSource{}, ErrAgentNotAnswering
+	}
+	if err != nil {
+		return checkedSource{}, err
+	}
+	if answer.Status == githubapp.Failed {
+		return checkedSource{}, sourceErrorFrom(answer.Result)
+	}
+
+	var check githubapp.SourceCheck
+	if err := json.Unmarshal([]byte(answer.Result), &check); err != nil {
+		return checkedSource{}, err
+	}
+
+	repository := source.Repository{Owner: covered.Owner, Name: covered.Name}
+	return checkedSource{repository: repository, rootDirectory: check.RootDirectory, gitHubRepositoryID: covered.ID}, nil
+}
+
+// sourceErrorFrom turns the agent's failure back into the error the form
+// shows for it.
+func sourceErrorFrom(reason string) error {
+	known := []error{
+		source.ErrRepositoryNotFound, source.ErrBranchNotFound, source.ErrInvalidBranch, source.ErrFolderNotFound,
+		githubapp.ErrNotInstalled,
+	}
+	for _, candidate := range known {
+		if reason == candidate.Error() {
+			return candidate
+		}
+	}
+
+	return fmt.Errorf("checking the repository failed: %s", reason)
+}
+
+// Redeploy queues a deploy of the app's branch, behind one that is running,
+// or takes over the one already queued.
 func (s *Service) Redeploy(ctx context.Context, name string) error {
 	appID, err := s.appID(ctx, name)
 	if err != nil {
 		return err
 	}
 
-	_, err = deploys.Enqueue(ctx, s.db, appID, s.now())
+	// Polling that stopped after repeated failures starts again.
+	if _, err := s.db.ExecContext(ctx, "UPDATE apps SET poll_failures = 0, poll_error = '' WHERE id = ?", appID); err != nil {
+		return err
+	}
+
+	_, err = deploys.Enqueue(ctx, s.db, appID, deploys.Trigger{Type: deploys.TriggerManual}, s.now())
 	return err
 }
 
@@ -153,6 +271,16 @@ func (s *Service) SetDisplayName(ctx context.Context, name, displayName string) 
 // SetRunTogether changes whether a deploy starts next to the live release.
 func (s *Service) SetRunTogether(ctx context.Context, name string, runTogether bool) error {
 	result, err := s.db.ExecContext(ctx, "UPDATE apps SET run_together = ? WHERE name = ?", runTogether, name)
+	if err != nil {
+		return err
+	}
+
+	return requireChanged(result)
+}
+
+// SetDeployOnPush changes whether pushes and polls queue deploys of the app.
+func (s *Service) SetDeployOnPush(ctx context.Context, name string, deployOnPush bool) error {
+	result, err := s.db.ExecContext(ctx, "UPDATE apps SET deploy_on_push = ? WHERE name = ?", deployOnPush, name)
 	if err != nil {
 		return err
 	}
@@ -213,20 +341,25 @@ type Deploy struct {
 	Reason        string `json:"reason"`
 	CommitSHA     string `json:"commitSha"`
 	CommitMessage string `json:"commitMessage"`
+	Trigger       string `json:"trigger"`
+	PushedBy      string `json:"pushedBy"`
 	QueuedAt      int64  `json:"queuedAt"`
 	FinishedAt    int64  `json:"finishedAt"`
 }
 
 // Detail is everything the app page shows.
 type Detail struct {
-	Name          string   `json:"name"`
-	DisplayName   string   `json:"displayName"`
-	Address       string   `json:"address"`
-	Repository    string   `json:"repository"`
-	Branch        string   `json:"branch"`
-	RootDirectory string   `json:"rootDirectory"`
-	RunTogether   bool     `json:"runTogether"`
-	Deploys       []Deploy `json:"deploys"`
+	Name          string `json:"name"`
+	DisplayName   string `json:"displayName"`
+	Address       string `json:"address"`
+	Repository    string `json:"repository"`
+	Branch        string `json:"branch"`
+	RootDirectory string `json:"rootDirectory"`
+	RunTogether   bool   `json:"runTogether"`
+	DeployOnPush  bool   `json:"deployOnPush"`
+	// PollError says why polling stopped, after repeated failures.
+	PollError string   `json:"pollError"`
+	Deploys   []Deploy `json:"deploys"`
 }
 
 // Get returns an app with its recent deploys, newest first.
@@ -234,8 +367,11 @@ func (s *Service) Get(ctx context.Context, name string) (Detail, error) {
 	var appID int64
 	detail := Detail{Name: name, Address: s.address(name)}
 	err := s.db.QueryRowContext(ctx,
-		"SELECT id, display_name, repository, branch, root_directory, run_together FROM apps WHERE name = ?", name).
-		Scan(&appID, &detail.DisplayName, &detail.Repository, &detail.Branch, &detail.RootDirectory, &detail.RunTogether)
+		`SELECT id, display_name, repository, branch, root_directory, run_together, deploy_on_push,
+			CASE WHEN poll_failures >= ? THEN poll_error ELSE '' END
+		FROM apps WHERE name = ?`, MaxPollFailures, name).
+		Scan(&appID, &detail.DisplayName, &detail.Repository, &detail.Branch, &detail.RootDirectory, &detail.RunTogether,
+			&detail.DeployOnPush, &detail.PollError)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Detail{}, ErrNotFound
 	}
@@ -260,7 +396,7 @@ func (s *Service) DeployState(ctx context.Context, deployID int64) (deploys.Stat
 
 func (s *Service) recentDeploys(ctx context.Context, appID int64) ([]Deploy, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, state, failed_step, reason, commit_sha, commit_message, queued_at, finished_at
+		SELECT id, state, failed_step, reason, commit_sha, commit_message, trigger_type, pushed_by, queued_at, finished_at
 		FROM deploys WHERE app_id = ? ORDER BY id DESC LIMIT ?`, appID, recentDeploys)
 	if err != nil {
 		return nil, err
@@ -271,7 +407,7 @@ func (s *Service) recentDeploys(ctx context.Context, appID int64) ([]Deploy, err
 	for rows.Next() {
 		var deploy Deploy
 		err := rows.Scan(&deploy.ID, &deploy.State, &deploy.FailedStep, &deploy.Reason,
-			&deploy.CommitSHA, &deploy.CommitMessage, &deploy.QueuedAt, &deploy.FinishedAt)
+			&deploy.CommitSHA, &deploy.CommitMessage, &deploy.Trigger, &deploy.PushedBy, &deploy.QueuedAt, &deploy.FinishedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -283,17 +419,18 @@ func (s *Service) recentDeploys(ctx context.Context, appID int64) ([]Deploy, err
 
 // storedApp is a checked new app, ready to insert.
 type storedApp struct {
-	name          string
-	displayName   string
-	repositoryURL string
-	branch        string
-	rootDirectory string
+	name               string
+	displayName        string
+	repositoryURL      string
+	branch             string
+	rootDirectory      string
+	gitHubRepositoryID int64
 }
 
 func (s *Service) insertApp(ctx context.Context, app storedApp) (int64, error) {
 	result, err := s.db.ExecContext(ctx,
-		"INSERT INTO apps (name, display_name, repository, branch, root_directory, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-		app.name, app.displayName, app.repositoryURL, app.branch, app.rootDirectory, s.now().Unix())
+		"INSERT INTO apps (name, display_name, repository, branch, root_directory, github_repository_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		app.name, app.displayName, app.repositoryURL, app.branch, app.rootDirectory, app.gitHubRepositoryID, s.now().Unix())
 	if err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed: apps.name") {
 		return 0, ErrNameTaken
 	}

@@ -1,4 +1,5 @@
 import type { Deploy } from '../../../lib/utils/api';
+import type { Messages } from '../../../locales/en';
 import { describeFailedStep, describeState } from '../../../lib/utils/deploy-states';
 import { useFormatTime, useMessages } from '../../../lib/utils/locale';
 
@@ -22,6 +23,7 @@ export function DeployList({ deploys, shownDeployID, onSelect }: DeployListProps
 				<tr>
 					<th scope="col">{messages.startedColumn}</th>
 					<th scope="col">{messages.commitColumn}</th>
+					<th scope="col">{messages.triggerColumn}</th>
 					<th scope="col">{messages.stateColumn}</th>
 					<th scope="col">{messages.logColumn}</th>
 				</tr>
@@ -57,6 +59,7 @@ function DeployRow({ deploy, isShown, onSelect }: DeployRowProps) {
 				<time dateTime={queuedAt.toISOString()}>{formatTime(queuedAt)}</time>
 			</td>
 			<td>{commit}</td>
+			<td>{describeTrigger(deploy, messages.app.deploys.triggers)}</td>
 			<td>
 				{stateText}
 				{isFailed && deploy.reason && <p>{deploy.reason}</p>}
@@ -68,4 +71,13 @@ function DeployRow({ deploy, isShown, onSelect }: DeployRowProps) {
 			</td>
 		</tr>
 	);
+}
+
+/** What queued a deploy, in words, naming the pusher of a push. */
+function describeTrigger(deploy: Deploy, messages: Messages['app']['deploys']['triggers']): string {
+	if (deploy.trigger === 'push') {
+		return deploy.pushedBy ? messages.pushBy(deploy.pushedBy) : messages.push;
+	}
+
+	return messages[deploy.trigger];
 }

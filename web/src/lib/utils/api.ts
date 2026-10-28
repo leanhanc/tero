@@ -24,6 +24,9 @@ export type AppSummary = {
 	latestState: DeployState | '';
 };
 
+/** What queued a deploy: the app's creation, Redeploy, a push or polling. */
+export type DeployTrigger = 'create' | 'manual' | 'push' | 'poll';
+
 export type Deploy = {
 	id: number;
 	state: DeployState;
@@ -31,6 +34,9 @@ export type Deploy = {
 	reason: string;
 	commitSha: string;
 	commitMessage: string;
+	trigger: DeployTrigger;
+	/** The GitHub login of whoever pushed, for a push. */
+	pushedBy: string;
 	queuedAt: number;
 	finishedAt: number;
 };
@@ -43,6 +49,9 @@ export type AppDetail = {
 	branch: string;
 	rootDirectory: string;
 	runTogether: boolean;
+	deployOnPush: boolean;
+	/** Why polling the branch stopped, after it kept failing; empty otherwise. */
+	pollError: string;
 	deploys: Deploy[];
 };
 
@@ -56,10 +65,42 @@ export type RepositoryLookup = {
 
 export type NewApp = {
 	repository: string;
+	/** Set when the admin picked a repository the GitHub App covers. */
+	githubRepositoryId?: number;
 	branch: string;
 	displayName: string;
 	name: string;
 	rootDirectory: string;
+};
+
+export type GitHubRepository = {
+	id: number;
+	owner: string;
+	name: string;
+	isPrivate: boolean;
+	defaultBranch: string;
+};
+
+/** The GitHub App, where it is installed and what it covers. Never its secrets. */
+export type GitHubStatus = {
+	app: { isConnected: boolean; slug?: string; owner?: string; isOrgOwned?: boolean };
+	installation: { account: string; isOrganization: boolean; isSuspended: boolean } | null;
+	repositories: GitHubRepository[];
+	installUrl?: string;
+	settingsUrl?: string;
+};
+
+/** What the browser posts to GitHub to create the App. */
+export type GitHubStart = {
+	action: string;
+	manifest: string;
+	state: string;
+};
+
+/** Work the agent does for the dashboard, such as finishing a connection. */
+export type GitHubRequest = {
+	status: 'pending' | 'done' | 'failed';
+	result: string;
 };
 
 export type LoginMethod = 'password' | 'passkey' | 'setup';
@@ -183,6 +224,36 @@ export function setRunTogether(name: string, runTogether: boolean): Promise<void
 	return request<void>('POST', `/api/apps/${encodeURIComponent(name)}/settings`, { runTogether });
 }
 
+export function setDeployOnPush(name: string, deployOnPush: boolean): Promise<void> {
+	return request<void>('POST', `/api/apps/${encodeURIComponent(name)}/settings`, { deployOnPush });
+}
+
+export function getGitHub(): Promise<GitHubStatus> {
+	return request<GitHubStatus>('GET', '/api/github');
+}
+
+/** Starts connecting GitHub. organization is empty for the admin's own account. Needs a confirmed session. */
+export function beginGitHubConnection(organization: string): Promise<GitHubStart> {
+	return request<GitHubStart>('POST', '/api/github/connect/begin', { organization });
+}
+
+export function finishGitHubConnection(code: string, state: string): Promise<{ requestId: number }> {
+	return request<{ requestId: number }>('POST', '/api/github/connect', { code, state });
+}
+
+export function refreshGitHub(): Promise<{ requestId: number }> {
+	return request<{ requestId: number }>('POST', '/api/github/refresh', {});
+}
+
+/** Disconnects GitHub. Needs a confirmed session. */
+export function disconnectGitHub(): Promise<void> {
+	return request<void>('POST', '/api/github/disconnect', {});
+}
+
+export function getGitHubRequest(requestId: number): Promise<GitHubRequest> {
+	return request<GitHubRequest>('GET', `/api/github/requests/${requestId}`);
+}
+
 export function getAccount(): Promise<Account> {
 	return request<Account>('GET', '/api/account');
 }
@@ -243,12 +314,13 @@ async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown):
 		throw new ApiError(response.status, message, field, code);
 	}
 
-	const hasNoContent = response.status === 204;
-	if (hasNoContent) {
+	// 204 and 202 (Redeploy) come without a body.
+	const text = await response.text();
+	if (text === '') {
 		return undefined as T;
 	}
 
-	return (await response.json()) as T;
+	return JSON.parse(text) as T;
 }
 
 // An empty message means the server gave no explanation; errorMessage turns

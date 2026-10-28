@@ -7,22 +7,27 @@ type Caller string
 
 const (
 	CallerDashboard Caller = "dashboard"
+	CallerAgent     Caller = "agent"
 	CallerRoot      Caller = "root"
 )
 
 // errUnknownCaller means the peer is none of the three callers.
-var errUnknownCaller = errors.New("the caller is neither the dashboard nor root")
+var errUnknownCaller = errors.New("the caller is neither the dashboard, the agent nor root")
 
 // dashboardCgroup is the cgroup of tero.service, fixed by the unit file init
 // writes. Only the dashboard runs there, and nothing running as tero can move
-// itself in: that needs write access to the root cgroup. The agent is not a
-// caller: anything running as tero under its user manager can join the
-// agent's cgroup, since the user manager's subtree is delegated to tero.
+// itself in: that needs write access to the root cgroup.
+//
+// The agent is known by its uid alone. Its user manager delegates its cgroup
+// subtree to tero-agent, so a cgroup proves nothing there; but only the agent
+// and the Podman helpers it starts run as tero-agent, and containers run as
+// subordinate ids, never as tero-agent itself.
 const dashboardCgroup = "/system.slice/tero.service"
 
 // peers tells callers apart for one server.
 type peers struct {
-	teroUID int
+	teroUID  int
+	agentUID int
 	// dashboard is the dashboard's cgroup: dashboardCgroup on a server.
 	dashboard string
 }

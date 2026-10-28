@@ -56,6 +56,19 @@ func ParseRepository(raw string) (Repository, error) {
 	return Repository{Owner: owner, Name: name}, nil
 }
 
+// ErrInvalidOwner rejects a name GitHub wouldn't accept for a user or
+// organization.
+var ErrInvalidOwner = errors.New("That isn't a valid GitHub user or organization name")
+
+// CheckOwner applies GitHub's rules for user and organization names.
+func CheckOwner(owner string) error {
+	if !ownerPattern.MatchString(owner) {
+		return ErrInvalidOwner
+	}
+
+	return nil
+}
+
 // URL is the repository's canonical HTTPS address, the only form Tero stores
 // and fetches.
 func (r Repository) URL() string {

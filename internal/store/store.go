@@ -1,13 +1,15 @@
 // Package store opens Tero's SQLite database, which holds apps and deploys.
-// Sessions and everything else about the login belong to the key service. The database belongs to the
-// tero user: the service opens it directly, and root CLI commands open it
-// through a child process running as tero, so every file stays owned by tero.
+// Sessions and everything else about the login belong to the key service.
+// The database is shared by the service (user tero) and the agent (user
+// tero-agent) through the group tero-shared, and is the only channel between
+// them.
 package store
 
 import (
 	"context"
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -18,26 +20,39 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// Path is the database file inside the service's StateDirectory.
-const Path = "/var/lib/tero/tero.db"
+// Path is the shared database. Its directory is root's, group tero-shared,
+// mode 2770, so every file in it gets that group.
+const Path = "/var/lib/tero-shared/tero.db"
 
 //go:embed migrations/*.sql
 var migrations embed.FS
 
-// Open opens the database at path, creating it with mode 0600 when missing,
-// and applies any pending migrations.
+// Open opens the shared database at path, creating it with mode 0660 when
+// missing, and applies any pending migrations. SQLite gives its WAL and
+// shared-memory files the database file's mode.
 func Open(ctx context.Context, path string) (*sql.DB, error) {
-	return OpenWith(ctx, path, migrations)
+	if err := refuseLinks(path, path+"-wal", path+"-shm"); err != nil {
+		return nil, err
+	}
+	if err := createFile(path, sharedFileMode); err != nil {
+		return nil, err
+	}
+
+	return open(ctx, path, migrations)
 }
 
 // OpenWith opens a database the same way with another set of migrations, read
 // from the "migrations" directory of source. The key service keeps its own
 // database this way.
 func OpenWith(ctx context.Context, path string, source fs.FS) (*sql.DB, error) {
-	if err := createPrivateFile(path); err != nil {
+	if err := createFile(path, privateFileMode); err != nil {
 		return nil, err
 	}
 
+	return open(ctx, path, source)
+}
+
+func open(ctx context.Context, path string, source fs.FS) (*sql.DB, error) {
 	// WAL lets the service keep serving while a CLI command writes. The busy
 	// timeout makes the two wait for each other instead of failing.
 	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_txlock=immediate"
@@ -54,19 +69,50 @@ func OpenWith(ctx context.Context, path string, source fs.FS) (*sql.DB, error) {
 	return db, nil
 }
 
-// createPrivateFile makes sure the database file exists before SQLite opens
-// it, so it is created with mode 0600 whatever the process umask is.
-func createPrivateFile(path string) error {
+// refuseLinks refuses to open the shared database when one of its files is
+// a link. Both users can create files in its directory, and SQLite follows
+// links, so a link would make the other process write where it points.
+func refuseLinks(paths ...string) error {
+	for _, path := range paths {
+		info, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%s is a link; the database's files must be regular files", path)
+		}
+	}
+
+	return nil
+}
+
+const (
+	privateFileMode os.FileMode = 0o600
+	sharedFileMode  os.FileMode = 0o660
+)
+
+// createFile makes sure the database file exists before SQLite opens it, so
+// it is created with mode whatever the process umask is. A file another
+// process created is left as it is.
+func createFile(path string, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
 
-	file, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0o600)
+	file, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE|os.O_EXCL, mode)
+	if errors.Is(err, os.ErrExist) {
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("create the database: %w", err)
 	}
+	defer file.Close()
 
-	return file.Close()
+	// The umask may have taken bits off the mode OpenFile asked for.
+	return file.Chmod(mode)
 }
 
 // migrate applies every embedded migration newer than the database's

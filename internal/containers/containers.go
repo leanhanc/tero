@@ -1,8 +1,8 @@
-// Package containers starts and checks app containers under tero's rootless
-// Podman, with the ADR 0001 rules: no capabilities, no privilege gain, a user
-// namespace slice of their own, and a network namespace of their own that
-// can't reach other apps. Each app's PORT is published on loopback only, for the built-in
-// proxy.
+// Package containers starts and checks app containers under tero-agent's
+// rootless Podman, with the ADR 0001 rules: no capabilities, no privilege
+// gain, a user namespace slice of their own, and a network namespace of
+// their own that can't reach other apps. Each app's PORT is published on
+// loopback only, for the built-in proxy.
 package containers
 
 import (
@@ -286,7 +286,7 @@ func answersHTTP(ctx context.Context, httpClient *http.Client, url string) bool 
 // apps' ports are published. Podman 5 uses pasta and Podman 4 slirp4netns,
 // each told not to map the host into the container. Podman networks aren't
 // used: on Podman 4 their shared rootless namespace hides the networks
-// stored under tero's home in /var/lib.
+// stored under tero-agent's home in /var/lib.
 func isolatedNetwork(ctx context.Context) (string, error) {
 	networkMu.Lock()
 	defer networkMu.Unlock()

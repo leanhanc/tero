@@ -20,11 +20,12 @@ const soPeerPIDFD = 77
 
 // identify works out who connected. The uid is the one the kernel recorded at
 // connect(), so a process that execs a setuid program afterwards is still
-// what it was. For tero it takes a pidfd for the peer, reads that process's
-// cgroup, and only then checks the pidfd still refers to a running process,
-// so a pid reused after the peer exited can't pass as it. The check polls the
-// pidfd rather than signalling it: tero-keys has no capabilities and another
-// uid, so the kernel refuses it even signal 0 to a tero process.
+// what it was. Root and the agent are known by uid. For tero it takes a pidfd
+// for the peer, reads that process's cgroup, and only then checks the pidfd
+// still refers to a running process, so a pid reused after the peer exited
+// can't pass as it. The check polls the pidfd rather than signalling it:
+// tero-keys has no capabilities and another uid, so the kernel refuses it
+// even signal 0 to a tero process.
 func (p peers) identify(conn *net.UnixConn) (Caller, error) {
 	raw, err := conn.SyscallConn()
 	if err != nil {
@@ -51,6 +52,9 @@ func (p peers) identify(conn *net.UnixConn) (Caller, error) {
 
 	if credentials.Uid == 0 {
 		return CallerRoot, nil
+	}
+	if int(credentials.Uid) == p.agentUID {
+		return CallerAgent, nil
 	}
 	if int(credentials.Uid) != p.teroUID {
 		return "", errUnknownCaller

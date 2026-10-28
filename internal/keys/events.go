@@ -38,6 +38,11 @@ const (
 	EventPasskeyLoginSucceeded  EventType = "passkey_login_succeeded"
 	EventPasskeyLoginFailed     EventType = "passkey_login_failed"
 	EventPasskeyCounterMismatch EventType = "passkey_counter_mismatch"
+
+	EventGitHubConnected           EventType = "github_connected"
+	EventGitHubDisconnected        EventType = "github_disconnected"
+	EventGitHubInstallationChanged EventType = "github_installation_changed"
+	EventWebhookSignatureFailed    EventType = "webhook_signature_failed"
 )
 
 // Source is who recorded an event. The key service records its own events;
@@ -72,6 +77,11 @@ var eventMessages = map[EventType]string{
 	EventPasskeyLoginSucceeded:  "Dashboard login with a passkey succeeded",
 	EventPasskeyLoginFailed:     "Dashboard login with a passkey failed",
 	EventPasskeyCounterMismatch: "Passkey login refused: its signature counter went backwards, so it may have been copied",
+
+	EventGitHubConnected:           "GitHub connected",
+	EventGitHubDisconnected:        "GitHub disconnected",
+	EventGitHubInstallationChanged: "The GitHub App's installation or its repositories changed",
+	EventWebhookSignatureFailed:    "GitHub webhook refused: its signature didn't match",
 }
 
 // warnings are written to the journal at warning priority.
@@ -80,12 +90,13 @@ var warnings = map[EventType]bool{
 	EventLoginReset: true, EventCallersRefused: true, EventEventsDropped: true, EventRateLimited: true,
 	EventBreachReset: true, EventConfirmFailed: true, EventConfirmCodeFailed: true, EventPasskeyLoginFailed: true,
 	EventPasskeyCounterMismatch: true, EventPasswordChanged: true, EventPasskeyAdded: true, EventPasskeyRemoved: true,
+	EventGitHubConnected: true, EventGitHubDisconnected: true, EventWebhookSignatureFailed: true,
 }
 
 // appendable lists the events each caller may append. Everything else is
 // recorded by the key service itself, from what it saw happen.
 var appendable = map[Caller]map[EventType]bool{
-	CallerDashboard: {EventBreachCheckSkipped: true},
+	CallerDashboard: {EventBreachCheckSkipped: true, EventGitHubInstallationChanged: true},
 	CallerRoot:      {EventBreachReset: true},
 }
 

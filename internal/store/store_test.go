@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestOpenCreatesPrivateDatabaseWithSchema(t *testing.T) {
+func TestOpenCreatesSharedDatabaseWithSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state", "tero.db")
 
 	db, err := Open(context.Background(), path)
@@ -21,8 +21,16 @@ func TestOpenCreatesPrivateDatabaseWithSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mode := info.Mode().Perm(); mode != 0o600 {
-		t.Errorf("database mode = %o, want 600", mode)
+	if mode := info.Mode().Perm(); mode != 0o660 {
+		t.Errorf("database mode = %o, want 660", mode)
+	}
+	db.Exec("CREATE TABLE wal_check (id INTEGER)")
+	walInfo, err := os.Stat(path + "-wal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := walInfo.Mode().Perm(); mode != 0o660 {
+		t.Errorf("WAL mode = %o, want 660", mode)
 	}
 
 	for _, table := range []string{"apps", "deploys", "served_routes"} {
@@ -54,6 +62,24 @@ func TestDatabaseHoldsNoCredentials(t *testing.T) {
 	}
 }
 
+func TestOpenWithCreatesPrivateDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "keys.db")
+
+	db, err := OpenWith(context.Background(), path, migrations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o600 {
+		t.Errorf("database mode = %o, want 600", mode)
+	}
+}
+
 func TestOpenTwiceKeepsData(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tero.db")
 	ctx := context.Background()
@@ -82,7 +108,7 @@ func TestOpenTwiceKeepsData(t *testing.T) {
 	}
 }
 
-func TestDeploysAllowOneInProgressAndOneLivePerApp(t *testing.T) {
+func TestDeploysAllowOneRunningOneQueuedAndOneLivePerApp(t *testing.T) {
 	db, err := Open(context.Background(), filepath.Join(t.TempDir(), "tero.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -92,9 +118,13 @@ func TestDeploysAllowOneInProgressAndOneLivePerApp(t *testing.T) {
 	mustExec(t, db, "INSERT INTO apps (name, repository, branch, created_at) VALUES ('api', 'https://github.com/o/r', 'main', 1)")
 	mustExec(t, db, "INSERT INTO deploys (app_id, state, queued_at) VALUES (1, 'live', 1)")
 	mustExec(t, db, "INSERT INTO deploys (app_id, state, queued_at) VALUES (1, 'building', 2)")
+	mustExec(t, db, "INSERT INTO deploys (app_id, state, queued_at) VALUES (1, 'queued', 3)")
 
-	if _, err := db.Exec("INSERT INTO deploys (app_id, state, queued_at) VALUES (1, 'queued', 3)"); err == nil {
-		t.Error("a second in-progress deploy for the same app was accepted")
+	if _, err := db.Exec("INSERT INTO deploys (app_id, state, queued_at) VALUES (1, 'queued', 4)"); err == nil {
+		t.Error("a second queued deploy for the same app was accepted")
+	}
+	if _, err := db.Exec("INSERT INTO deploys (app_id, state, queued_at) VALUES (1, 'starting', 4)"); err == nil {
+		t.Error("a second running deploy for the same app was accepted")
 	}
 	if _, err := db.Exec("INSERT INTO deploys (app_id, state, queued_at) VALUES (1, 'live', 3)"); err == nil {
 		t.Error("a second live deploy for the same app was accepted")

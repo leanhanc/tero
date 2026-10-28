@@ -67,6 +67,7 @@ const failedApp = {
 	branch: 'main',
 	rootDirectory: '',
 	runTogether: true,
+	deployOnPush: true,
 	deploys: [
 		{
 			id: 7,
@@ -75,6 +76,8 @@ const failedApp = {
 			reason: buildFailedReason,
 			commitSha: 'abcdef1234567890',
 			commitMessage: 'feat: break the build',
+			trigger: 'push',
+			pushedBy: 'leanhanc',
 			queuedAt: 1_800_000_000,
 			finishedAt: 1_800_000_060,
 		},
@@ -218,16 +221,58 @@ describe('apps', () => {
 		expect(log.querySelector('img')).toBeNull();
 	});
 
-	it('disables Redeploy while a deploy is in progress', async () => {
+	it('queues a redeploy behind a running deploy, then shows it queued', async () => {
 		openAt('/apps/api');
-		const building = { ...failedApp, deploys: failedApp.deploys.map((deploy) => ({ ...deploy, state: 'building', reason: '', failedStep: '' })) };
-		mockAPI({ '/api/state': [loggedIn], '/api/apps/api': [{ status: 200, body: building }] });
+		const runningDeploy = { ...failedApp.deploys[0], state: 'building', reason: '', failedStep: '' };
+		const building = { ...failedApp, deploys: [runningDeploy] };
+		const queued = { ...failedApp, deploys: [{ ...runningDeploy, id: 8, state: 'queued', trigger: 'manual', pushedBy: '' }, runningDeploy] };
+		const calls = mockAPI({
+			'/api/state': [loggedIn],
+			'/api/apps/api': [
+				{ status: 200, body: building },
+				{ status: 200, body: queued },
+			],
+			'/api/apps/api/deploys': [{ status: 202 }],
+		});
+		const opened = mockEventSource([]);
+		render(<App />);
+
+		expect(await screen.findByText('A deploy is running. Redeploying queues another one after it.')).toBeTruthy();
+		await userEvent.click(screen.getByRole('button', { name: 'Redeploy' }));
+
+		const queuedButton = await screen.findByRole('button', { name: 'Queued' });
+		expect(queuedButton).toHaveProperty('disabled', true);
+		expect(calls.some((call) => call.path === '/api/apps/api/deploys')).toBe(true);
+		expect(opened.every((path) => path === '/api/deploys/7/log')).toBe(true);
+	});
+
+	it('says who started each deploy', async () => {
+		openAt('/apps/api');
+		mockAPI({ '/api/state': [loggedIn], '/api/apps/api': [{ status: 200, body: failedApp }] });
 		mockEventSource([]);
 		render(<App />);
 
-		const button = await screen.findByRole('button', { name: 'Redeploy' });
-		expect(button).toHaveProperty('disabled', true);
-		expect(screen.getByText('A deploy is in progress.')).toBeTruthy();
+		expect(await screen.findByText('A push by leanhanc')).toBeTruthy();
+	});
+
+	it('turns off deploy on push and keeps the other setting', async () => {
+		openAt('/apps/api');
+		const calls = mockAPI({
+			'/api/state': [loggedIn],
+			'/api/apps/api': [
+				{ status: 200, body: failedApp },
+				{ status: 200, body: { ...failedApp, deployOnPush: false } },
+			],
+			'/api/apps/api/settings': [{ status: 204 }],
+		});
+		mockEventSource([]);
+		render(<App />);
+
+		const checkbox = await screen.findByLabelText<HTMLInputElement>('Deploy every new commit on the branch');
+		expect(checkbox.checked).toBe(true);
+		await userEvent.click(checkbox);
+
+		expect(calls.find((call) => call.path === '/api/apps/api/settings')?.body).toEqual({ deployOnPush: false });
 	});
 
 	it('shows how long a deploy has run and says so when its log goes quiet', async () => {
@@ -251,5 +296,36 @@ describe('apps', () => {
 		expect(screen.getByText('Running for 3m 43s.')).toBeTruthy();
 		expect(screen.getByText(/^No new output for 31s\. The deploy is still running/)).toBeTruthy();
 		vi.useRealTimers();
+	});
+});
+
+describe('new app from GitHub', () => {
+	it('creates an app from a repository the App can read', async () => {
+		openAt('/apps/new');
+		const calls = mockAPI({
+			'/api/state': [loggedIn],
+			'/api/github': [
+				{
+					status: 200,
+					body: {
+						app: { isConnected: true, slug: 'tero-dash' },
+						installation: { account: 'leanhanc', isOrganization: false, isSuspended: false },
+						repositories: [{ id: 555, owner: 'leanhanc', name: 'secret-api', isPrivate: true, defaultBranch: 'trunk' }],
+					},
+				},
+			],
+			'/api/apps': [{ status: 201, body: { name: 'secret-api' } }],
+			'/api/apps/secret-api': [{ status: 200, body: { ...failedApp, name: 'secret-api' } }],
+		});
+		mockEventSource([]);
+		render(<App />);
+
+		await userEvent.selectOptions(await screen.findByLabelText('Or pick one the GitHub App can read'), '555');
+		expect(screen.getByLabelText<HTMLInputElement>('Branch').value).toBe('trunk');
+		await userEvent.click(screen.getByRole('button', { name: 'Create and deploy' }));
+
+		const created = calls.find((call) => call.path === '/api/apps')?.body as Record<string, unknown>;
+		expect(created.githubRepositoryId).toBe(555);
+		expect(created.repository).toBe('https://github.com/leanhanc/secret-api');
 	});
 });

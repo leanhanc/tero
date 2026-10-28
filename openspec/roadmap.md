@@ -67,11 +67,15 @@ Requirements: ASVS 6.2.2, 6.2.3, 6.2.11, 6.3.3, 7.4.3, 7.4.5, 7.5.1, 7.5.2 ([asv
 
 ## Slice 5: Deploy on push
 
-- [ ] Connect GitHub through a per-server GitHub App (manifest flow)
-- [ ] Private repositories with short-lived installation tokens
-- [ ] Signed push webhooks start a deploy of the tracked branch
-- [ ] Polling for public repositories
+Change: [add-deploy-on-push-slice-5](changes/add-deploy-on-push-slice-5/)
+
+- [ ] The agent runs as its own `tero-agent` user, which owns Podman and every container, so `tero-keys` can tell it apart from the dashboard
+- [ ] Connect GitHub through a per-server GitHub App (manifest flow), for a personal account or an organization
+- [ ] Private repositories with short-lived installation tokens, minted and held only by the agent
+- [ ] Signed push webhooks start a deploy of the tracked branch, with a per-app "Deploy on push" setting, on by default
+- [ ] Polling for public repositories, and failed webhook deliveries redelivered when the agent starts
 - [ ] One deploy at a time per app; a newer commit replaces a queued one
+- [ ] `sudo tero assume-breach` deletes the GitHub connection
 
 Drafts: [github-connection](drafts/github-connection/spec.md), [deployments](drafts/deployments/spec.md)
 
@@ -81,9 +85,9 @@ Drafts: [github-connection](drafts/github-connection/spec.md), [deployments](dra
 - [ ] A change restarts the live image with the new values, with no build; only variables marked "needed at build" rebuild
 - [ ] Secrets encrypted per app under the slice 3 master key and kept out of logs and images
 - [ ] Sealed variables, as Railway's: optional per variable, write-only once saved, held by `tero-keys` and never returned to the dashboard, so the internet-facing process can't read app secrets in clear (the failure behind slice 3). Sealing can't be undone; a sealed value can be replaced, with a fresh TOTP code
-- [ ] Decide how the agent receives secrets: it can't yet be told apart from other processes running as `tero`, and the dashboard writes the deploys it runs. Candidates: the agent under its own uid, and `tero-keys` releasing an app's secrets only for a source the admin approved with a fresh TOTP check in `tero-keys`
+- [ ] Decide which deploys `tero-keys` releases an app's secrets for: the agent has its own uid since slice 5, but the dashboard still writes the deploys it runs. Candidate: only for a source the admin approved with a fresh TOTP check in `tero-keys`
 - [ ] Per-secret list of when it was read, from the security log
-- [ ] `sudo tero assume-breach` lists each app's secret names to rotate at their providers and the link to revoke the GitHub App
+- [ ] `sudo tero assume-breach` lists each app's secret names to rotate at their providers
 - [ ] Recovery key printed once, and `sudo tero restore` for moving encrypted secrets to a new server
 
 Drafts: [apps](drafts/apps/spec.md)

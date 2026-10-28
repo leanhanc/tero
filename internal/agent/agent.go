@@ -1,8 +1,8 @@
 // Package agent is `tero agent`, the process that builds and runs apps. It
-// runs as tero under tero's systemd user manager, outside the service's
-// sandbox, because rootless Podman needs the setuid id-mapping helpers the
-// service may not use. It listens on nothing: the deploy queue in the SQLite
-// store is its only input.
+// runs as tero-agent under that user's systemd user manager, outside any
+// service sandbox, because rootless Podman needs the setuid id-mapping
+// helpers a sandboxed service may not use. It listens on nothing: the deploy
+// queue in the SQLite store is its only input.
 package agent
 
 import (
@@ -30,11 +30,18 @@ type Pipeline interface {
 	Run(ctx context.Context, deploy deploys.Deploy) error
 }
 
+// Background is work the agent runs alongside deploys until ctx ends, such
+// as answering the dashboard's GitHub requests.
+type Background interface {
+	Run(ctx context.Context)
+}
+
 // Options configure the agent. Now defaults to the real clock.
 type Options struct {
-	DB       *sql.DB
-	Pipeline Pipeline
-	Now      func() time.Time
+	DB         *sql.DB
+	Pipeline   Pipeline
+	Background []Background
+	Now        func() time.Time
 }
 
 // Run claims and runs queued deploys until ctx is cancelled.
@@ -61,6 +68,9 @@ func Run(ctx context.Context, opts Options) error {
 
 	go reconcilePeriodically(ctx, opts.DB)
 	go pullBuildKit(ctx)
+	for _, work := range opts.Background {
+		go work.Run(ctx)
+	}
 
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()

@@ -55,8 +55,8 @@ func testKeyServiceIdentity(t *testing.T) {
 		}
 	}
 
-	if got := must(t, "stat -c '%U:%G %a' /run/tero-keys/keys.sock"); got != "tero-keys:tero 660" {
-		t.Errorf("socket is %q, want tero-keys:tero 660", got)
+	if got := must(t, "stat -c '%U:%G %a' /run/tero-keys/keys.sock"); got != "tero-keys:tero-keys-callers 660" {
+		t.Errorf("socket is %q, want tero-keys:tero-keys-callers 660", got)
 	}
 
 	keysPID := must(t, "systemctl show tero-keys --property=MainPID --value")
@@ -123,10 +123,16 @@ func testOnlyTheDashboardIsAnswered(t *testing.T) {
 	assertContains(t, must(t, inDashboardCgroup(keysStatus)), `"isSetUp"`)
 
 	if got := run(t, asTero(keysStatus)); got.exitCode == 0 {
-		t.Errorf("a tero process in its user session was answered:\n%s", got.output)
-	}
-	if got := run(t, "sudo -u tero "+keysStatus); got.exitCode == 0 {
 		t.Errorf("a tero process outside tero.service was answered:\n%s", got.output)
+	}
+}
+
+// key-service: Agent asks for account verbs. The agent is a caller the key
+// service knows, but status isn't one of its verbs.
+func testAgentKnownButLimited(t *testing.T) {
+	got := must(t, asAgent(keysStatus))
+	if strings.Contains(got, "isSetUp") || !strings.Contains(got, `"error"`) {
+		t.Errorf("the agent asked for status and got:\n%s", got)
 	}
 }
 
@@ -177,10 +183,13 @@ func testAssumeBreach(t *testing.T) {
 		t.Error("assume-breach ran without confirmation")
 	}
 
-	// What an attacker running as tero could leave behind.
+	// What an attacker running as tero or tero-agent could leave behind.
 	must(t, asTero(`mkdir -p ~/.config/systemd/user && printf '[Service]\nExecStart=/bin/true\n' > ~/.config/systemd/user/planted.service`))
+	must(t, asAgent(`mkdir -p ~/.config/systemd/user && printf '[Service]\nExecStart=/bin/true\n' > ~/.config/systemd/user/planted-agent.service`))
 	must(t, `echo '* * * * * true' | sudo crontab -u tero -`)
+	must(t, `echo '* * * * * true' | sudo crontab -u tero-agent -`)
 	must(t, "sudo systemd-run --quiet --uid=tero --unit=tero-e2e-leftover sleep 1000")
+	must(t, "sudo systemd-run --quiet --uid=tero-agent --unit=tero-e2e-agent-leftover sleep 1000")
 
 	versionsBefore := must(t, "sudo ls /etc/tero/keys")
 	certificatesBefore := must(t, caddyCertificates)
@@ -203,17 +212,29 @@ func testAssumeBreach(t *testing.T) {
 	must(t, "systemctl is-active tero")
 	assertContains(t, must(t, "sudo "+keysStatus), `"isSetUp":false`)
 
-	if left := run(t, "systemctl is-active tero-e2e-leftover"); left.exitCode == 0 {
-		t.Error("a process running as tero survived assume-breach")
-	}
-	for _, path := range []string{"/var/lib/tero/.config/systemd/user", "/var/spool/cron/crontabs/tero"} {
-		if left := run(t, "sudo test -e "+path); left.exitCode == 0 {
-			t.Errorf("%s was left in place", path)
+	for _, leftover := range []string{"tero-e2e-leftover", "tero-e2e-agent-leftover"} {
+		if left := run(t, "systemctl is-active "+leftover); left.exitCode == 0 {
+			t.Errorf("%s survived assume-breach", leftover)
 		}
-		assertContains(t, got, path)
 	}
-	if found := must(t, "sudo find /var/lib/tero-breach -name planted.service"); found == "" {
-		t.Error("the planted unit wasn't kept in /var/lib/tero-breach")
+	// The moved ~/.config is reported; tero-agent's user manager and Podman
+	// may make a fresh, empty one once they start again.
+	moved := map[string]string{
+		"/var/lib/tero/.config":               "/var/lib/tero/.config/systemd/user/planted.service",
+		"/var/lib/tero-agent/.config":         "/var/lib/tero-agent/.config/systemd/user/planted-agent.service",
+		"/var/spool/cron/crontabs/tero":       "/var/spool/cron/crontabs/tero",
+		"/var/spool/cron/crontabs/tero-agent": "/var/spool/cron/crontabs/tero-agent",
+	}
+	for reported, planted := range moved {
+		if left := run(t, "sudo test -e "+planted); left.exitCode == 0 {
+			t.Errorf("%s was left in place", planted)
+		}
+		assertContains(t, got, reported)
+	}
+	for _, unit := range []string{"planted.service", "planted-agent.service"} {
+		if found := must(t, "sudo find /var/lib/tero-breach -name "+unit); found == "" {
+			t.Errorf("%s wasn't kept in /var/lib/tero-breach", unit)
+		}
 	}
 	waitUntil(t, time.Minute, func() bool { return run(t, agentSystemctl+" is-active tero-agent").exitCode == 0 })
 }

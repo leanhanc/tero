@@ -15,16 +15,16 @@ import (
 	"github.com/leanhanc/tero/internal/podman"
 )
 
-// buildkitImage is pinned by index digest to the release of the BuildKit
+// BuildKitImage is pinned by index digest to the release of the BuildKit
 // client Railpack compiles against, so the daemon understands its LLB.
-const buildkitImage = "docker.io/moby/buildkit:v0.33.0-rootless@sha256:80b15f0735e87bab7bf59ec4d695dfb4a7cfb25521cf56dc75d6f256285b63ef"
+const BuildKitImage = "docker.io/moby/buildkit:v0.33.0-rootless@sha256:80b15f0735e87bab7bf59ec4d695dfb4a7cfb25521cf56dc75d6f256285b63ef"
 
-// cacheVolume keeps BuildKit's state between throwaway daemons, so base
+// CacheVolume keeps BuildKit's state between throwaway daemons, so base
 // images and package layers are reused.
-const cacheVolume = "tero-buildkit-cache"
+const CacheVolume = "tero-buildkit-cache"
 
-// buildkitIDs is the slice of tero's 1,000,000 subordinate ids BuildKit
-// runs in: the top 200,000, enough for rootlesskit's nested range
+// buildkitIDs is the slice of tero-agent's 1,000,000 subordinate ids
+// BuildKit runs in: the top 200,000, enough for rootlesskit's nested range
 // (100000-165535). Apps get --userns=auto slices, which Podman hands out from
 // the bottom of the range and never from a running container's map, so
 // BuildKit and apps don't share host uids. A fixed map also keeps the cache
@@ -38,11 +38,11 @@ const minimumMemoryLimit = 1 << 30
 // download the same layers alongside it, which is only slower.
 func PullImage(ctx context.Context) error {
 	// podman image exists answers through its exit code alone: 1 is missing.
-	if _, err := podman.Run(ctx, "image", "exists", buildkitImage); err == nil {
+	if _, err := podman.Run(ctx, "image", "exists", BuildKitImage); err == nil {
 		return nil
 	}
 
-	_, err := podman.Run(ctx, "pull", "--quiet", buildkitImage)
+	_, err := podman.Run(ctx, "pull", "--quiet", BuildKitImage)
 	return err
 }
 
@@ -68,8 +68,8 @@ func startDaemon(ctx context.Context, deployID int64) (*daemon, error) {
 		"--security-opt", "unmask=/proc/*",
 		"--uidmap", buildkitIDs, "--gidmap", buildkitIDs,
 		"--memory", strconv.FormatInt(memoryLimit(), 10),
-		"--volume", cacheVolume+":/home/user/.local/share/buildkit",
-		buildkitImage)
+		"--volume", CacheVolume+":/home/user/.local/share/buildkit",
+		BuildKitImage)
 	if err != nil {
 		return nil, fmt.Errorf("start BuildKit: %w", err)
 	}

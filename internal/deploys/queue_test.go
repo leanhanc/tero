@@ -3,7 +3,6 @@ package deploys
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -35,7 +34,7 @@ func openTestDB(t *testing.T, appNames ...string) *sql.DB {
 func mustEnqueue(t *testing.T, db *sql.DB, appID int64) int64 {
 	t.Helper()
 
-	deployID, err := Enqueue(context.Background(), db, appID, testNow)
+	deployID, err := Enqueue(context.Background(), db, appID, Trigger{Type: TriggerManual}, testNow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,14 +53,59 @@ func stateOf(t *testing.T, db *sql.DB, deployID int64) (State, string) {
 	return State(state), failedStep
 }
 
-// deployments: Redeploy while deploying
-func TestEnqueueRefusesWhileAppHasDeployInProgress(t *testing.T) {
+// deployments: Redeploy while one is queued
+func TestEnqueueUpdatesTheQueuedDeploy(t *testing.T) {
+	ctx := context.Background()
 	db := openTestDB(t, "api")
-	mustEnqueue(t, db, 1)
+	firstID, err := Enqueue(ctx, db, 1, Trigger{Type: TriggerPush, PushedBy: "ana", RequestedSHA: "abc"}, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	_, err := Enqueue(context.Background(), db, 1, testNow)
-	if !errors.Is(err, ErrInProgress) {
-		t.Fatalf("second enqueue error = %v, want ErrInProgress", err)
+	secondID, err := Enqueue(ctx, db, 1, Trigger{Type: TriggerManual}, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondID != firstID {
+		t.Errorf("a second deploy %d was queued next to %d", secondID, firstID)
+	}
+
+	var count int
+	var trigger, pushedBy string
+	db.QueryRow("SELECT count(*), max(trigger_type), max(pushed_by) FROM deploys").Scan(&count, &trigger, &pushedBy)
+	if count != 1 || trigger != "manual" || pushedBy != "" {
+		t.Errorf("deploys = %d, trigger %q by %q; want 1, manual by nobody", count, trigger, pushedBy)
+	}
+}
+
+// deployments: Redeploy while deploying, Two quick pushes
+func TestEnqueueQueuesOneBehindARunningDeploy(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t, "api")
+	runningID := mustEnqueue(t, db, 1)
+	if _, _, err := ClaimNext(ctx, db, testNow); err != nil {
+		t.Fatal(err)
+	}
+
+	behindID, err := Enqueue(ctx, db, 1, Trigger{Type: TriggerPush, PushedBy: "ana"}, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	againID, err := Enqueue(ctx, db, 1, Trigger{Type: TriggerPush, PushedBy: "bo"}, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if behindID == runningID || againID != behindID {
+		t.Errorf("running %d, queued %d then %d; want one queued deploy behind the running one", runningID, behindID, againID)
+	}
+	if state, _ := stateOf(t, db, behindID); state != Queued {
+		t.Errorf("the deploy behind is %s", state)
+	}
+	var pushedBy string
+	db.QueryRow("SELECT pushed_by FROM deploys WHERE id = ?", behindID).Scan(&pushedBy)
+	if pushedBy != "bo" {
+		t.Errorf("the queued deploy names %q, want the newest pusher", pushedBy)
 	}
 }
 

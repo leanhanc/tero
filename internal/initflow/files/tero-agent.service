@@ -1,11 +1,12 @@
-# Written by `tero init`. A user unit for tero's systemd user manager: rootless
-# Podman needs the setuid id-mapping helpers, which the system service's
-# sandbox blocks. Every systemd sandbox option either blocks those helpers or
-# Podman's namespaces in a user manager, so the boundary is the tero user.
+# Written by `tero init`. A user unit for tero-agent's systemd user manager:
+# rootless Podman needs the setuid id-mapping helpers, which a system
+# service's sandbox blocks. Every systemd sandbox option either blocks those
+# helpers or Podman's namespaces in a user manager, so the boundary is the
+# tero-agent user.
 [Unit]
 Description=Tero agent (builds and runs apps)
 Documentation=https://github.com/leanhanc/tero
-ConditionUser=tero
+ConditionUser=tero-agent
 
 [Service]
 ExecStart=/usr/local/bin/tero agent

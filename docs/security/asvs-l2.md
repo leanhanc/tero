@@ -135,10 +135,14 @@ ASVS 11.1.2. Every key and algorithm Tero uses:
 | TOTP secret | 160 bits from `crypto/rand`, HMAC-SHA1, 6 digits, 30 s (RFC 6238) | AES-256-GCM under the master key in `/var/lib/tero-keys/keys.db` (mode 0600, owned by `tero-keys`); the additional data names the table, column, row and key version | Replaced by `reset-login` |
 | TLS certificate and key | Chosen by Caddy (ECDSA P-256), TLS 1.2 and 1.3 | `/var/lib/tero/caddy` | Obtained and renewed by Caddy over ACME |
 | Breach check | SHA-1 prefix, as the Have I Been Pwned API defines | Not stored | — |
+| GitHub App private key | RSA, made by GitHub when the admin creates the App | AES-256-GCM under the master key in `/var/lib/tero-keys/keys.db`; the agent hands it from GitHub straight to `tero-keys`, and it never leaves again | Deleted by Disconnect or `assume-breach`, which also tells the admin to delete the App on GitHub |
+| GitHub App tokens (JWT) | RS256 over a fixed header, signed by `tero-keys` with the App's key | Not stored; returned only to the agent | Valid 5 minutes, backdated 60 s for clock skew |
+| Installation tokens | Issued by GitHub, scoped to one repository and `contents: read` | Only in the agent's memory, passed to git as HTTP basic auth | Revoked as soon as the fetch ends; GitHub expires them within an hour |
+| GitHub webhook secret | Made by GitHub; HMAC-SHA256 of each body | AES-256-GCM under the master key in `/var/lib/tero-keys/keys.db`; `tero-keys` answers only valid or invalid | Deleted with the App's key |
 
 SHA-1 appears only where a protocol fixes it: inside HMAC for TOTP, which is what authenticator apps support, and in the breach-check prefix, which is a lookup key rather than a security function. Everything Tero chooses itself uses SHA-256 or stronger.
 
-The `tero-keys` service holds the master key and is the only process that reads the password hash, the TOTP secret and the passkeys: the dashboard sends the password and code, or the browser's passkey answer, over a Unix socket and gets back a session or a refusal. App secrets are encrypted under the same key with slice 6 (ADR 0001, section 5).
+The `tero-keys` service holds the master key and is the only process that reads the password hash, the TOTP secret, the passkeys and the GitHub App's secrets: the dashboard sends the password and code, or the browser's passkey answer, over a Unix socket and gets back a session or a refusal. App secrets are encrypted under the same key with slice 6 (ADR 0001, section 5).
 
 ### Sensitive data
 
@@ -150,6 +154,8 @@ ASVS 14.1.1 and 14.1.2.
 | TOTP secret | Shown once during setup; never returned again or logged; encrypted in the database of `tero-keys`, which `tero` can't read |
 | Session, device and setup tokens | Only in `HttpOnly` cookies or the URL fragment; only hashes stored, by `tero-keys`; never logged |
 | TLS private key | Readable only by `tero` |
+| GitHub App private key and webhook secret | Never returned by `tero-keys`; the dashboard never receives them, even while connecting |
+| Installation tokens | In the agent's memory for one fetch; never written to the database, the checkout (`.git` is removed before the build), the image or the build log |
 | Source IPs in security events | Kept for the admin; kept for one year, then deleted |
 
 API responses carry `Cache-Control: no-store`, and logout sends `Clear-Site-Data: "cache", "storage"`. Nothing is kept in browser storage other than the two cookies.
@@ -161,17 +167,19 @@ ASVS 13.1.1.
 | Direction | Peer | Purpose |
 |---|---|---|
 | Inbound 443 | Browsers | Dashboard over HTTPS, and each app on `<app>.<public-ip>.nip.io` |
+| Inbound 443 | GitHub | Signed webhooks at `/api/github/webhook` (push and installation events) |
 | Inbound 80 | Browsers, the ACME CA | Redirect to HTTPS, ACME HTTP-01 challenges |
 | Inbound SSH | The admin | Server administration, `sudo tero ...` |
 | Outbound HTTPS | Let's Encrypt | Certificates |
 | Outbound HTTPS | `api.pwnedpasswords.com` | Breached-password check |
 | Outbound HTTPS | `1.1.1.1` | Public IP lookup during `sudo tero init` |
 | Outbound HTTP(S) | Ubuntu archive mirrors | Packages during init and automatic security updates |
-| Outbound HTTPS | `github.com` | Branches and source of apps' public repositories |
+| Outbound HTTPS | `github.com` | Branches and source of apps' repositories; polling public ones every minute (agent) |
+| Outbound HTTPS | `api.github.com` | The GitHub App: manifest conversion, installation, repository lists, installation tokens, webhook redelivery (agent only) |
 | Outbound HTTPS | `ghcr.io`, `docker.io` | Railpack's builder and runtime images, and the pinned BuildKit image |
 | Outbound HTTP(S) | Whatever each app's build uses | Package registries (npm, for example) and runtime downloads during builds |
 
-Repository URLs are the only addresses that come from input. Only `https://github.com/<owner>/<repo>` is accepted, and Tero builds every URL it fetches from the owner and name on that fixed host (1.3.6).
+Repository URLs are the only addresses that come from input. Only `https://github.com/<owner>/<repo>` is accepted, and Tero builds every URL it fetches from the owner and name on that fixed host (1.3.6). GitHub's API is called only by the agent, on `api.github.com`, with paths built from numeric ids and checked names; a webhook body never supplies a URL, and a pushed commit's SHA is never fetched: the agent builds the branch head it reads itself.
 
 ### Logging
 
@@ -260,7 +268,7 @@ Tero targets authentication assurance level 2 (AAL2, section 2.2): every login u
 | 2.3.2 | 2 | Business limits enforced | Met | Throttle limits as documented | `TestLogin_v5_0_0_6_3_1_RepeatedFailuresFromOneIP`, `TestLogin_v5_0_0_6_3_1_DistributedGuessingHitsAccountLimit` |
 | 2.3.3 | 2 | Operations are transactional | Met | Account creation, link use and the first session commit together; `reset-login` is one transaction | — |
 | 2.3.4 | 2 | No double-booking | Met | The admin row has a fixed id, so racing setups can't create two accounts; attempts are counted in a write transaction | `TestSecondAccountCannotBeCreated`, `TestLogin_v5_0_0_6_3_1_ParallelFailuresCannotPassThrottle` |
-| 2.4.1 | 2 | Anti-automation | Met | Logins and setup codes are throttled, hashing is bounded, and every other call needs a session or a setup link | `TestRateLimitedLoginHasRetryAfter`, `TestHashingIsBoundedToTwoAtOnce` |
+| 2.4.1 | 2 | Anti-automation | Met | Logins and setup codes are throttled, hashing is bounded, every other call needs a session or a setup link, and the GitHub webhook endpoint stops asking `tero-keys` after 10 bad signatures a minute from one address | `TestRateLimitedLoginHasRetryAfter`, `TestHashingIsBoundedToTwoAtOnce`, `TestForgedWebhooksAreRefusedAndThrottled` |
 
 ### V3 Web Frontend Security
 
@@ -274,7 +282,7 @@ Tero targets authentication assurance level 2 (AAL2, section 2.2): every login u
 | 3.3.4 | 2 | `HttpOnly` for tokens | Met | Both cookies are `HttpOnly`; tokens never appear in a response body | `TestCookieAttributes` |
 | 3.4.1 | 1 | HSTS for a year, including subdomains at L2 | Met | `max-age=31536000; includeSubDomains` | `TestBuildCaddyConfig_v5_0_0_3_4_1_HSTSCoversSubdomainsForAYear` |
 | 3.4.2 | 1 | Fixed CORS origin | Met | No `Access-Control-Allow-Origin` is sent | — |
-| 3.4.3 | 2 | Content-Security-Policy | Met | `default-src 'self'`, no inline scripts or styles, `object-src 'none'`, `base-uri 'none'` | `TestBuildCaddyConfigSetsStrictCSP`, e2e `web app served under the strict CSP` |
+| 3.4.3 | 2 | Content-Security-Policy | Met | `default-src 'self'`, no inline scripts or styles, `object-src 'none'`, `base-uri 'none'`; `form-action` allows `https://github.com` only for posting the GitHub App's manifest | `TestBuildCaddyConfigSetsStrictCSP`, e2e `web app served under the strict CSP` |
 | 3.4.4 | 2 | `X-Content-Type-Options: nosniff` | Met | Set on every dashboard response | — |
 | 3.4.5 | 2 | Referrer policy | Met | `Referrer-Policy: no-referrer` | — |
 | 3.4.6 | 2 | CSP `frame-ancestors` | Met | `frame-ancestors 'none'` | `TestBuildCaddyConfigSetsStrictCSP` |
@@ -480,12 +488,12 @@ Tero isn't an OAuth client, resource server, authorization server or OpenID prov
 | ID | L | Requirement | Status | How | Test |
 |---|---|---|---|---|---|
 | 13.1.1 | 2 | Communication needs documented | Met | [Connections](#connections) | — |
-| 13.2.1 | 2 | Backend components authenticated | Met | The only backend component is `tero-keys`, on a Unix socket only `tero` and root can open. It identifies each caller by the uid the kernel records and the caller's exact systemd unit, never by anything the caller sends | `TestOnlyTheDashboardsExactCgroupCounts`, `TestCallersLimitedToTheirVerbs` |
-| 13.2.2 | 2 | Least privilege for components | Met | The service runs as `tero` with only `CAP_NET_BIND_SERVICE`; the database is mode 0600 | e2e `Service process identity`, `TestOpenCreatesPrivateDatabaseWithSchema` |
+| 13.2.1 | 2 | Backend components authenticated | Met | `tero-keys` listens on a Unix socket only `tero`, `tero-agent` and root can open. It identifies each caller by the uid the kernel records, and the dashboard also by its exact systemd unit, never by anything the caller sends. GitHub webhooks are authenticated by their HMAC-SHA256 signature, checked in `tero-keys` | `TestIdentifyAcrossUsers`, `TestOnlyTheDashboardsExactCgroupCounts`, `TestCallersLimitedToTheirVerbs`, `TestForgedWebhooksAreRefusedAndThrottled` |
+| 13.2.2 | 2 | Least privilege for components | Met | The service runs as `tero` with only `CAP_NET_BIND_SERVICE` and runs no container; containers and GitHub credentials belong to `tero-agent`, which listens on nothing; the shared database is mode 0660, group `tero-shared` | e2e `Service process identity`, e2e `tero can't run containers`, `TestOpenCreatesSharedDatabaseWithSchema` |
 | 13.2.3 | 2 | No default credentials | Met | None exist | — |
 | 13.2.4 | 2 | Outbound allowlist | Gap | The firewall filters inbound only | — |
 | 13.2.5 | 2 | Server allowlist for requests | Gap | As 13.2.4 | — |
-| 13.3.1 | 2 | Secrets management solution | Met | The `tero-keys` service holds the master key sealed by `systemd-creds` and keeps the login secrets encrypted; app secrets join it in slice 6. The TLS key stays in Caddy's storage, readable only by `tero` | `TestSecretSealedAtRest`, e2e `Stored form` |
+| 13.3.1 | 2 | Secrets management solution | Met | The `tero-keys` service holds the master key sealed by `systemd-creds` and keeps the login secrets and the GitHub App's secrets encrypted; app secrets join it in slice 6. The TLS key stays in Caddy's storage, readable only by `tero` | `TestSecretSealedAtRest`, e2e `Stored form` |
 | 13.3.2 | 2 | Least privilege for secrets | Met | Only `tero-keys` can read the master key and the login secrets; the dashboard can only ask yes-or-no questions, by verb, and is identified by its exact systemd unit. Only `tero` can read its database and Caddy storage | `TestCallersLimitedToTheirVerbs`, `TestOnlyTheDashboardsExactCgroupCounts`, `TestDatabaseHoldsNoCredentials` |
 | 13.4.1 | 1 | No source control metadata | Met | One binary with the built web app embedded | — |
 | 13.4.2 | 2 | Debug modes off | Met | Caddy's admin API is disabled; no debug endpoints | — |

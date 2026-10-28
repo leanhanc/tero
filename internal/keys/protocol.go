@@ -14,10 +14,10 @@ import (
 // The protocol is one request and one answer per connection, each a 4-byte
 // big-endian length followed by that many bytes of JSON.
 
-// maxMessage bounds a request or an answer. It is above the dashboard's
-// 64 KiB body limit, so anything the dashboard accepted fits with the
-// session and browser around it.
-const maxMessage = 128 << 10
+// maxMessage bounds a request or an answer. It fits a webhook body of
+// MaxWebhookBody, base64-encoded in JSON, and so anything else the dashboard
+// accepts.
+const maxMessage = 2 << 20
 
 // Verbs, and which caller may send each. No verb returns the master key, the
 // password hash, a stored TOTP secret or a token hash; only the three that
@@ -46,6 +46,15 @@ const (
 	VerbKeyRotate            = "key.rotate"
 	VerbEventAppend          = "events.append"
 	VerbEventList            = "events.list"
+
+	VerbGitHubConnectBegin   = "github.connect.begin"
+	VerbGitHubConnectApprove = "github.connect.approve"
+	VerbGitHubConnect        = "github.connect"
+	VerbGitHubDisconnect     = "github.disconnect"
+	VerbGitHubForget         = "github.forget"
+	VerbGitHubStatus         = "github.status"
+	VerbGitHubJWT            = "github.jwt"
+	VerbGitHubWebhookVerify  = "github.webhook.verify"
 )
 
 var verbs = map[Caller]map[string]bool{
@@ -57,10 +66,18 @@ var verbs = map[Caller]map[string]bool{
 		VerbPasskeyRegisterBegin: true, VerbPasskeyRegister: true, VerbPasskeyList: true, VerbPasskeyRename: true,
 		VerbPasskeyRemove: true,
 		VerbEventAppend:   true, VerbEventList: true,
+		VerbGitHubConnectBegin: true, VerbGitHubConnectApprove: true, VerbGitHubDisconnect: true,
+		VerbGitHubStatus: true, VerbGitHubWebhookVerify: true,
+	},
+	// Only the agent talks to GitHub with the App's credentials, so only it
+	// stores the App and gets App tokens.
+	CallerAgent: {
+		VerbGitHubConnect: true, VerbGitHubStatus: true, VerbGitHubJWT: true,
 	},
 	CallerRoot: {
 		VerbStatus: true, VerbSetupIssue: true, VerbLoginReset: true, VerbKeyRotate: true,
 		VerbEventAppend: true, VerbEventList: true,
+		VerbGitHubForget: true, VerbGitHubStatus: true,
 	},
 }
 
@@ -94,6 +111,11 @@ var errorCodes = map[string]error{
 	"invalid_name":    ErrInvalidName,
 	"invalid_passkey": ErrInvalidPasskey,
 	"not_found":       ErrNotFound,
+
+	"github_connected":     ErrGitHubConnected,
+	"github_not_connected": ErrGitHubNotConnected,
+	"invalid_connection":   ErrInvalidConnection,
+	"invalid_app_key":      ErrInvalidAppKey,
 }
 
 const rateLimitedCode = "rate_limited"
@@ -233,6 +255,21 @@ type (
 		Session string `json:"session"`
 		Limit   int    `json:"limit"`
 	}
+	gitHubApproveArgs struct {
+		Session string `json:"session"`
+		State   string `json:"state"`
+	}
+	webhookVerifyArgs struct {
+		Body      []byte `json:"body"`
+		Signature string `json:"signature"`
+		IP        string `json:"ip"`
+	}
+	gitHubStateResult struct {
+		State string `json:"state"`
+	}
+	webhookVerifyResult struct {
+		IsValid bool `json:"isValid"`
+	}
 	setupIssueResult struct {
 		Token string `json:"token"`
 	}
@@ -360,6 +397,34 @@ func (s *Service) dispatch(ctx context.Context, caller Caller, req request) (any
 	case VerbEventList:
 		return withArgs(req, func(args eventListArgs) (any, error) {
 			return s.listEventsFor(ctx, caller, args)
+		})
+	case VerbGitHubConnectBegin:
+		return withArgs(req, func(args sessionArgs) (any, error) {
+			state, err := s.BeginGitHubConnection(ctx, args.Session)
+			return gitHubStateResult{State: state}, err
+		})
+	case VerbGitHubConnectApprove:
+		return withArgs(req, func(args gitHubApproveArgs) (any, error) {
+			return struct{}{}, s.ApproveGitHubConnection(ctx, args.Session, args.State)
+		})
+	case VerbGitHubConnect:
+		return withArgs(req, func(args GitHubAppSecrets) (any, error) {
+			return struct{}{}, s.ConnectGitHub(ctx, args)
+		})
+	case VerbGitHubDisconnect:
+		return withArgs(req, func(args sessionArgs) (any, error) {
+			return struct{}{}, s.DisconnectGitHub(ctx, args.Session)
+		})
+	case VerbGitHubForget:
+		return struct{}{}, s.ForgetGitHub(ctx)
+	case VerbGitHubStatus:
+		return s.GitHubStatus(ctx)
+	case VerbGitHubJWT:
+		return s.SignAppToken(ctx)
+	case VerbGitHubWebhookVerify:
+		return withArgs(req, func(args webhookVerifyArgs) (any, error) {
+			isValid, err := s.VerifyWebhook(ctx, args.Body, args.Signature, args.IP)
+			return webhookVerifyResult{IsValid: isValid}, err
 		})
 	default:
 		return nil, ErrRefused

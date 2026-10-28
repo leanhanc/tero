@@ -29,7 +29,7 @@ func testNoPlantedSession(t *testing.T) {
 		t.Errorf("made-up session = %d", response.status)
 	}
 
-	if got := strings.TrimSpace(run(t, "sudo grep -a -c 'CREATE TABLE sessions' /var/lib/tero/tero.db").output); got != "0" {
+	if got := strings.TrimSpace(run(t, "sudo grep -a -c 'CREATE TABLE sessions' /var/lib/tero-shared/tero.db").output); got != "0" {
 		t.Errorf("tero's database has a sessions table (%s matches)", got)
 	}
 	for _, command := range []string{asTero("cat /var/lib/tero-keys/keys.db"), inDashboardCgroup("cat /var/lib/tero-keys/keys.db")} {

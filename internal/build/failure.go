@@ -1,4 +1,4 @@
-// Package build turns an app's source into an image in tero's Podman store:
+// Package build turns an app's source into an image in tero-agent's Podman store:
 // Railpack plans the build, a throwaway rootless BuildKit container runs it,
 // and the result is loaded with `podman load`. No registry is involved.
 package build

@@ -20,7 +20,9 @@ git -C "$repo_root" ls-files -co --exclude-standard -z |
 
 git -C "$work/tree" init -q -b main
 git -C "$work/tree" add -A
-git -C "$work/tree" -c user.name=tero-e2e -c user.email=e2e@tero.test commit -qm "e2e snapshot"
+# No automatic gc: it packs objects in the background while the clone below
+# copies them, and the clone fails.
+git -C "$work/tree" -c user.name=tero-e2e -c user.email=e2e@tero.test -c gc.auto=0 -c maintenance.auto=false commit -qm "e2e snapshot"
 git -C "$work/tree" branch e2e-redeploy
 git clone -q --bare "$work/tree" "$work/tero.git"
 COPYFILE_DISABLE=1 tar -C "$work" -czf "$work/tero-git.tgz" tero.git

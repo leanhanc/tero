@@ -52,7 +52,7 @@ install_tero() {
 # three restart.
 restart_tero() {
 	limactl shell --workdir / "$instance" sudo systemctl restart tero-keys.service tero
-	limactl shell --workdir / "$instance" sudo systemctl --user --machine=tero@ restart tero-agent.service
+	limactl shell --workdir / "$instance" sudo systemctl --user --machine=tero-agent@ restart tero-agent.service
 }
 
 # A VM whose login was never set up would leave you at a login page with no

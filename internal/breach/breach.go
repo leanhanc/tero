@@ -1,12 +1,12 @@
 // Package breach is `sudo tero assume-breach`: the one command for a server
-// that may be compromised. It stops the dashboard and every other process
-// running as tero, so nothing an attacker left in memory survives, moves
-// aside what something running as tero could have planted to run later,
-// replaces everything the dashboard could have read or used (sessions,
-// trusted browsers, certificates and their keys, the login and passkeys),
-// rotates the
-// master key, and tells the admin what to do outside the server. Apps are
-// down until tero's user manager and the dashboard start again.
+// that may be compromised. It stops the dashboard, the agent and every other
+// process running as tero or tero-agent, so nothing an attacker left in
+// memory survives, moves aside what either user could have planted to run
+// later, replaces everything the dashboard could have read or used
+// (sessions, trusted browsers, certificates and their keys, the login and
+// passkeys), rotates the master key, and tells the admin what to do outside
+// the server. Apps are down until tero-agent's user manager and the
+// dashboard start again.
 package breach
 
 import (
@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/leanhanc/tero/internal/auth"
+	"github.com/leanhanc/tero/internal/build"
+	"github.com/leanhanc/tero/internal/githubapp"
 	"github.com/leanhanc/tero/internal/keyfiles"
 	"github.com/leanhanc/tero/internal/keys"
 	"github.com/leanhanc/tero/internal/sysexec"
@@ -33,23 +35,25 @@ const (
 	// caddyStorage holds the dashboard's and apps' certificates, their
 	// private keys and the ACME account key.
 	caddyStorage = "/var/lib/tero/caddy"
-	// teroHome is tero's home directory. Its parent belongs to root, so tero
-	// can't replace it with a link.
-	teroHome    = "/var/lib/tero"
-	teroCrontab = "/var/spool/cron/crontabs/tero"
+	// teroHome and agentHome are the users' home directories. Their parent
+	// belongs to root, so neither user can replace its home with a link.
+	teroHome   = "/var/lib/tero"
+	agentHome  = "/var/lib/tero-agent"
+	crontabDir = "/var/spool/cron/crontabs"
 	// QuarantineDir keeps what was moved out of those places, readable only
 	// by root.
 	QuarantineDir = "/var/lib/tero-breach"
 )
 
-// plantDirs are the directories under teroHome where something running as
-// tero could put units that its user manager or Podman would start later.
-// Tero never puts anything there: the agent's unit is in /etc/systemd/user.
+// plantDirs are the directories under a user's home where something running
+// as that user could put what its user manager or Podman would run or load
+// later: units, environment.d, user.conf, Podman's containers.conf (runtime,
+// conmon, hooks), registries and policies. Tero never puts anything there:
+// the agent's unit is in /etc/systemd/user.
 var plantDirs = []string{
-	".config/systemd/user",
-	".config/systemd/user.control",
+	".config",
 	".local/share/systemd/user",
-	".config/containers/systemd",
+	".local/share/containers/systemd",
 }
 
 // ErrNotConfirmed means the admin didn't type yes.
@@ -67,19 +71,35 @@ type Options struct {
 	Root string
 	Run  sysexec.Runner
 	Keys keyfiles.Files
-	// TeroUID is the tero user's uid, whose user manager and processes are
-	// stopped.
-	TeroUID int
+	// TeroUID and AgentUID are the uids of tero and tero-agent, whose
+	// sessions, user managers and processes are stopped.
+	TeroUID  int
+	AgentUID int
+}
+
+// serviceUser is one of the users the reset clears.
+type serviceUser struct {
+	name string
+	uid  int
+	home string
+}
+
+func (o Options) users() []serviceUser {
+	return []serviceUser{
+		{"tero", o.TeroUID, teroHome},
+		{"tero-agent", o.AgentUID, agentHome},
+	}
 }
 
 const plan = `This resets everything a compromised dashboard could have read or planted:
 
-  - stops the dashboard, the agent, the apps and every other process running as tero;
-    apps are down until they start again, usually a few minutes
-  - moves aside units and cron jobs something running as tero added
+  - stops the dashboard, the agent, the apps and every other process running as
+    tero or tero-agent; apps are down until they start again, usually a few minutes
+  - moves aside units and cron jobs something running as either user added
   - ends every dashboard session and forgets every trusted browser
   - deletes the dashboard's and apps' certificates and keys, so new ones are issued
   - replaces the master key
+  - deletes the GitHub connection; you then delete the App on GitHub and connect again
   - resets the dashboard password, TOTP and passkeys, and prints a new setup link
 
 Type yes to continue: `
@@ -98,47 +118,55 @@ func Run(ctx context.Context, opts Options) (err error) {
 	if _, err := opts.Run.Run(ctx, "systemctl", "stop", dashboardService); err != nil {
 		return err
 	}
-	// Deferred starts run in reverse: the user manager starts before the
-	// dashboard, so the agent is back when the dashboard asks for deploys.
+	// Deferred starts run in reverse: the agent's user manager starts before
+	// the dashboard, so the agent is back when the dashboard queues deploys.
+	// The build cache is cleared in between, once Podman can run again.
 	defer start(ctx, opts, dashboardService, &err)
+	defer clearBuildCache(ctx, opts, &err)
 
-	// tero's slice holds the user manager (the agent, builds and apps) and
-	// every session, cron jobs included; /run/user/<uid> goes with
-	// user-runtime-dir. Starting the user manager brings both back.
-	uid := strconv.Itoa(opts.TeroUID)
-	if _, err := opts.Run.Run(ctx, "systemctl", "stop", "user-"+uid+".slice", "user-runtime-dir@"+uid+".service"); err != nil {
-		return err
+	// Each user's slice holds every session of that user, cron jobs
+	// included, and tero-agent's also holds its user manager (the agent,
+	// builds and apps); /run/user/<uid> goes with user-runtime-dir.
+	// Starting tero-agent's user manager brings both back for it. tero has
+	// no user manager to start.
+	for _, user := range opts.users() {
+		uid := strconv.Itoa(user.uid)
+		if _, err := opts.Run.Run(ctx, "systemctl", "stop", "user-"+uid+".slice", "user-runtime-dir@"+uid+".service"); err != nil {
+			return err
+		}
 	}
-	defer start(ctx, opts, "user@"+uid+".service", &err)
+	defer start(ctx, opts, "user@"+strconv.Itoa(opts.AgentUID)+".service", &err)
 
 	aside, err := quarantineDir(opts.Root)
 	if err != nil {
 		return err
 	}
-	// The crontab goes first, so cron can't start a job after the kill.
-	moved, err := quarantine(opts.Root, aside, []string{teroCrontab})
+	// The crontabs go first, so cron can't start a job after the kill.
+	moved, err := quarantine(opts.Root, aside, crontabs(opts.users()))
 	if err != nil {
-		return fmt.Errorf("move aside tero's crontab: %w", err)
+		return fmt.Errorf("move aside the crontabs: %w", err)
 	}
-	// Anything left running as tero (a process started outside its slice)
-	// could keep acting as the dashboard once the reset is done. With none
-	// left, nothing can change tero's files while they are checked and
-	// moved.
-	if err := stopTeroProcesses(ctx, opts); err != nil {
-		return err
+	// Anything left running as either user (a process started outside its
+	// slice) could keep acting as the dashboard or the agent once the reset
+	// is done. With none left, nothing can change their files while they are
+	// checked and moved.
+	for _, user := range opts.users() {
+		if err := stopProcesses(ctx, opts, user); err != nil {
+			return err
+		}
 	}
-	units, err := quarantine(opts.Root, aside, plantPaths(opts.Root))
+	units, err := quarantine(opts.Root, aside, plantPaths(opts.Root, opts.users()))
 	if err != nil {
 		return fmt.Errorf("move aside planted units: %w", err)
 	}
 	moved = append(moved, units...)
 
-	link, err := reset(ctx, opts)
+	link, gitHubApp, err := reset(ctx, opts)
 	if err != nil {
 		return err
 	}
 
-	report(ctx, opts, aside, moved, link)
+	report(ctx, opts, aside, moved, link, gitHubApp)
 	return nil
 }
 
@@ -147,11 +175,34 @@ func start(ctx context.Context, opts Options, unit string, err *error) {
 	*err = errors.Join(*err, startErr)
 }
 
-// stopTeroProcesses kills every process left running as tero and checks
-// none is left. pgrep exits 1 when nothing matches; any other failure means
-// the check didn't happen.
-func stopTeroProcesses(ctx context.Context, opts Options) error {
-	uid := strconv.Itoa(opts.TeroUID)
+// clearBuildCache removes BuildKit's cache volume and image, which
+// something running as tero-agent could have poisoned for later builds.
+// Apps' own images stay, so they keep serving; the report says to redeploy.
+func clearBuildCache(ctx context.Context, opts Options, err *error) {
+	asAgent := []string{"--machine=tero-agent@.host", "--user", "--wait", "--quiet", "podman"}
+	for _, args := range [][]string{
+		{"volume", "rm", "--force", build.CacheVolume},
+		{"rmi", "--force", build.BuildKitImage},
+	} {
+		_, runErr := opts.Run.Run(context.WithoutCancel(ctx), "systemd-run", append(asAgent, args...)...)
+		*err = errors.Join(*err, runErr)
+	}
+}
+
+func crontabs(users []serviceUser) []string {
+	var paths []string
+	for _, user := range users {
+		paths = append(paths, filepath.Join(crontabDir, user.name))
+	}
+
+	return paths
+}
+
+// stopProcesses kills every process left running as user and checks none is
+// left. pgrep exits 1 when nothing matches; any other failure means the
+// check didn't happen.
+func stopProcesses(ctx context.Context, opts Options, user serviceUser) error {
+	uid := strconv.Itoa(user.uid)
 	for range 3 {
 		opts.Run.Run(ctx, "pkill", "--signal", "KILL", "--uid", uid)
 
@@ -161,7 +212,7 @@ func stopTeroProcesses(ctx context.Context, opts Options) error {
 			return nil
 		}
 		if err != nil {
-			return fmt.Errorf("check for processes running as tero: %w", err)
+			return fmt.Errorf("check for processes running as %s: %w", user.name, err)
 		}
 
 		select {
@@ -171,40 +222,59 @@ func stopTeroProcesses(ctx context.Context, opts Options) error {
 		}
 	}
 
-	return errors.New("processes running as tero didn't stop; see `ps -u tero`")
+	return fmt.Errorf("processes running as %s didn't stop; see `ps -u %s`", user.name, user.name)
 }
 
-func reset(ctx context.Context, opts Options) (string, error) {
+// reset replaces everything the dashboard and the agent could have read or
+// used, and returns the new setup link and the GitHub App it disconnected,
+// if any.
+func reset(ctx context.Context, opts Options) (string, keys.GitHubApp, error) {
 	if err := os.RemoveAll(filepath.Join(opts.Root, caddyStorage)); err != nil {
-		return "", fmt.Errorf("delete the certificates: %w", err)
+		return "", keys.GitHubApp{}, fmt.Errorf("delete the certificates: %w", err)
 	}
 
 	client := opts.Keys.Keys
 	if err := client.ResetLogin(ctx); err != nil {
-		return "", fmt.Errorf("reset the login: %w", err)
+		return "", keys.GitHubApp{}, fmt.Errorf("reset the login: %w", err)
 	}
+
+	// The agent could have read the App's private key while it connected,
+	// so the App itself has to go, not just its copy here.
+	gitHubApp, err := client.GitHubStatus(ctx)
+	if err != nil {
+		return "", keys.GitHubApp{}, fmt.Errorf("read the GitHub connection: %w", err)
+	}
+	if err := client.ForgetGitHub(ctx); err != nil {
+		return "", keys.GitHubApp{}, fmt.Errorf("delete the GitHub connection: %w", err)
+	}
+
 	if _, err := opts.Keys.Rotate(ctx); err != nil {
-		return "", fmt.Errorf("replace the master key: %w", err)
+		return "", keys.GitHubApp{}, fmt.Errorf("replace the master key: %w", err)
 	}
 
 	token, err := client.IssueSetupLink(ctx)
 	if err != nil {
-		return "", fmt.Errorf("issue a setup link: %w", err)
+		return "", keys.GitHubApp{}, fmt.Errorf("issue a setup link: %w", err)
 	}
 	if err := client.AppendEvent(ctx, keys.EventBreachReset, ""); err != nil {
-		return "", err
+		return "", keys.GitHubApp{}, err
 	}
 
-	return auth.SetupLink(opts.Domain, token), nil
+	return auth.SetupLink(opts.Domain, token), gitHubApp, nil
 }
 
-func report(ctx context.Context, opts Options, aside string, moved []string, link string) {
+func report(ctx context.Context, opts Options, aside string, moved []string, link string, gitHubApp keys.GitHubApp) {
 	out := opts.Out
 	fmt.Fprintln(out, "\nThe server was reset. Outside the server:")
 	fmt.Fprintln(out, "  - Install the latest Tero if this may have come from a bug in Tero")
 	fmt.Fprintln(out, "  - Change the old dashboard password anywhere else you used it")
 	fmt.Fprintln(out, "  - Remove the old Tero entry from your authenticator app, and the old Tero passkeys from your devices")
+	if gitHubApp.IsConnected {
+		fmt.Fprintf(out, "  - Delete the GitHub App %s at %s, then connect GitHub again from Settings\n",
+			gitHubApp.Slug, githubapp.SettingsPage(gitHubApp))
+	}
 	fmt.Fprintln(out, "  - Check the SSH keys in ~/.ssh/authorized_keys of every user on this server")
+	fmt.Fprintln(out, "  - Redeploy every app, so its image is built again from source")
 
 	for _, path := range moved {
 		fmt.Fprintf(out, "  - Check %s, moved to %s: Tero never creates it, so something else put it there\n",
@@ -229,15 +299,25 @@ func quarantineDir(root string) (string, error) {
 	return os.MkdirTemp(filepath.Join(root, QuarantineDir), time.Now().UTC().Format("20060102T150405Z")+"-")
 }
 
-// plantPaths returns, for each plant directory that holds something, the
-// path to move: the directory itself, or the first part of its path that
-// isn't a real directory. A link is moved as a link, so a planted link to
-// /root/.ssh moves the link and never what it points to. It runs once
-// nothing runs as tero, so nothing changes between the check and the move.
-func plantPaths(root string) []string {
+// plantPaths returns, for each plant directory in each user's home that
+// holds something, the path to move: the directory itself, or the first part
+// of its path that isn't a real directory. A link is moved as a link, so a
+// planted link to /root/.ssh moves the link and never what it points to. It
+// runs once nothing runs as either user, so nothing changes between the
+// check and the move.
+func plantPaths(root string, users []serviceUser) []string {
+	var found []string
+	for _, user := range users {
+		found = append(found, plantPathsIn(root, user.home)...)
+	}
+
+	return found
+}
+
+func plantPathsIn(root, home string) []string {
 	var found []string
 	for _, dir := range plantDirs {
-		path := teroHome
+		path := home
 		isReal := true
 		for _, part := range strings.Split(dir, "/") {
 			path = filepath.Join(path, part)

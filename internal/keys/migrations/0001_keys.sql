@@ -67,6 +67,31 @@ CREATE TABLE setup_links (
 	pending_totp_secret      BLOB
 );
 
+-- The GitHub App this server created, at most one. The private key and
+-- webhook secret are sealed with the master key version in key_version; the
+-- rest isn't secret.
+CREATE TABLE github_app (
+	id             INTEGER PRIMARY KEY CHECK (id = 1),
+	app_id         INTEGER NOT NULL,
+	slug           TEXT    NOT NULL,
+	owner          TEXT    NOT NULL,
+	is_org_owned   INTEGER NOT NULL CHECK (is_org_owned IN (0, 1)),
+	key_version    INTEGER NOT NULL,
+	private_key    BLOB    NOT NULL,
+	webhook_secret BLOB    NOT NULL,
+	connected_at   INTEGER NOT NULL
+);
+
+-- Connections the admin started on a confirmed session. Only the state's
+-- hash is stored. The admin approves it when GitHub sends them back, and the
+-- agent then uses it once to store the App.
+CREATE TABLE github_connections (
+	state_hash  TEXT    PRIMARY KEY,
+	session_id  TEXT    NOT NULL,
+	expires_at  INTEGER NOT NULL,
+	approved_at INTEGER NOT NULL DEFAULT 0
+);
+
 -- Logins with the right password and a wrong code, for the code guessing
 -- limit.
 CREATE TABLE code_failures (

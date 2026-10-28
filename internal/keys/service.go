@@ -403,6 +403,7 @@ func (s *Service) versionsInUse(ctx context.Context) ([]int, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT totp_key_version FROM admin
 		UNION SELECT pending_totp_key_version FROM setup_links WHERE pending_totp_key_version IS NOT NULL
+		UNION SELECT key_version FROM github_app
 		ORDER BY 1`)
 	if err != nil {
 		return nil, err
@@ -436,6 +437,9 @@ func (s *Service) RotateKey(ctx context.Context) ([]int, error) {
 		return nil, err
 	}
 	if err := s.resealLinks(ctx, tx); err != nil {
+		return nil, err
+	}
+	if err := s.resealGitHubApp(ctx, tx); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -537,12 +541,14 @@ func (s *Service) Prune(ctx context.Context) error {
 		{"DELETE FROM login_throttles WHERE last_failure < ? AND locked_until <= ?",
 			[]any{now.Add(-failureMemory).Unix(), now.Unix()}},
 		{"DELETE FROM code_failures WHERE at <= ?", []any{now.Add(-codeFailureWindow).Unix()}},
+		{"DELETE FROM github_connections WHERE expires_at <= ?", []any{now.Unix()}},
 		{"DELETE FROM security_events WHERE at < ?", []any{now.Add(-eventRetention).Unix()}},
 		// A flood of one kind of event must not push out the record of a
 		// reset, a rotation or a successful login.
 		{`DELETE FROM security_events WHERE id <= (SELECT max(id) FROM security_events) - ?
 			AND type NOT IN ('login_succeeded', 'passkey_login_succeeded', 'setup_completed', 'login_reset', 'key_rotated',
-				'breach_reset', 'totp_locked', 'password_changed', 'passkey_added', 'passkey_removed')`,
+				'breach_reset', 'totp_locked', 'password_changed', 'passkey_added', 'passkey_removed',
+				'github_connected', 'github_disconnected')`,
 			[]any{maxEvents}},
 	}
 

@@ -95,14 +95,41 @@ func TestLookupRefusesOtherHosts_v5_0_0_1_3_6(t *testing.T) {
 }
 
 // deployments: Redeploy while deploying
-func TestRedeployRefusedWhileDeploying(t *testing.T) {
+func TestRedeployQueuesBehindARunningDeploy(t *testing.T) {
 	d := newTestDashboard(t)
 	session := d.setUp(t)
 	d.insertApp(t, "api", "building")
 
-	response := d.post("/api/apps/api/deploys", map[string]string{}, session)
-	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "already in progress") {
-		t.Fatalf("redeploy = %d %s, want 409", response.Code, response.Body)
+	for range 2 {
+		response := d.post("/api/apps/api/deploys", map[string]string{}, session)
+		if response.Code != http.StatusAccepted {
+			t.Fatalf("redeploy = %d %s, want 202", response.Code, response.Body)
+		}
+	}
+
+	var queued int
+	var trigger string
+	d.db.QueryRow("SELECT count(*), max(trigger_type) FROM deploys WHERE state = 'queued'").Scan(&queued, &trigger)
+	if queued != 1 || trigger != "manual" {
+		t.Errorf("queued deploys = %d (%s), want one manual deploy behind the running one", queued, trigger)
+	}
+}
+
+// deployments: Deploy on push turned off
+func TestSettingsChangeOnlyWhatTheyName(t *testing.T) {
+	d := newTestDashboard(t)
+	session := d.setUp(t)
+	d.insertApp(t, "api", "live")
+
+	response := d.post("/api/apps/api/settings", map[string]bool{"deployOnPush": false}, session)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("settings = %d %s", response.Code, response.Body)
+	}
+
+	var runTogether, deployOnPush bool
+	d.db.QueryRow("SELECT run_together, deploy_on_push FROM apps WHERE name = 'api'").Scan(&runTogether, &deployOnPush)
+	if !runTogether || deployOnPush {
+		t.Errorf("run_together = %v, deploy_on_push = %v; want true, false", runTogether, deployOnPush)
 	}
 }
 

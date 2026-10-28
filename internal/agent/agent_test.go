@@ -21,7 +21,7 @@ func (failingPipeline) Run(context.Context, deploys.Deploy) error {
 func TestRunNextDeployFailsDeployWhenPipelineErrors(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
-	deployID, err := deploys.Enqueue(ctx, db, 1, time.Now())
+	deployID, err := deploys.Enqueue(ctx, db, 1, deploys.Trigger{Type: deploys.TriggerManual}, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

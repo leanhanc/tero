@@ -16,6 +16,7 @@ import (
 	"github.com/leanhanc/tero/internal/config"
 	"github.com/leanhanc/tero/internal/dashboard"
 	"github.com/leanhanc/tero/internal/deploylog"
+	"github.com/leanhanc/tero/internal/githubapp"
 	"github.com/leanhanc/tero/internal/hostfs"
 	"github.com/leanhanc/tero/internal/journal"
 	"github.com/leanhanc/tero/internal/keys"
@@ -28,9 +29,10 @@ import (
 const stateDir = "/var/lib/tero"
 
 // contentSecurityPolicy allows only the dashboard's own files: no inline
-// scripts or styles and no third-party origins.
+// scripts or styles and no third-party origins. The one exception is
+// form-action: connecting GitHub posts the App's manifest to github.com.
 const contentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
-	"connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+	"connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self' https://github.com; frame-ancestors 'none'"
 
 // Run serves until ctx is cancelled.
 func Run(ctx context.Context) error {
@@ -45,15 +47,21 @@ func Run(ctx context.Context) error {
 	}
 	defer db.Close()
 
+	keyService := keys.NewClient(keys.SocketPath)
 	service := auth.New(auth.Options{
-		Keys:      keys.NewClient(keys.SocketPath),
+		Keys:      keyService,
 		Domain:    cfg.DashboardDomain,
 		PublicIP:  cfg.PublicIP,
 		Passwords: password.Policy{Breaches: password.NewPwnedPasswords()},
 		Journal:   journal.Send,
 	})
 	appService := apps.NewService(db, cfg.PublicIP, time.Now)
-	dashboard.Activate(dashboard.NewHandler(service, appService, cfg.DashboardDomain, deploylog.Dir))
+	gitHub := dashboard.GitHub{
+		Connection: githubapp.Connection{DB: db, Keys: keyService, Domain: cfg.DashboardDomain, Now: time.Now},
+		Webhooks:   githubapp.Webhooks{DB: db, Events: keyService, Now: time.Now},
+		Verifier:   keyService,
+	}
+	dashboard.Activate(dashboard.NewHandler(service, appService, gitHub, cfg.DashboardDomain, deploylog.Dir))
 
 	settings := caddySettings{Domain: cfg.DashboardDomain, PublicIP: cfg.PublicIP, Issuer: acmeIssuer()}
 	routes, err := loadAppRoutes(ctx, db, settings.PublicIP)

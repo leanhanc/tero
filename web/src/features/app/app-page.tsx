@@ -8,6 +8,7 @@ import type { Messages } from '../../locales/en';
 import { AppSummary } from './components/app-summary';
 import { BuildLog } from './components/build-log';
 import { DeployList } from './components/deploy-list';
+import { DeployOnPushSetting } from './components/deploy-on-push-setting';
 import { DisplayNameSetting } from './components/display-name-setting';
 import { RedeployButton } from './components/redeploy-button';
 import { RunTogetherSetting } from './components/run-together-setting';
@@ -58,15 +59,24 @@ function AppPageContent({ loaded, selectedDeployID, onSelectDeploy, onChange }: 
 	}
 
 	const { app } = loaded;
-	const latestDeploy = app.deploys[0];
-	const hasDeployInProgress = latestDeploy !== undefined && isInProgress(latestDeploy.state);
-	const shownDeploy = app.deploys.find((deploy) => deploy.id === selectedDeployID) ?? latestDeploy;
+	const hasDeployQueued = app.deploys.some((deploy) => deploy.state === 'queued');
+	const hasDeployRunning = app.deploys.some((deploy) => deploy.state === 'building' || deploy.state === 'starting');
+	// A queued deploy has no log yet, so the page opens on the newest one that
+	// has started.
+	const latestStartedDeploy = app.deploys.find((deploy) => deploy.state !== 'queued') ?? app.deploys[0];
+	const shownDeploy = app.deploys.find((deploy) => deploy.id === selectedDeployID) ?? latestStartedDeploy;
 
 	return (
 		<>
 			<AppSummary app={app} />
-			<RedeployButton appName={app.name} hasDeployInProgress={hasDeployInProgress} onRedeploy={onChange} />
+			<RedeployButton
+				appName={app.name}
+				hasDeployRunning={hasDeployRunning}
+				hasDeployQueued={hasDeployQueued}
+				onRedeploy={onChange}
+			/>
 			<DisplayNameSetting key={app.displayName} appName={app.name} displayName={app.displayName} onChange={onChange} />
+			<DeployOnPushSetting appName={app.name} deployOnPush={app.deployOnPush} onChange={onChange} />
 			<RunTogetherSetting appName={app.name} runTogether={app.runTogether} onChange={onChange} />
 			<DeployList deploys={app.deploys} shownDeployID={shownDeploy?.id} onSelect={onSelectDeploy} />
 			{shownDeploy && <BuildLog key={shownDeploy.id} deploy={shownDeploy} />}
@@ -92,8 +102,8 @@ function useApp(name: string, errorMessages: Messages['errors']): [LoadedApp, ()
 
 	const reload = useCallback(() => setReloadCount((count) => count + 1), []);
 
-	const latestState = loaded !== null && 'app' in loaded ? (loaded.app.deploys[0]?.state ?? '') : '';
-	const shouldRefresh = isInProgress(latestState);
+	const deploys = loaded !== null && 'app' in loaded ? loaded.app.deploys : [];
+	const shouldRefresh = deploys.some((deploy) => isInProgress(deploy.state));
 	useEffect(() => {
 		if (!shouldRefresh) {
 			return;

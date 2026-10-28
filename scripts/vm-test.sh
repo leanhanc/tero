@@ -20,6 +20,7 @@ cd "$repo_root"
 # The VMs run on the host's architecture.
 arch="$(go env GOHOSTARCH)"
 make build-e2e E2E_ARCH="$arch"
+GOOS=linux GOARCH="$arch" CGO_ENABLED=0 go build -o "bin/fake-github-linux-$arch" ./e2e/fakegithub
 
 # go install puts binaries for another platform in a linux_<arch> subdirectory.
 pebble_bin="$(go env GOPATH)/bin"
@@ -52,6 +53,7 @@ for release in "${releases[@]}"; do
 
 	limactl copy bin/tero-e2e-linux-$arch "$pebble_bin/pebble" "$pebble_bin/pebble-challtestsrv" \
 		scripts/vm-test-ca.sh scripts/vm-test-release.sh install.sh "$instance:/tmp/"
+	limactl copy "bin/fake-github-linux-$arch" "$instance:/tmp/fake-github"
 	limactl shell --workdir / "$instance" sudo bash /tmp/vm-test-ca.sh
 	limactl shell --workdir / "$instance" sudo bash /tmp/vm-test-release.sh "$arch"
 	scripts/vm-test-repo.sh "$instance"

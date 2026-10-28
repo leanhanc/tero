@@ -3,6 +3,10 @@ package breach
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"os"
 	"path/filepath"
@@ -62,7 +66,7 @@ func (s *fakeServer) Run(_ context.Context, name string, args ...string) (string
 		if !s.hasTPM {
 			return "", errors.New("no TPM")
 		}
-	case "pgrep --uid 999":
+	case "pgrep --uid 999", "pgrep --uid 998":
 		return "", noMatch{}
 	}
 
@@ -114,13 +118,14 @@ func (s *fakeServer) files() keyfiles.Files {
 
 func (s *fakeServer) options(out *bytes.Buffer, answer string) Options {
 	return Options{
-		Domain:  "dash.example.com",
-		In:      strings.NewReader(answer),
-		Out:     out,
-		Root:    s.root,
-		Run:     s,
-		Keys:    s.files(),
-		TeroUID: 999,
+		Domain:   "dash.example.com",
+		In:       strings.NewReader(answer),
+		Out:      out,
+		Root:     s.root,
+		Run:      s,
+		Keys:     s.files(),
+		TeroUID:  999,
+		AgentUID: 998,
 	}
 }
 
@@ -163,16 +168,26 @@ func TestAssumeBreachResetsEverything(t *testing.T) {
 	}
 
 	stopAt := slices.Index(server.commands, "systemctl stop tero.service")
-	stopUserAt := slices.Index(server.commands, "systemctl stop user-999.slice user-runtime-dir@999.service")
-	killAt := slices.Index(server.commands, "pkill --signal KILL --uid 999")
+	stopTeroAt := slices.Index(server.commands, "systemctl stop user-999.slice user-runtime-dir@999.service")
+	stopAgentAt := slices.Index(server.commands, "systemctl stop user-998.slice user-runtime-dir@998.service")
+	killTeroAt := slices.Index(server.commands, "pkill --signal KILL --uid 999")
+	killAgentAt := slices.Index(server.commands, "pkill --signal KILL --uid 998")
 	// The rotation restarts the key service after the login is reset.
 	clearAt := slices.Index(server.commands, "systemctl restart tero-keys.service")
-	startUserAt := slices.Index(server.commands, "systemctl start user@999.service")
+	startAgentAt := slices.Index(server.commands, "systemctl start user@998.service")
 	startAt := slices.Index(server.commands, "systemctl start tero.service")
-	isInOrder := stopAt >= 0 && stopUserAt > stopAt && killAt > stopUserAt && clearAt > killAt &&
-		startUserAt > clearAt && startAt > startUserAt
+	clearCacheAt := slices.IndexFunc(server.commands, func(command string) bool {
+		return strings.HasPrefix(command, "systemd-run --machine=tero-agent@.host --user --wait --quiet podman volume rm")
+	})
+	isInOrder := clearCacheAt > slices.Index(server.commands, "systemctl start user@998.service") &&
+		stopAt >= 0 && stopTeroAt > stopAt && stopAgentAt > stopAt &&
+		killTeroAt > stopAgentAt && killAgentAt > stopAgentAt &&
+		clearAt > killTeroAt && clearAt > killAgentAt && startAgentAt > clearAt && startAt > startAgentAt
 	if !isInOrder || !server.dashboardUp {
 		t.Errorf("commands in the wrong order: %v", server.commands)
+	}
+	if slices.Contains(server.commands, "systemctl start user@999.service") {
+		t.Error("tero's user manager was started; tero has none")
 	}
 
 	status, err := server.client.Status(ctx)
@@ -239,7 +254,12 @@ func TestAssumeBreachWithYesDoesntAsk(t *testing.T) {
 	}
 }
 
-const userUnits = teroHome + "/.config/systemd/user"
+const (
+	userUnits      = teroHome + "/.config/systemd/user"
+	agentUserUnits = agentHome + "/.config/systemd/user"
+	teroCrontab    = crontabDir + "/tero"
+	agentCrontab   = crontabDir + "/tero-agent"
+)
 
 // breach-response: What to do elsewhere, Server without a TPM
 func TestAssumeBreachReportsWhatToCheck(t *testing.T) {
@@ -247,13 +267,18 @@ func TestAssumeBreachReportsWhatToCheck(t *testing.T) {
 	server.setUp(t)
 	os.MkdirAll(filepath.Join(server.root, userUnits), 0o700)
 	os.WriteFile(filepath.Join(server.root, userUnits, "miner.service"), []byte("[Service]"), 0o600)
+	os.MkdirAll(filepath.Join(server.root, agentUserUnits), 0o700)
+	os.WriteFile(filepath.Join(server.root, agentUserUnits, "backdoor.service"), []byte("[Service]"), 0o600)
 	var out bytes.Buffer
 
 	if err := Run(context.Background(), server.options(&out, "yes\n")); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := os.Stat(filepath.Join(server.root, agentUserUnits, "backdoor.service")); !os.IsNotExist(err) {
+		t.Error("the unit planted for tero-agent was left in place")
+	}
 
-	for _, want := range []string{"latest Tero", "authenticator app", "authorized_keys", userUnits, "no TPM"} {
+	for _, want := range []string{"latest Tero", "authenticator app", "authorized_keys", "Redeploy every app", teroHome + "/.config", agentHome + "/.config", "no TPM"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output is missing %q:\n%s", want, out.String())
 		}
@@ -311,7 +336,7 @@ func TestPlantedLinkMovesOnlyTheLink(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(server.root, userUnits)); !os.IsNotExist(err) {
 		t.Error("the planted link was left in place")
 	}
-	for _, want := range []string{userUnits, teroHome + "/.local/share", "/var/lib/tero-breach/"} {
+	for _, want := range []string{teroHome + "/.config", teroHome + "/.local/share", "/var/lib/tero-breach/"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output is missing %q:\n%s", want, out.String())
 		}
@@ -323,14 +348,16 @@ func TestCrontabMovedBeforeTheKill(t *testing.T) {
 	server.setUp(t)
 	os.MkdirAll(filepath.Join(server.root, "var/spool/cron/crontabs"), 0o700)
 	os.WriteFile(filepath.Join(server.root, teroCrontab), []byte("* * * * * true"), 0o600)
+	os.WriteFile(filepath.Join(server.root, agentCrontab), []byte("* * * * * true"), 0o600)
 	var out bytes.Buffer
 	opts := server.options(&out, "yes\n")
 	run := opts.Run
-	var isMovedAtKill bool
+	isMovedAtKill := true
 	opts.Run = runnerFunc(func(ctx context.Context, name string, args ...string) (string, error) {
 		if name == "pkill" {
-			_, err := os.Stat(filepath.Join(server.root, teroCrontab))
-			isMovedAtKill = os.IsNotExist(err)
+			_, teroErr := os.Stat(filepath.Join(server.root, teroCrontab))
+			_, agentErr := os.Stat(filepath.Join(server.root, agentCrontab))
+			isMovedAtKill = isMovedAtKill && os.IsNotExist(teroErr) && os.IsNotExist(agentErr)
 		}
 		return run.Run(ctx, name, args...)
 	})
@@ -339,7 +366,7 @@ func TestCrontabMovedBeforeTheKill(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !isMovedAtKill {
-		t.Error("the crontab was still in place when tero's processes were killed")
+		t.Error("a crontab was still in place when the processes were killed")
 	}
 }
 
@@ -369,3 +396,45 @@ type runnerFunc func(ctx context.Context, name string, args ...string) (string, 
 func (f runnerFunc) Run(ctx context.Context, name string, args ...string) (string, error) {
 	return f(ctx, name, args...)
 }
+
+// breach-response: GitHub connection deleted, What to do elsewhere
+func TestAssumeBreachDeletesTheGitHubConnection(t *testing.T) {
+	server := newFakeServer(t)
+	server.setUp(t)
+	ctx := context.Background()
+	dashboard := keys.NewLocalClient(server.service, keys.CallerDashboard)
+	agent := keys.NewLocalClient(server.service, keys.CallerAgent)
+	state, err := dashboard.BeginGitHubConnection(ctx, server.session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dashboard.ApproveGitHubConnection(ctx, server.session, state)
+	err = agent.ConnectGitHub(ctx, keys.GitHubAppSecrets{
+		State: state, AppID: 7, Slug: "tero-dash", Owner: "acme", IsOrgOwned: true,
+		PrivateKey: testAppKey, WebhookSecret: "secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+
+	if err := Run(ctx, server.options(&out, "yes\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	app, _ := server.client.GitHubStatus(ctx)
+	if app.IsConnected {
+		t.Error("GitHub is still connected after assume-breach")
+	}
+	if !strings.Contains(out.String(), "Delete the GitHub App tero-dash at https://github.com/organizations/acme/settings/apps/tero-dash") {
+		t.Errorf("the output doesn't say to delete the App:\n%s", out.String())
+	}
+}
+
+var testAppKey = func() string {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		panic(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}))
+}()

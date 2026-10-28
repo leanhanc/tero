@@ -21,6 +21,8 @@ import (
 	"github.com/leanhanc/tero/internal/config"
 	"github.com/leanhanc/tero/internal/deployer"
 	"github.com/leanhanc/tero/internal/deploylog"
+	"github.com/leanhanc/tero/internal/github"
+	"github.com/leanhanc/tero/internal/githubapp"
 	"github.com/leanhanc/tero/internal/hostfs"
 	"github.com/leanhanc/tero/internal/initflow"
 	"github.com/leanhanc/tero/internal/keyfiles"
@@ -165,11 +167,11 @@ func runAssumeBreach(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	tero, err := user.Lookup("tero")
+	teroUID, err := lookupUID("tero")
 	if err != nil {
-		return fmt.Errorf("find the tero user: %w", err)
+		return err
 	}
-	teroUID, err := strconv.Atoi(tero.Uid)
+	agentUID, err := lookupUID(keys.AgentUser)
 	if err != nil {
 		return err
 	}
@@ -183,7 +185,17 @@ func runAssumeBreach(ctx context.Context, args []string) error {
 		Run:         sysexec.Host{},
 		Keys:        keyfiles.Host(),
 		TeroUID:     teroUID,
+		AgentUID:    agentUID,
 	})
+}
+
+func lookupUID(name string) (int, error) {
+	found, err := user.Lookup(name)
+	if err != nil {
+		return 0, fmt.Errorf("find the %s user: %w", name, err)
+	}
+
+	return strconv.Atoi(found.Uid)
 }
 
 func runAgent(ctx context.Context) error {
@@ -193,8 +205,12 @@ func runAgent(ctx context.Context) error {
 	}
 	defer db.Close()
 
-	pipeline := deployer.Pipeline{DB: db, LogDir: deploylog.Dir, WorkDir: deployer.WorkDir, Now: time.Now}
-	return agent.Run(ctx, agent.Options{DB: db, Pipeline: pipeline})
+	gitHubApp := githubapp.Worker{DB: db, Keys: keys.NewClient(keys.SocketPath), GitHub: github.New(), Now: time.Now}
+	pipeline := deployer.Pipeline{DB: db, LogDir: deploylog.Dir, WorkDir: deployer.WorkDir, Tokens: gitHubApp, Now: time.Now}
+
+	poller := agent.Poller{DB: db, Now: time.Now}
+
+	return agent.Run(ctx, agent.Options{DB: db, Pipeline: pipeline, Background: []agent.Background{gitHubApp, poller}})
 }
 
 func isTerminal(file *os.File) bool {

@@ -33,17 +33,19 @@ const (
 
 // Handler is the dashboard for one domain.
 type Handler struct {
-	auth   *auth.Service
-	apps   *apps.Service
-	logDir string
-	origin string
-	mux    *http.ServeMux
+	auth          *auth.Service
+	apps          *apps.Service
+	github        GitHub
+	logDir        string
+	origin        string
+	mux           *http.ServeMux
+	badSignatures badSignatures
 }
 
 // NewHandler returns the dashboard served at https://domain. logDir holds
 // the deploy logs the agent writes.
-func NewHandler(service *auth.Service, appService *apps.Service, domain, logDir string) *Handler {
-	h := &Handler{auth: service, apps: appService, logDir: logDir, origin: "https://" + domain, mux: http.NewServeMux()}
+func NewHandler(service *auth.Service, appService *apps.Service, gitHub GitHub, domain, logDir string) *Handler {
+	h := &Handler{auth: service, apps: appService, github: gitHub, logDir: logDir, origin: "https://" + domain, mux: http.NewServeMux()}
 
 	h.mux.HandleFunc("GET /api/state", h.state)
 	h.mux.HandleFunc("POST /api/setup/begin", h.beginSetup)
@@ -55,6 +57,7 @@ func NewHandler(service *auth.Service, appService *apps.Service, domain, logDir 
 	h.mux.HandleFunc("GET /api/events", h.requireSession(h.events))
 	h.registerAccountRoutes()
 	h.registerAppRoutes()
+	h.registerGitHubRoutes()
 	h.mux.HandleFunc("/api/", h.notFound)
 	h.mux.Handle("/", newWebApp())
 

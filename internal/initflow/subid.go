@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// subIDCount is the size of tero's subordinate uid/gid range. Rootless
+// subIDCount is the size of tero-agent's subordinate uid/gid range. Rootless
 // BuildKit nests its own user namespace inside the container and maps ids
 // 100000-165535 there, so the usual 65536 is too small.
 const subIDCount = 1_000_000

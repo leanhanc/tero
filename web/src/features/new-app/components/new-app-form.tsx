@@ -1,21 +1,23 @@
 import { type SubmitEvent, useState } from 'react';
 
 import { AddressHelp } from '../../../components/address-help';
-import { ApiError, createApp, errorMessage, lookUpRepository, type NewApp } from '../../../lib/utils/api';
+import { ApiError, createApp, errorMessage, type GitHubRepository, lookUpRepository, type NewApp } from '../../../lib/utils/api';
 import { toAddressLabel } from '../../../lib/utils/app-address';
 import { useMessages } from '../../../lib/utils/locale';
 import { TextField } from '../../../components/text-field';
+import { GitHubRepositoryPicker } from './github-repository-picker';
 
-type Field = keyof NewApp;
+type Field = Exclude<keyof NewApp, 'githubRepositoryId'>;
 type FieldErrors = Partial<Record<Field, string>>;
 
 const emptyApp: NewApp = { repository: '', branch: '', displayName: '', name: '', rootDirectory: '' };
 
 /**
- * Creates an app and starts its first deploy. Leaving the repository field
- * looks the repository up and fills in the branch and name the admin hasn't
- * typed yet. The address follows the name until the admin edits it. The
- * server checks every field again.
+ * Creates an app and starts its first deploy, from a public repository's URL
+ * or a repository the GitHub App can read. Leaving the repository field, or
+ * picking a repository, fills in the branch and name the admin hasn't typed
+ * yet. The address follows the name until the admin edits it. The server
+ * checks every field again.
  */
 export function NewAppForm({ onCreated }: { onCreated: (name: string) => void }) {
 	const messages = useMessages();
@@ -42,9 +44,30 @@ export function NewAppForm({ onCreated }: { onCreated: (name: string) => void })
 		setField('name')(name);
 	};
 
+	// Typing a URL replaces a picked repository.
+	const setRepositoryURL = (repository: string) =>
+		setNewApp((current) => ({ ...current, repository, githubRepositoryId: undefined }));
+
+	const pickRepository = (picked: GitHubRepository) => {
+		setFieldErrors((current) => ({ ...current, repository: undefined }));
+		setNewApp((current) => {
+			const displayName = current.displayName || picked.name;
+			const name = isAddressEdited ? current.name : toAddressLabel(displayName);
+			return {
+				...current,
+				repository: `https://github.com/${picked.owner}/${picked.name}`,
+				githubRepositoryId: picked.id,
+				branch: current.branch || picked.defaultBranch,
+				displayName,
+				name,
+			};
+		});
+	};
+
 	const fillFromRepository = async () => {
 		const repositoryURL = newApp.repository.trim();
-		if (repositoryURL === '') {
+		const isPicked = newApp.githubRepositoryId !== undefined;
+		if (repositoryURL === '' || isPicked) {
 			return;
 		}
 
@@ -100,10 +123,11 @@ export function NewAppForm({ onCreated }: { onCreated: (name: string) => void })
 				hint={formMessages.repository.hint}
 				isRequired
 				value={newApp.repository}
-				onChange={setField('repository')}
+				onChange={setRepositoryURL}
 				onBlur={fillFromRepository}
 				error={fieldErrors.repository ?? ''}
 			/>
+			<GitHubRepositoryPicker selectedID={newApp.githubRepositoryId} onPick={pickRepository} />
 			<TextField
 				id="branch"
 				label={formMessages.branch.label}

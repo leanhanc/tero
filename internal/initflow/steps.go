@@ -34,6 +34,9 @@ func steps(cfg config.Config) []step {
 	return []step{
 		{"installing Podman, nftables, auditd and automatic updates", installPackages},
 		{"creating the tero system user", createTeroUser},
+		{"creating the tero-agent system user", createAgentUser},
+		{"sharing the database between tero and tero-agent", shareState},
+		{"starting tero-agent's user manager", startAgentManager},
 		{"locking down SSH", hardenSSH},
 		{"turning on the firewall", enableFirewall},
 		{"turning on automatic security updates", enableAutomaticUpdates},
@@ -293,40 +296,32 @@ func saveConfig(cfg config.Config) func(context.Context, host) error {
 	}
 }
 
-// agentOnlyDirs are the parts of tero's home the service unit makes
-// inaccessible. They must exist before the service starts, or systemd
-// skips them and the service could create them itself.
-var agentOnlyDirs = []string{teroHome + "/.config", teroHome + "/.local", teroHome + "/.cache"}
-
 func startService(ctx context.Context, h host) error {
 	if _, err := writeEmbedded(h, "tero.service", "/etc/systemd/system/tero.service", 0o644); err != nil {
 		return err
 	}
 
-	makeAgentDirs := append([]string{"install", "-d", "-o", teroUser, "-g", teroUser, "-m", "0700"}, agentOnlyDirs...)
-
 	return runAll(ctx, h,
-		makeAgentDirs,
 		[]string{"systemctl", "daemon-reload"},
 		[]string{"systemctl", "enable", "tero.service"},
 		[]string{"systemctl", "restart", "tero.service"},
 	)
 }
 
-// startAgent installs the agent as a user unit that only tero's user manager
-// runs, enables it for boot, and starts it now. The unit file stays owned by
-// root, so tero can't change what the agent runs.
+// startAgent installs the agent as a user unit that only tero-agent's user
+// manager runs, enables it for boot, and starts it now. The unit file stays
+// owned by root, so neither tero nor tero-agent can change what it runs.
 func startAgent(ctx context.Context, h host) error {
 	if _, err := writeEmbedded(h, "tero-agent.service", "/etc/systemd/user/tero-agent.service", 0o644); err != nil {
 		return err
 	}
 
-	const teroManager = "--machine=" + teroUser + "@.host"
+	const agentManager = "--machine=" + agentUser + "@.host"
 
 	return runAll(ctx, h,
 		[]string{"systemctl", "--global", "enable", "tero-agent.service"},
-		[]string{"systemctl", "--user", teroManager, "daemon-reload"},
-		[]string{"systemctl", "--user", teroManager, "restart", "tero-agent.service"},
+		[]string{"systemctl", "--user", agentManager, "daemon-reload"},
+		[]string{"systemctl", "--user", agentManager, "restart", "tero-agent.service"},
 	)
 }
 

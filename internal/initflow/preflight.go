@@ -35,7 +35,13 @@ func checkPreflight(ctx context.Context, h host) error {
 		return err
 	}
 
-	if err := checkTeroAccount(h); err != nil {
+	for _, service := range []serviceAccount{teroAccount, agentAccount} {
+		if err := checkServiceAccount(h, service); err != nil {
+			return err
+		}
+	}
+
+	if err := checkSharedGroups(h); err != nil {
 		return err
 	}
 

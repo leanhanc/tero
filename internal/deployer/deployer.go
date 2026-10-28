@@ -20,6 +20,7 @@ import (
 	"github.com/leanhanc/tero/internal/containers"
 	"github.com/leanhanc/tero/internal/deploylog"
 	"github.com/leanhanc/tero/internal/deploys"
+	"github.com/leanhanc/tero/internal/githubapp"
 	"github.com/leanhanc/tero/internal/source"
 )
 
@@ -37,8 +38,9 @@ const (
 	internalErrorNote = "Tero hit an internal error during this deploy. Redeploy to try again"
 )
 
-// WorkDir holds checkouts and image tarballs while a deploy builds.
-const WorkDir = "/var/lib/tero/builds"
+// WorkDir holds checkouts and image tarballs while a deploy builds, in the
+// agent's home, out of the service's reach.
+const WorkDir = "/var/lib/tero-agent/builds"
 
 // Pipeline runs deploys for the agent.
 type Pipeline struct {
@@ -46,7 +48,16 @@ type Pipeline struct {
 	// LogDir holds build logs, WorkDir checkouts and image tarballs.
 	LogDir  string
 	WorkDir string
-	Now     func() time.Time
+	// Tokens mints the token a repository the GitHub App covers is fetched
+	// with. Without it, only public repositories outside the App deploy.
+	Tokens RepositoryTokens
+	Now    func() time.Time
+}
+
+// RepositoryTokens mints a token that reads one covered repository. revoke
+// must be called once the fetch ends.
+type RepositoryTokens interface {
+	RepositoryToken(ctx context.Context, repositoryID int64) (token source.Token, revoke func(), err error)
 }
 
 // app is an app as the pipeline needs it. Every field is checked again
@@ -59,6 +70,8 @@ type app struct {
 	Branch        string
 	RootDirectory string
 	RunTogether   bool
+	// GitHubRepositoryID is set when the GitHub App covers the repository.
+	GitHubRepositoryID int64
 }
 
 // Run takes a claimed deploy to live or failed. Failures the admin can act
@@ -100,7 +113,7 @@ func (p Pipeline) buildImage(ctx context.Context, deploy deploys.Deploy, deployA
 	defer os.RemoveAll(checkoutDir)
 
 	fmt.Fprintf(log, "==> Fetching %s (%s)\n", deployApp.Repository.URL(), deployApp.Branch)
-	commit, err := source.Clone(ctx, deployApp.Repository, deployApp.Branch, checkoutDir)
+	commit, err := p.fetch(ctx, deployApp, checkoutDir)
 	if err != nil {
 		return "", asFailure(err)
 	}
@@ -265,9 +278,28 @@ func actionableReason(err error) (string, bool) {
 }
 
 // asFailure marks the source package's errors the admin can fix.
+// fetch clones the branch head. A repository the GitHub App covers is read
+// with a token for that repository alone, revoked as soon as the clone ends.
+func (p Pipeline) fetch(ctx context.Context, deployApp app, checkoutDir string) (source.Commit, error) {
+	if deployApp.GitHubRepositoryID == 0 {
+		return source.Clone(ctx, deployApp.Repository, "", deployApp.Branch, checkoutDir)
+	}
+	if p.Tokens == nil {
+		return source.Commit{}, githubapp.ErrNotInstalled
+	}
+
+	token, revoke, err := p.Tokens.RepositoryToken(ctx, deployApp.GitHubRepositoryID)
+	if err != nil {
+		return source.Commit{}, err
+	}
+	defer revoke()
+
+	return source.Clone(ctx, deployApp.Repository, token, deployApp.Branch, checkoutDir)
+}
+
 func asFailure(err error) error {
 	isActionable := errors.Is(err, source.ErrRepositoryNotFound) || errors.Is(err, source.ErrBranchNotFound) ||
-		errors.Is(err, source.ErrFolderNotFound)
+		errors.Is(err, source.ErrFolderNotFound) || errors.Is(err, githubapp.ErrNotInstalled)
 	if isActionable {
 		return build.Failure{Reason: err.Error()}
 	}
@@ -279,8 +311,8 @@ func (p Pipeline) loadApp(ctx context.Context, appID int64) (app, error) {
 	var loaded app
 	var repositoryURL string
 	err := p.DB.QueryRowContext(ctx,
-		"SELECT id, name, repository, branch, root_directory, run_together FROM apps WHERE id = ?", appID).
-		Scan(&loaded.ID, &loaded.Name, &repositoryURL, &loaded.Branch, &loaded.RootDirectory, &loaded.RunTogether)
+		"SELECT id, name, repository, branch, root_directory, run_together, github_repository_id FROM apps WHERE id = ?", appID).
+		Scan(&loaded.ID, &loaded.Name, &repositoryURL, &loaded.Branch, &loaded.RootDirectory, &loaded.RunTogether, &loaded.GitHubRepositoryID)
 	if err != nil {
 		return app{}, fmt.Errorf("load app %d: %w", appID, err)
 	}

@@ -14,12 +14,13 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport"
+	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/storage/memory"
 )
 
 // Errors shown in the new-app form.
 var (
-	ErrRepositoryNotFound = errors.New("That repository wasn't found. Check the URL, and make sure the repository is public")
+	ErrRepositoryNotFound = errors.New("That repository wasn't found. Check the URL. For a private repository, connect GitHub in Settings and give the App access to it")
 	ErrBranchNotFound     = errors.New("That branch wasn't found in the repository")
 	ErrFolderNotFound     = errors.New("That folder wasn't found in the repository on this branch")
 )
@@ -30,9 +31,26 @@ type Commit struct {
 	Message string
 }
 
+// Token is a GitHub installation token for a private repository, or empty
+// for a public one. It is only ever passed to git as HTTP basic auth, never
+// put in a URL or in the checkout's .git/config.
+type Token string
+
+// authFor is the token as git's HTTP basic auth for the repository. Only
+// GitHub over HTTPS gets it: e2e builds read fixtures from local copies,
+// where git takes no credentials.
+func (t Token) authFor(repo Repository) transport.AuthMethod {
+	isHTTPS := strings.HasPrefix(repo.cloneURL(), "https://")
+	if t == "" || !isHTTPS {
+		return nil
+	}
+
+	return &githttp.BasicAuth{Username: "x-access-token", Password: string(t)}
+}
+
 // DefaultBranch returns the branch the repository's HEAD points to.
-func DefaultBranch(ctx context.Context, repo Repository) (string, error) {
-	refs, err := listRefs(ctx, repo)
+func DefaultBranch(ctx context.Context, repo Repository, token Token) (string, error) {
+	refs, err := listRefs(ctx, repo, token)
 	if err != nil {
 		return "", err
 	}
@@ -48,8 +66,8 @@ func DefaultBranch(ctx context.Context, repo Repository) (string, error) {
 }
 
 // BranchExists reports whether the branch exists on GitHub.
-func BranchExists(ctx context.Context, repo Repository, branch string) (bool, error) {
-	refs, err := listRefs(ctx, repo)
+func BranchExists(ctx context.Context, repo Repository, token Token, branch string) (bool, error) {
+	refs, err := listRefs(ctx, repo, token)
 	if err != nil {
 		return false, err
 	}
@@ -65,10 +83,12 @@ func BranchExists(ctx context.Context, repo Repository, branch string) (bool, er
 }
 
 // Clone fetches the branch's latest commit into dir, which must not exist
-// yet, and returns that commit.
-func Clone(ctx context.Context, repo Repository, branch, dir string) (Commit, error) {
+// yet, and returns that commit. The .git directory is removed afterwards, so
+// it never reaches the build.
+func Clone(ctx context.Context, repo Repository, token Token, branch, dir string) (Commit, error) {
 	cloned, err := git.PlainCloneContext(ctx, dir, false, &git.CloneOptions{
 		URL:           repo.cloneURL(),
+		Auth:          token.authFor(repo),
 		ReferenceName: plumbing.NewBranchReferenceName(branch),
 		SingleBranch:  true,
 		Depth:         1,
@@ -78,14 +98,37 @@ func Clone(ctx context.Context, repo Repository, branch, dir string) (Commit, er
 		return Commit{}, describeFetchError(err)
 	}
 
-	return headCommit(cloned)
+	commit, err := headCommit(cloned)
+	if err != nil {
+		return Commit{}, err
+	}
+
+	return commit, os.RemoveAll(filepath.Join(dir, git.GitDirName))
+}
+
+// BranchHead returns the commit the branch points to on GitHub, without
+// fetching anything else.
+func BranchHead(ctx context.Context, repo Repository, token Token, branch string) (string, error) {
+	refs, err := listRefs(ctx, repo, token)
+	if err != nil {
+		return "", err
+	}
+
+	branchRef := plumbing.NewBranchReferenceName(branch)
+	for _, ref := range refs {
+		if ref.Name() == branchRef {
+			return ref.Hash().String(), nil
+		}
+	}
+
+	return "", ErrBranchNotFound
 }
 
 // CheckRootDirectory returns the cleaned root directory, or
 // ErrFolderNotFound when it is absolute, leaves the repository, or isn't a
 // folder on the branch. An empty root directory means the repository root.
 // It reads only the branch's latest tree, without checking files out.
-func CheckRootDirectory(ctx context.Context, repo Repository, branch, rootDirectory string) (string, error) {
+func CheckRootDirectory(ctx context.Context, repo Repository, token Token, branch, rootDirectory string) (string, error) {
 	cleaned, err := cleanRootDirectory(rootDirectory)
 	if err != nil || cleaned == "" {
 		return cleaned, err
@@ -93,6 +136,7 @@ func CheckRootDirectory(ctx context.Context, repo Repository, branch, rootDirect
 
 	cloned, err := git.CloneContext(ctx, memory.NewStorage(), nil, &git.CloneOptions{
 		URL:           repo.cloneURL(),
+		Auth:          token.authFor(repo),
 		ReferenceName: plumbing.NewBranchReferenceName(branch),
 		SingleBranch:  true,
 		Depth:         1,
@@ -167,10 +211,10 @@ func cleanRootDirectory(rootDirectory string) (string, error) {
 	return cleaned, nil
 }
 
-func listRefs(ctx context.Context, repo Repository) ([]*plumbing.Reference, error) {
+func listRefs(ctx context.Context, repo Repository, token Token) ([]*plumbing.Reference, error) {
 	remote := git.NewRemote(memory.NewStorage(), &config.RemoteConfig{Name: "origin", URLs: []string{repo.cloneURL()}})
 
-	refs, err := remote.ListContext(ctx, &git.ListOptions{})
+	refs, err := remote.ListContext(ctx, &git.ListOptions{Auth: token.authFor(repo)})
 	if err != nil {
 		return nil, describeFetchError(err)
 	}

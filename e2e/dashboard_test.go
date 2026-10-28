@@ -33,6 +33,7 @@ type dashboard struct {
 
 func testDashboardAccess(t *testing.T) {
 	admin := &dashboard{token: tokenOf(t, setupLink)}
+	currentAdmin = admin
 
 	t.Run("dashboard: web app served under the strict CSP", testWebApp)
 	t.Run("dashboard-access: No login before setup", admin.testNoLoginBeforeSetup)
@@ -165,14 +166,14 @@ func (d *dashboard) testLinkReused(t *testing.T) {
 }
 
 func testStoredForm(t *testing.T) {
-	if got := must(t, "sudo stat -c '%a %U' /var/lib/tero/tero.db"); got != "600 tero" {
-		t.Errorf("database is %q, want 600 tero", got)
+	if got := must(t, "sudo stat -c '%a %G' /var/lib/tero-shared/tero.db"); got != "660 tero-shared" {
+		t.Errorf("database is %q, want 660 tero-shared", got)
 	}
 	if got := must(t, "sudo stat -c '%a %U' /var/lib/tero-keys/keys.db"); got != "600 tero-keys" {
 		t.Errorf("key service database is %q, want 600 tero-keys", got)
 	}
 
-	teroFiles := "sudo cat /var/lib/tero/tero.db /var/lib/tero/tero.db-wal 2>/dev/null"
+	teroFiles := "sudo cat /var/lib/tero-shared/tero.db /var/lib/tero-shared/tero.db-wal 2>/dev/null"
 	keysFiles := "sudo cat /var/lib/tero-keys/keys.db /var/lib/tero-keys/keys.db-wal 2>/dev/null"
 	for _, files := range []string{teroFiles, keysFiles} {
 		plaintextCount := run(t, files+" | grep -a -c "+adminPassword)
@@ -334,16 +335,20 @@ func (d *dashboard) testRecoveryVisible(t *testing.T) {
 }
 
 // nextCode waits for a TOTP step the server hasn't accepted yet and returns
-// its code, acting as the admin's authenticator app.
+// its code, acting as the admin's authenticator app. It reads the server's
+// clock: a fresh test VM can run tens of seconds apart from the host until
+// its time syncs, which is more than a TOTP step.
 func (d *dashboard) nextCode(t *testing.T) string {
 	t.Helper()
 
-	for totp.Step(time.Now()) <= d.lastStep {
+	now := serverTime(t)
+	for totp.Step(now) <= d.lastStep {
 		time.Sleep(time.Second)
+		now = serverTime(t)
 	}
-	d.lastStep = totp.Step(time.Now())
+	d.lastStep = totp.Step(now)
 
-	code, err := totp.Code(d.secret, time.Now())
+	code, err := totp.Code(d.secret, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -445,4 +450,14 @@ func randomLowercase(length int) string {
 			return password
 		}
 	}
+}
+
+// serverTime is the test server's clock.
+func serverTime(t *testing.T) time.Time {
+	t.Helper()
+	seconds, err := strconv.ParseInt(must(t, "date +%s"), 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return time.Unix(seconds, 0)
 }

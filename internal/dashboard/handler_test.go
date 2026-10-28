@@ -15,6 +15,7 @@ import (
 
 	"github.com/leanhanc/tero/internal/apps"
 	"github.com/leanhanc/tero/internal/auth"
+	"github.com/leanhanc/tero/internal/githubapp"
 	"github.com/leanhanc/tero/internal/keys"
 	"github.com/leanhanc/tero/internal/password"
 	"github.com/leanhanc/tero/internal/store"
@@ -38,8 +39,10 @@ type testDashboard struct {
 	refusals *[]string
 	db       *sql.DB
 	logDir   string
-	// keysRoot is root's client of the in-process key service.
-	keysRoot *keys.Client
+	// keysRoot and keysAgent are root's and the agent's clients of the
+	// in-process key service.
+	keysRoot  *keys.Client
+	keysAgent *keys.Client
 }
 
 func newTestDashboard(t *testing.T) testDashboard {
@@ -80,10 +83,17 @@ func newTestDashboard(t *testing.T) testDashboard {
 
 	logDir := t.TempDir()
 	appService := apps.NewService(db, "203.0.113.10", func() time.Time { return now })
-	handler := NewHandler(service, appService, "dash.example.com", logDir)
+	dashboardKeys := keys.NewLocalClient(keyService, keys.CallerDashboard)
+	clock := func() time.Time { return now }
+	gitHub := GitHub{
+		Connection: githubapp.Connection{DB: db, Keys: dashboardKeys, Domain: "dash.example.com", Now: clock},
+		Webhooks:   githubapp.Webhooks{DB: db, Events: dashboardKeys, Now: clock},
+		Verifier:   dashboardKeys,
+	}
+	handler := NewHandler(service, appService, gitHub, "dash.example.com", logDir)
 
 	return testDashboard{handler: handler, service: service, db: db, logDir: logDir, now: &now, secret: &secret, refusals: refusals,
-		keysRoot: keys.NewLocalClient(keyService, keys.CallerRoot)}
+		keysRoot: keys.NewLocalClient(keyService, keys.CallerRoot), keysAgent: keys.NewLocalClient(keyService, keys.CallerAgent)}
 }
 
 func (d testDashboard) post(path string, body any, cookies ...*http.Cookie) *httptest.ResponseRecorder {

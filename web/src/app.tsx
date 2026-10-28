@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { AppPage } from './features/app/app-page';
+import { GitHubReturnPage } from './features/github/github-return-page';
 import { HomePage } from './features/home/home-page';
 import { LoginPage } from './features/login/login-page';
 import { NewAppPage } from './features/new-app/new-app-page';
@@ -69,6 +70,10 @@ function SignedInPage({ path, onLogout }: { path: string; onLogout: () => void }
 
 	if (path === '/settings') {
 		return <SettingsPage onLogout={onLogout} />;
+	}
+
+	if (path === '/github/connected' || path === '/github/installed') {
+		return <GitHubReturnPage path={path} onLogout={onLogout} />;
 	}
 
 	const appName = appPathPattern.exec(path)?.[1];

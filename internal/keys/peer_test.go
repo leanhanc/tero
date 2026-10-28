@@ -23,10 +23,11 @@ import (
 const (
 	helperServerUID = 65533
 	helperTeroUID   = 65534
+	helperAgentUID  = 65531
 	helperOtherUID  = 65532
 )
 
-// key-service: Other process running as tero
+// key-service: Other process running as tero; the agent known by uid
 func TestIdentifyAcrossUsers(t *testing.T) {
 	if os.Getuid() != 0 {
 		t.Skip("needs root to run the server and callers as other users")
@@ -68,6 +69,7 @@ func TestIdentifyAcrossUsers(t *testing.T) {
 		want string
 	}{
 		{helperTeroUID, string(CallerDashboard)},
+		{helperAgentUID, string(CallerAgent)},
 		{helperOtherUID, "refused"},
 	} {
 		client := helper(binary, test.uid, "connect", socket, "")
@@ -93,6 +95,7 @@ func helper(binary string, uid uint32, mode, socket, cgroup string) *exec.Cmd {
 		"KEYS_PEER_SOCKET=" + socket,
 		"KEYS_PEER_CGROUP=" + cgroup,
 		"KEYS_PEER_TERO_UID=" + strconv.Itoa(helperTeroUID),
+		"KEYS_PEER_AGENT_UID=" + strconv.Itoa(helperAgentUID),
 	}
 	command.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uid, Gid: uid}}
 	return command
@@ -104,7 +107,8 @@ func TestPeerHelper(t *testing.T) {
 	switch os.Getenv("KEYS_PEER_HELPER") {
 	case "serve":
 		teroUID, _ := strconv.Atoi(os.Getenv("KEYS_PEER_TERO_UID"))
-		peers := peers{teroUID: teroUID, dashboard: os.Getenv("KEYS_PEER_CGROUP")}
+		agentUID, _ := strconv.Atoi(os.Getenv("KEYS_PEER_AGENT_UID"))
+		peers := peers{teroUID: teroUID, agentUID: agentUID, dashboard: os.Getenv("KEYS_PEER_CGROUP")}
 
 		listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socket, Net: "unix"})
 		if err != nil {

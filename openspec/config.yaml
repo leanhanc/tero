@@ -15,10 +15,16 @@ context: |
   `<app>.<public-ip>.nip.io`) and 3 (the `tero-keys` system service, its own user with no network, reachable
   only on a Unix socket, holding the master key sealed by systemd-creds (TPM2 when present), the admin's password
   hash and encrypted TOTP secret and the security log, identifying callers by uid and exact systemd unit;
-  `sudo tero rotate-key` and `sudo tero assume-breach`) are built. Current slice (slice 4): account security.
-  `tero-keys` also holds dashboard sessions, trusted browsers, login throttles and passkeys (WebAuthn, verified
-  with go-webauthn), creates every session, and checks the session on every dashboard request. The dashboard
-  gains a settings page: password change, a 5-minute "confirm it's you" window, the session list and passkeys.
+  `sudo tero rotate-key` and `sudo tero assume-breach`) and 4 (account security: `tero-keys` holds sessions,
+  trusted browsers, login throttles and passkeys, and the settings page) are built. Current slice (slice 5):
+  deploy on push. The agent runs as its own system user `tero-agent` (rootless Podman, the subordinate ids and
+  every container belong to it), shares the SQLite database and build logs with the service through the group
+  `tero-shared` in /var/lib/tero-shared, and is a `tero-keys` caller known by uid. Each server creates a private,
+  read-only GitHub App (manifest flow, personal account or organization); `tero-keys` holds its private key and
+  webhook secret, signs App JWTs for the agent only and verifies webhook signatures for the dashboard. Only the
+  agent talks to GitHub with credentials (one-repo installation tokens, revoked after each clone). Signed push
+  webhooks, polling of public repositories and redelivery of failed deliveries at agent start queue deploys;
+  an app has at most one deploy running and one queued.
   openspec/specs holds only the current slice's capabilities. openspec/drafts holds rough specs for what later
   slices still own (apps, deployments, domains, app logs, build pipeline, GitHub connection); they are not commitments.
   Security standards (ADR 0001): OWASP ASVS 5.0.0 Level 2 for the dashboard and HTTP endpoints, citing

@@ -14,7 +14,7 @@ function mockAPI(responses: Record<string, MockResponse[]>) {
 		'fetch',
 		vi.fn(async (path: string, init?: RequestInit) => {
 			calls.push({ path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-			const next = responses[path]?.shift() ?? { status: 500, body: { error: 'unexpected call' } };
+			const next = responses[path]?.shift() ?? defaultResponses[path] ?? { status: 500, body: { error: 'unexpected call' } };
 			return new Response(next.body === undefined ? null : JSON.stringify(next.body), { status: next.status });
 		}),
 	);
@@ -22,6 +22,11 @@ function mockAPI(responses: Record<string, MockResponse[]>) {
 }
 
 const signedIn = { status: 200, body: { isSetUp: true, isLoggedIn: true } };
+
+const notConnected = { status: 200, body: { app: { isConnected: false }, installation: null, repositories: [] } };
+
+// Calls every settings page makes, answered unless a test answers them itself.
+const defaultResponses: Record<string, MockResponse> = { '/api/github': notConnected };
 
 const firefox = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14.5; rv:140.0) Gecko/20100101 Firefox/140.0';
 
@@ -362,5 +367,59 @@ describe('passkey login', () => {
 
 		expect(await screen.findByLabelText('Password')).toBeTruthy();
 		expect(screen.queryByRole('button', { name: 'Log in with a passkey' })).toBeNull();
+	});
+});
+
+describe('GitHub section', () => {
+	it('confirms first, then sends the manifest to the organization on GitHub', async () => {
+		openSettings();
+		const calls = mockAPI({
+			'/api/state': [signedIn],
+			'/api/account': [{ status: 200, body: account(true) }],
+			'/api/github/connect/begin': [
+				{
+					status: 200,
+					body: { action: 'https://github.com/organizations/acme/settings/apps/new?state=s', manifest: '{"name":"Tero"}', state: 's' },
+				},
+			],
+		});
+		const submitted: { action: string; manifest: string }[] = [];
+		vi.spyOn(HTMLFormElement.prototype, 'submit').mockImplementation(function (this: HTMLFormElement) {
+			const manifest = this.querySelector<HTMLInputElement>('input[name="manifest"]')?.value ?? '';
+			submitted.push({ action: this.action, manifest });
+		});
+		render(<App />);
+
+		await userEvent.click(await screen.findByLabelText('An organization I own'));
+		await userEvent.type(screen.getByLabelText('Organization'), 'acme');
+		await userEvent.click(screen.getByRole('button', { name: 'Connect GitHub' }));
+
+		expect(calls.find((call) => call.path === '/api/github/connect/begin')?.body).toEqual({ organization: 'acme' });
+		expect(submitted).toEqual([{ action: 'https://github.com/organizations/acme/settings/apps/new?state=s', manifest: '{"name":"Tero"}' }]);
+	});
+
+	it('lists the repositories the App can read', async () => {
+		openSettings();
+		mockAPI({
+			'/api/state': [signedIn],
+			'/api/account': [{ status: 200, body: account(true) }],
+			'/api/github': [
+				{
+					status: 200,
+					body: {
+						app: { isConnected: true, slug: 'tero-dash', owner: 'leanhanc' },
+						installation: { account: 'leanhanc', isOrganization: false, isSuspended: false },
+						repositories: [{ id: 1, owner: 'leanhanc', name: 'api', isPrivate: true, defaultBranch: 'main' }],
+						installUrl: 'https://github.com/apps/tero-dash/installations/new',
+						settingsUrl: 'https://github.com/settings/apps/tero-dash',
+					},
+				},
+			],
+		});
+		render(<App />);
+
+		const list = await screen.findByRole('list', { name: 'Repositories the App can read' });
+		expect(within(list).getByText('leanhanc/api (private)')).toBeTruthy();
+		expect(screen.getByRole('link', { name: 'the App on GitHub' }).getAttribute('href')).toBe('https://github.com/settings/apps/tero-dash');
 	});
 });

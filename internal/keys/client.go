@@ -225,3 +225,52 @@ func (c *Client) RecentEvents(ctx context.Context, session string, limit int) ([
 	err := c.call(ctx, VerbEventList, eventListArgs{Session: session, Limit: limit}, &events)
 	return events, err
 }
+
+// BeginGitHubConnection returns the state for GitHub's manifest flow. The
+// session must be confirmed.
+func (c *Client) BeginGitHubConnection(ctx context.Context, session string) (string, error) {
+	var result gitHubStateResult
+	err := c.call(ctx, VerbGitHubConnectBegin, sessionArgs{Session: session}, &result)
+	return result.State, err
+}
+
+// ApproveGitHubConnection approves a state the same session began.
+func (c *Client) ApproveGitHubConnection(ctx context.Context, session, state string) error {
+	return c.call(ctx, VerbGitHubConnectApprove, gitHubApproveArgs{Session: session, State: state}, nil)
+}
+
+// ConnectGitHub stores the App the agent created. Agent only.
+func (c *Client) ConnectGitHub(ctx context.Context, secrets GitHubAppSecrets) error {
+	return c.call(ctx, VerbGitHubConnect, secrets, nil)
+}
+
+// DisconnectGitHub deletes the App's secrets. The session must be
+// confirmed.
+func (c *Client) DisconnectGitHub(ctx context.Context, session string) error {
+	return c.call(ctx, VerbGitHubDisconnect, sessionArgs{Session: session}, nil)
+}
+
+// ForgetGitHub deletes the App's secrets. Root only.
+func (c *Client) ForgetGitHub(ctx context.Context) error {
+	return c.call(ctx, VerbGitHubForget, nil, nil)
+}
+
+func (c *Client) GitHubStatus(ctx context.Context) (GitHubApp, error) {
+	var app GitHubApp
+	err := c.call(ctx, VerbGitHubStatus, nil, &app)
+	return app, err
+}
+
+// SignAppToken returns a new App token. Agent only.
+func (c *Client) SignAppToken(ctx context.Context) (AppToken, error) {
+	var token AppToken
+	err := c.call(ctx, VerbGitHubJWT, nil, &token)
+	return token, err
+}
+
+// VerifyWebhook reports whether a webhook's signature is valid.
+func (c *Client) VerifyWebhook(ctx context.Context, body []byte, signature, ip string) (bool, error) {
+	var result webhookVerifyResult
+	err := c.call(ctx, VerbGitHubWebhookVerify, webhookVerifyArgs{Body: body, Signature: signature, IP: ip}, &result)
+	return result.IsValid, err
+}

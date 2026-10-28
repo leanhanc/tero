@@ -9,6 +9,17 @@ export function AppSummary({ app }: { app: AppDetail }) {
 	const liveCommit = liveDeploy ? `${liveDeploy.commitSha.slice(0, 12)} ${liveDeploy.commitMessage}` : messages.nothingLive;
 
 	return (
+		<>
+			{app.pollError && <p role="alert">{messages.pollStopped(app.pollError)}</p>}
+			<SummaryList app={app} liveCommit={liveCommit} />
+		</>
+	);
+}
+
+function SummaryList({ app, liveCommit }: { app: AppDetail; liveCommit: string }) {
+	const messages = useMessages().app.summary;
+
+	return (
 		<dl>
 			<dt>
 				{messages.address} <AddressHelp address={app.address} />

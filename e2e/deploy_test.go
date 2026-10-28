@@ -71,7 +71,7 @@ func testDeploys(t *testing.T) {
 	t.Run("process-isolation: Service sandbox unchanged", testServiceSandboxUnchanged)
 	t.Run("build-pipeline: BuildKit lifecycle / No published port or socket / Image available after build", testBuildKitGone)
 	t.Run("apps: App process exits", testAppProcessExits)
-	t.Run("deployments: Redeploy picks up a new commit / Successful deploy / Redeploy while deploying", testRedeployNewCommit)
+	t.Run("deployments: Redeploy picks up a new commit / Successful deploy / Redeploy while one is queued", testRedeployNewCommit)
 	t.Run("deployments: Failed redeploy", testFailedRedeploy)
 	t.Run("deployments: Setting off, deploy succeeds / Setting off, deploy fails", testStopFirst)
 	t.Run("process-isolation: Dashboard cannot trigger root work", testAppRoutesNoRootWork)
@@ -246,14 +246,14 @@ func testNoRouteBeforeLive(t *testing.T) {
 
 func liveContainer(t *testing.T, app string) string {
 	t.Helper()
-	return must(t, asTero(fmt.Sprintf(`podman ps --filter label=tero.app=%s --format '{{.Names}}'`, app)))
+	return must(t, asAgent(fmt.Sprintf(`podman ps --filter label=tero.app=%s --format '{{.Names}}'`, app)))
 }
 
 func testContainerHardening(t *testing.T) {
 	npm := liveContainer(t, fixtureApp("npm"))
 	bun := liveContainer(t, fixtureApp("bun"))
 
-	options := must(t, asTero(`podman inspect --format '{{.HostConfig.CapAdd}} {{.EffectiveCaps}} {{.HostConfig.SecurityOpt}} {{.HostConfig.NetworkMode}} {{.HostConfig.PortBindings}}' `+npm))
+	options := must(t, asAgent(`podman inspect --format '{{.HostConfig.CapAdd}} {{.EffectiveCaps}} {{.HostConfig.SecurityOpt}} {{.HostConfig.NetworkMode}} {{.HostConfig.PortBindings}}' `+npm))
 	assertContains(t, options, "no-new-privileges", "127.0.0.1")
 	if !strings.Contains(options, "pasta") && !strings.Contains(options, "slirp4netns") {
 		t.Errorf("container isn't on a network namespace of its own: %s", options)
@@ -262,12 +262,12 @@ func testContainerHardening(t *testing.T) {
 		t.Errorf("container has capabilities: %s", options)
 	}
 
-	// --userns=auto gives the container a small slice of tero's range, not
+	// --userns=auto gives the container a small slice of tero-agent's range, not
 	// the whole of it.
-	appPID := must(t, asTero(`podman inspect --format '{{.State.Pid}}' `+npm))
+	appPID := must(t, asAgent(`podman inspect --format '{{.State.Pid}}' `+npm))
 	uidMap := must(t, "sudo cat /proc/"+appPID+"/uid_map")
 	if strings.Contains(uidMap, "1000000") {
-		t.Errorf("the app's user namespace maps tero's whole range:\n%s", uidMap)
+		t.Errorf("the app's user namespace maps tero-agent's whole range:\n%s", uidMap)
 	}
 
 	npmUID := firstHostUID(t, npm)
@@ -275,15 +275,15 @@ func testContainerHardening(t *testing.T) {
 	if npmUID == bunUID {
 		t.Errorf("two apps share host uid %s", npmUID)
 	}
-	subUIDStart, _ := strconv.Atoi(must(t, "grep '^tero:' /etc/subuid | cut -d: -f2"))
+	subUIDStart, _ := strconv.Atoi(must(t, "grep '^tero-agent:' /etc/subuid | cut -d: -f2"))
 	for _, uid := range []string{npmUID, bunUID} {
 		hostUID, _ := strconv.Atoi(uid)
 		if hostUID < subUIDStart || hostUID >= subUIDStart+1_000_000 {
-			t.Errorf("app host uid %s is outside tero's subordinate range starting at %d", uid, subUIDStart)
+			t.Errorf("app host uid %s is outside tero-agent's subordinate range starting at %d", uid, subUIDStart)
 		}
 	}
 
-	port := must(t, asTero(`podman port `+npm+` 8080`))
+	port := must(t, asAgent(`podman port `+npm+` 8080`))
 	if !strings.HasPrefix(port, "127.0.0.1:") {
 		t.Errorf("app port is published on %s, want 127.0.0.1 only", port)
 	}
@@ -291,7 +291,7 @@ func testContainerHardening(t *testing.T) {
 
 func firstHostUID(t *testing.T, container string) string {
 	t.Helper()
-	lines := strings.Split(must(t, asTero(`podman top `+container+` huser`)), "\n")
+	lines := strings.Split(must(t, asAgent(`podman top `+container+` huser`)), "\n")
 	if len(lines) < 2 {
 		t.Fatalf("podman top %s printed no processes", container)
 	}
@@ -301,7 +301,7 @@ func firstHostUID(t *testing.T, container string) string {
 func testAppsIsolated(t *testing.T) {
 	npm := liveContainer(t, fixtureApp("npm"))
 	bun := liveContainer(t, fixtureApp("bun"))
-	bunPort := strings.TrimPrefix(must(t, asTero(`podman port `+bun+` 8080`)), "127.0.0.1:")
+	bunPort := strings.TrimPrefix(must(t, asAgent(`podman port `+bun+` 8080`)), "127.0.0.1:")
 	vmIP := must(t, "hostname -I | awk '{print $1}'")
 
 	// Every way the npm app could reach the host's loopback, where the bun
@@ -309,7 +309,7 @@ func testAppsIsolated(t *testing.T) {
 	// the VM's loopback ports to the Mac, which a real server doesn't do.
 	for _, target := range []string{"127.0.0.1", "10.0.2.2", "169.254.1.2", "host.containers.internal", vmIP} {
 		script := fmt.Sprintf(`const s=require("net").connect(%s,%q);s.setTimeout(3000);s.on("connect",()=>{console.log("REACHED");process.exit(0)});s.on("timeout",()=>{console.log("BLOCKED");process.exit(0)});s.on("error",()=>{console.log("BLOCKED");process.exit(0)})`, bunPort, target)
-		got := must(t, asTero(fmt.Sprintf(`podman exec %s node -e '%s'`, npm, script)))
+		got := must(t, asAgent(fmt.Sprintf(`podman exec %s node -e '%s'`, npm, script)))
 		if !strings.Contains(got, "BLOCKED") {
 			t.Errorf("one app reached another's port through %s: %s", target, got)
 		}
@@ -325,21 +325,21 @@ func testServiceSandboxUnchanged(t *testing.T) {
 }
 
 func testBuildKitGone(t *testing.T) {
-	buildkit := must(t, asTero(`podman ps --all --filter name=tero-buildkit --format '{{.Names}}'`))
+	buildkit := must(t, asAgent(`podman ps --all --filter name=tero-buildkit --format '{{.Names}}'`))
 	if buildkit != "" {
 		t.Errorf("BuildKit containers left after builds: %s", buildkit)
 	}
 
-	images := must(t, asTero(`podman images --format '{{.Repository}}:{{.Tag}}'`))
+	images := must(t, asAgent(`podman images --format '{{.Repository}}:{{.Tag}}'`))
 	assertContains(t, images, "localhost/tero/"+fixtureApp("npm")+":deploy-")
-	if tarballs := run(t, "sudo ls /var/lib/tero/builds").output; strings.Contains(tarballs, ".tar") {
+	if tarballs := run(t, "sudo ls /var/lib/tero-agent/builds").output; strings.Contains(tarballs, ".tar") {
 		t.Errorf("image tarballs left behind: %s", tarballs)
 	}
 }
 
 func testAppProcessExits(t *testing.T) {
 	app := fixtureApp("npm")
-	must(t, asTero("podman kill "+liveContainer(t, app)))
+	must(t, asAgent("podman kill "+liveContainer(t, app)))
 	waitUntil(t, time.Minute, func() bool {
 		return strings.Contains(fetchApp(t, app, "/").output, "tero fixture npm")
 	})
@@ -406,12 +406,17 @@ func testRedeployNewCommit(t *testing.T) {
 	if response := postDashboard(t, "admin", "/api/apps/"+redeployApp+"/deploys", map[string]string{}); response.status != 202 {
 		t.Fatalf("redeploy = %d %s", response.status, response.body)
 	}
+	// A second Redeploy while the first is queued takes it over instead of
+	// adding another.
 	second := postDashboard(t, "admin", "/api/apps/"+redeployApp+"/deploys", map[string]string{})
-	if second.status != 409 || !strings.Contains(second.body, "already in progress") {
-		t.Errorf("redeploy while deploying = %d %s, want 409", second.status, second.body)
+	if second.status != 202 {
+		t.Errorf("redeploy while one is queued = %d %s, want 202", second.status, second.body)
 	}
 
 	detail := waitForDeploy(t, redeployApp)
+	if len(detail.Deploys) != 2 {
+		t.Errorf("deploys after two quick redeploys = %d, want 2", len(detail.Deploys))
+	}
 	if detail.Deploys[0].State != "live" || detail.Deploys[0].CommitSHA == first.CommitSHA {
 		t.Fatalf("redeploy = %s on %s, want live on a new commit", detail.Deploys[0].State, detail.Deploys[0].CommitSHA)
 	}
@@ -509,7 +514,7 @@ func testInterruptedDeploy(t *testing.T) {
 		t.Errorf("interrupted deploy = %s: %s", detail.Deploys[0].State, detail.Deploys[0].Reason)
 	}
 	waitUntil(t, time.Minute, func() bool {
-		return must(t, asTero(`podman ps --all --filter name=tero-buildkit --format '{{.Names}}'`)) == ""
+		return must(t, asAgent(`podman ps --all --filter name=tero-buildkit --format '{{.Names}}'`)) == ""
 	})
 	assertContains(t, fetchApp(t, app, "/").output, "tero fixture npm")
 }

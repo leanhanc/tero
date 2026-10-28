@@ -1,6 +1,8 @@
 // Package deploys is the deploy queue shared by the service and the agent
-// through the SQLite store. The service queues deploys; the agent claims them
-// one at a time across the server and moves them through their states.
+// through the SQLite store. Both queue deploys; the agent claims them one at
+// a time across the server and moves them through their states. An app has
+// at most one deploy running and one queued: a newer trigger updates the
+// queued one, which builds the branch head whenever it starts.
 package deploys
 
 import (
@@ -23,10 +25,6 @@ const (
 	Superseded State = "superseded"
 )
 
-// ErrInProgress means the app already has a deploy queued, building or
-// starting.
-var ErrInProgress = errors.New("A deploy is already in progress for this app. Wait for it to finish, then redeploy")
-
 // interruptedReason is shown on deploys the agent finds half done when it
 // starts, after a crash, a restart or a reboot.
 const interruptedReason = "Tero restarted while this deploy was running. Redeploy to try again"
@@ -38,23 +36,54 @@ type Deploy struct {
 	State State
 }
 
+// TriggerType is what queued a deploy.
+type TriggerType string
+
+const (
+	TriggerCreate TriggerType = "create"
+	TriggerManual TriggerType = "manual"
+	TriggerPush   TriggerType = "push"
+	TriggerPoll   TriggerType = "poll"
+)
+
+// Trigger is what queued a deploy. PushedBy and RequestedSHA are set for a
+// push, and only shown: the agent builds the branch head when it starts.
+type Trigger struct {
+	Type         TriggerType
+	PushedBy     string
+	RequestedSHA string
+}
+
 // Enqueue queues a deploy of the app's tracked branch and returns its id.
-func Enqueue(ctx context.Context, db *sql.DB, appID int64, now time.Time) (int64, error) {
+// When the app already has a deploy queued, that one takes the newer
+// trigger instead, and its id is returned.
+func Enqueue(ctx context.Context, db *sql.DB, appID int64, trigger Trigger, now time.Time) (int64, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
 
-	hasDeployInProgress, err := appHasDeployInProgress(ctx, tx, appID)
-	if err != nil {
+	var queuedID int64
+	err = tx.QueryRowContext(ctx, "SELECT id FROM deploys WHERE app_id = ? AND state = 'queued'", appID).Scan(&queuedID)
+	isAlreadyQueued := err == nil
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return 0, err
 	}
-	if hasDeployInProgress {
-		return 0, ErrInProgress
+
+	if isAlreadyQueued {
+		_, err = tx.ExecContext(ctx,
+			"UPDATE deploys SET trigger_type = ?, pushed_by = ?, requested_sha = ? WHERE id = ?",
+			string(trigger.Type), trigger.PushedBy, trigger.RequestedSHA, queuedID)
+		if err != nil {
+			return 0, fmt.Errorf("update the queued deploy: %w", err)
+		}
+		return queuedID, tx.Commit()
 	}
 
-	result, err := tx.ExecContext(ctx, "INSERT INTO deploys (app_id, queued_at) VALUES (?, ?)", appID, now.Unix())
+	result, err := tx.ExecContext(ctx,
+		"INSERT INTO deploys (app_id, trigger_type, pushed_by, requested_sha, queued_at) VALUES (?, ?, ?, ?, ?)",
+		appID, string(trigger.Type), trigger.PushedBy, trigger.RequestedSHA, now.Unix())
 	if err != nil {
 		return 0, fmt.Errorf("queue the deploy: %w", err)
 	}
@@ -147,14 +176,6 @@ func MarkInterrupted(ctx context.Context, db *sql.DB, now time.Time) (int64, err
 	}
 
 	return result.RowsAffected()
-}
-
-func appHasDeployInProgress(ctx context.Context, tx *sql.Tx, appID int64) (bool, error) {
-	var count int
-	err := tx.QueryRowContext(ctx,
-		"SELECT count(*) FROM deploys WHERE app_id = ? AND state IN ('queued', 'building', 'starting')", appID).Scan(&count)
-
-	return count > 0, err
 }
 
 // RecordCommit stores the commit a deploy builds.

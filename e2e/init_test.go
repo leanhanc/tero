@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -52,11 +53,13 @@ func TestSlice1(t *testing.T) {
 		t.FailNow()
 	}
 
-	t.Run("server-init: Podman available to tero", testPodmanAvailable)
+	t.Run("server-init: Podman available to tero-agent", testPodmanAvailable)
 	t.Run("server-init: Subordinate id range sized for rootless BuildKit", testSubIDRange)
-	t.Run("server-init: Linger enabled", testLinger)
-	t.Run("server-init: tero cannot log in interactively", testNoLogin)
-	t.Run("process-isolation: No container process owned by host root", testRootlessContainer)
+	t.Run("server-init: Agent survives reboot (linger)", testLinger)
+	t.Run("server-init: tero has no containers / process-isolation: tero can't run containers", testTeroHasNoContainers)
+	t.Run("server-init: tero cannot log in interactively / tero-agent cannot log in interactively", testNoLogin)
+	t.Run("server-init: Shared directory / Other users kept out", testSharedState)
+	t.Run("process-isolation: No container process owned by host root / Containers never run as the agent's uid", testRootlessContainer)
 	t.Run("server-init: SSH locked down", testSSHLockedDown)
 	t.Run("server-init: Firewall default deny", testFirewall)
 	t.Run("server-init: Automatic security updates", testAutomaticUpdates)
@@ -66,8 +69,9 @@ func TestSlice1(t *testing.T) {
 	t.Run("server-init: Service running after init", testServiceRunning)
 	t.Run("process-isolation: Service process identity", testServiceIdentity)
 	t.Run("server-init: Agent running after init / process-isolation: Agent has no listener", testAgentRunning)
-	t.Run("process-isolation: Agent unit not writable by tero", testAgentUnitOwnership)
-	t.Run("process-isolation: Service can't change the agent's setup", testServiceFencedFromAgent)
+	t.Run("process-isolation: Agent unit not writable by tero or tero-agent", testAgentUnitOwnership)
+	t.Run("process-isolation: Service can't change the agent's setup", testAgentHomeClosed)
+	t.Run("process-isolation: Service can't change the agent's setup (as tero)", testServiceFencedFromAgent)
 	t.Run("server-init: Key service running after init", testKeyServiceRunning)
 	t.Run("key-service: Process identity and sandbox / No network / Socket permissions", testKeyServiceIdentity)
 	t.Run("server-init: tero-keys can't log in", testKeysUserNoLogin)
@@ -75,6 +79,7 @@ func TestSlice1(t *testing.T) {
 	t.Run("key-service: TPM used when present", testTPMUsedWhenPresent)
 	t.Run("key-service: tero can't read the key / process-isolation: Dashboard can't read the key service", testTeroCantReadKeys)
 	t.Run("key-service: Other process running as tero / process-isolation: Other tero processes refused", testOnlyTheDashboardIsAnswered)
+	t.Run("key-service: Agent asks for account verbs", testAgentKnownButLimited)
 	t.Run("process-isolation: Dashboard can't leave its cgroup", testDashboardStaysInItsCgroup)
 	t.Run("server-init: Public IP recorded for app addresses", testPublicIPRecorded)
 	t.Run("process-isolation: Built-in proxy binds privileged ports", testProxyPorts)
@@ -84,6 +89,7 @@ func TestSlice1(t *testing.T) {
 	t.Run("server-init: Init on an already initialized server", testSecondInit)
 	t.Run("dashboard-access", testDashboardAccess)
 	t.Run("deploys", testDeploys)
+	t.Run("github", testGitHub)
 	t.Run("key-service: Rotation / Apps keep serving during rotation", testRotateKey)
 	t.Run("key-service: Key can't be opened / dashboard-access: Master key lost", testKeyCantBeOpened)
 	t.Run("breach-response: Not confirmed / Scripted run / Confirmed run", testAssumeBreach)
@@ -184,18 +190,25 @@ func lastLine(output string) string {
 	return strings.TrimSpace(lines[len(lines)-1])
 }
 
-// asTero runs a shell command as tero inside tero's systemd user session,
-// where the agent runs. On Podman 4.9 the first container with networking
-// leaves a helper process in the cgroup it started from, and app networks
-// stop working once that cgroup ends, so containers must start where the
-// agent's would.
+// asAgent runs a shell command as tero-agent inside its systemd user
+// session, where the agent runs. On Podman 4.9 the first container with
+// networking leaves a helper process in the cgroup it started from, and app
+// networks stop working once that cgroup ends, so containers must start
+// where the agent's would.
+func asAgent(command string) string {
+	script := base64.StdEncoding.EncodeToString([]byte(command))
+	return "echo " + script + " | base64 -d | sudo systemd-run --machine=tero-agent@.host --user --pipe --wait --quiet bash"
+}
+
+// asTero runs a shell command as tero outside tero.service, which is what
+// anything else running as tero could do. tero has no user manager.
 func asTero(command string) string {
 	script := base64.StdEncoding.EncodeToString([]byte(command))
-	return "echo " + script + " | base64 -d | sudo systemd-run --machine=tero@.host --user --pipe --wait --quiet bash"
+	return "echo " + script + " | base64 -d | sudo -u tero bash"
 }
 
 func testPodmanAvailable(t *testing.T) {
-	got := must(t, asTero(`podman info --format '{{.Host.Security.Rootless}}'`))
+	got := must(t, asAgent(`podman info --format '{{.Host.Security.Rootless}}'`))
 	if got != "true" {
 		t.Fatalf("podman rootless = %q", got)
 	}
@@ -221,8 +234,11 @@ func assertOneLargeNonOverlappingRange(t *testing.T, file, contents string) {
 		start, _ := strconv.Atoi(fields[1])
 		count, _ := strconv.Atoi(fields[2])
 		if fields[0] == "tero" {
+			t.Errorf("%s: tero has a subordinate range; only tero-agent runs containers", file)
+		}
+		if fields[0] == "tero-agent" {
 			if count != 1000000 {
-				t.Errorf("%s: tero has %d ids, want 1000000", file, count)
+				t.Errorf("%s: tero-agent has %d ids, want 1000000", file, count)
 			}
 			teroSpans = append(teroSpans, span{start, start + count})
 		} else {
@@ -231,49 +247,96 @@ func assertOneLargeNonOverlappingRange(t *testing.T, file, contents string) {
 	}
 
 	if len(teroSpans) != 1 {
-		t.Fatalf("%s: tero has %d ranges, want 1:\n%s", file, len(teroSpans), contents)
+		t.Fatalf("%s: tero-agent has %d ranges, want 1:\n%s", file, len(teroSpans), contents)
 	}
 	for _, other := range otherSpans {
 		isOverlapping := other.start < teroSpans[0].end && teroSpans[0].start < other.end
 		if isOverlapping {
-			t.Errorf("%s: tero's range overlaps %v", file, other)
+			t.Errorf("%s: tero-agent's range overlaps %v", file, other)
 		}
 	}
 }
 
 func testLinger(t *testing.T) {
-	assertContains(t, must(t, "loginctl show-user tero --property=Linger"), "Linger=yes")
-	must(t, "test -d /run/user/$(id -u tero)")
+	assertContains(t, must(t, "loginctl show-user tero-agent --property=Linger"), "Linger=yes")
+	must(t, "test -d /run/user/$(id -u tero-agent)")
+}
+
+// server-init: tero has no containers / process-isolation: tero can't run containers
+func testTeroHasNoContainers(t *testing.T) {
+	if linger := run(t, "loginctl show-user tero --property=Linger").output; strings.Contains(linger, "Linger=yes") {
+		t.Error("tero has lingering enabled")
+	}
+	if got := run(t, asTero("cd /tmp && podman run --rm quay.io/libpod/alpine:latest true")); got.exitCode == 0 {
+		t.Error("tero can run a container")
+	}
 }
 
 func testNoLogin(t *testing.T) {
-	shell := must(t, "getent passwd tero | cut -d: -f7")
-	if shell != "/usr/sbin/nologin" {
-		t.Errorf("tero's shell is %q", shell)
-	}
+	for _, user := range []string{"tero", "tero-agent"} {
+		shell := must(t, "getent passwd "+user+" | cut -d: -f7")
+		if shell != "/usr/sbin/nologin" {
+			t.Errorf("%s's shell is %q", user, shell)
+		}
 
-	passwordState := strings.Fields(must(t, "sudo passwd --status tero"))
-	if len(passwordState) < 2 || passwordState[1] != "L" {
-		t.Errorf("tero's password is not locked: %v", passwordState)
+		passwordState := strings.Fields(must(t, "sudo passwd --status "+user))
+		if len(passwordState) < 2 || passwordState[1] != "L" {
+			t.Errorf("%s's password is not locked: %v", user, passwordState)
+		}
+	}
+}
+
+// server-init: Shared directory / Other users kept out
+func testSharedState(t *testing.T) {
+	if got := must(t, "stat -c '%a %U %G' /var/lib/tero-shared"); got != "2770 root tero-shared" {
+		t.Errorf("/var/lib/tero-shared is %q, want 2770 root tero-shared", got)
+	}
+	for _, group := range []string{"tero-shared", "tero-keys-callers"} {
+		members := strings.Split(must(t, "getent group "+group+" | cut -d: -f4"), ",")
+		slices.Sort(members)
+		if !slices.Equal(members, []string{"tero", "tero-agent"}) {
+			t.Errorf("%s members = %v, want tero and tero-agent", group, members)
+		}
+	}
+	if got := run(t, "sudo -u nobody cat /var/lib/tero-shared/tero.db"); got.exitCode == 0 {
+		t.Error("another user can read the shared database")
+	}
+	if got := run(t, "sudo -u nobody "+keysStatus); got.exitCode == 0 {
+		t.Error("another user can reach the key service")
+	}
+}
+
+func testAgentHomeClosed(t *testing.T) {
+	// Podman 4.9 adds search permission for others, so container processes
+	// running as subordinate ids can reach their storage; listing and
+	// reading stay closed.
+	got := must(t, "stat -c '%a %U' /var/lib/tero-agent")
+	if got != "700 tero-agent" && got != "711 tero-agent" {
+		t.Errorf("/var/lib/tero-agent is %q, want 700 or 711, owned by tero-agent", got)
 	}
 }
 
 func testRootlessContainer(t *testing.T) {
 	// A scope of its own keeps the container running after this command's
 	// transient unit ends, as the agent does for apps.
-	must(t, asTero("systemd-run --user --scope --quiet podman run -d --rm --name e2e-probe quay.io/libpod/alpine:latest sleep 60"))
-	defer run(t, asTero("podman rm -f e2e-probe"))
+	must(t, asAgent("systemd-run --user --scope --quiet podman run -d --rm --userns=auto --name e2e-probe quay.io/libpod/alpine:latest sleep 60"))
+	defer run(t, asAgent("podman rm -f e2e-probe"))
 
-	containerOwners := must(t, asTero("podman top e2e-probe huser"))
+	containerOwners := must(t, asAgent("podman top e2e-probe huser"))
+	agentUID := must(t, "id -u tero-agent")
 	for _, line := range strings.Split(containerOwners, "\n")[1:] {
-		if strings.TrimSpace(line) == "0" || strings.TrimSpace(line) == "root" {
+		owner := strings.TrimSpace(line)
+		if owner == "0" || owner == "root" {
 			t.Errorf("a container process runs as host root:\n%s", containerOwners)
+		}
+		if owner == agentUID || owner == "tero-agent" {
+			t.Errorf("a container process runs as tero-agent itself:\n%s", containerOwners)
 		}
 	}
 
 	helperOwners := must(t, "ps -o user= -C conmon,pasta,rootlessport | sort -u")
-	if helperOwners != "tero" {
-		t.Errorf("container helpers run as %q, want only tero", helperOwners)
+	if helperOwners != "tero-agent" {
+		t.Errorf("container helpers run as %q, want only tero-agent", helperOwners)
 	}
 }
 
@@ -422,16 +485,17 @@ func testServiceIdentity(t *testing.T) {
 	}
 }
 
-// agentSystemctl talks to tero's systemd user manager, where the agent runs.
-const agentSystemctl = "sudo systemctl --user --machine=tero@.host"
+// agentSystemctl talks to tero-agent's systemd user manager, where the
+// agent runs.
+const agentSystemctl = "sudo systemctl --user --machine=tero-agent@.host"
 
 func testAgentRunning(t *testing.T) {
 	must(t, agentSystemctl+" is-active tero-agent")
 	agentPID := must(t, agentSystemctl+" show tero-agent --property=MainPID --value")
 
 	owner := must(t, "ps -o user= -p "+agentPID)
-	if owner != "tero" {
-		t.Errorf("agent runs as %q, want tero", owner)
+	if owner != "tero-agent" {
+		t.Errorf("agent runs as %q, want tero-agent", owner)
 	}
 
 	listeners := run(t, "sudo ss -Hlnp -A inet,unix | grep 'pid="+agentPID+",'")
@@ -447,15 +511,21 @@ func testAgentUnitOwnership(t *testing.T) {
 	}
 }
 
-// testServiceFencedFromAgent writes as tero from inside the service's mount
-// namespace, which is what a compromised service could do.
+// testServiceFencedFromAgent reads and writes as tero, from inside the
+// service's mount namespace and outside it, which is what a compromised
+// service could do.
 func testServiceFencedFromAgent(t *testing.T) {
 	servicePID := must(t, "systemctl show tero --property=MainPID --value")
 	asServiceUser := "sudo nsenter -t " + servicePID + " -m -S $(id -u tero) -G $(id -g tero) "
 
-	for _, dir := range []string{"/var/lib/tero/.config", "/var/lib/tero/.local", "/var/lib/tero/.cache"} {
-		if got := run(t, asServiceUser+"touch "+dir+"/tero-e2e-probe"); got.exitCode == 0 {
-			t.Errorf("the service can write to %s", dir)
+	for _, path := range []string{"/var/lib/tero-agent", "/var/lib/tero-agent/.config", "/var/lib/tero-agent/.local/share/containers"} {
+		for _, prefix := range []string{asServiceUser, "sudo -u tero "} {
+			if got := run(t, prefix+"ls "+path); got.exitCode == 0 {
+				t.Errorf("tero can list %s", path)
+			}
+			if got := run(t, prefix+"touch "+path+"/tero-e2e-probe"); got.exitCode == 0 {
+				t.Errorf("tero can write to %s", path)
+			}
 		}
 	}
 }

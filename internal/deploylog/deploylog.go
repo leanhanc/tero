@@ -4,16 +4,23 @@
 package deploylog
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sync"
+	"syscall"
 )
 
-// Dir holds one log file per deploy.
-const Dir = "/var/lib/tero/logs/deploys"
+// Dir holds one log file per deploy, in the directory the service and the
+// agent share. Init creates it with group tero-shared, so the agent writes
+// each log and the service can read it.
+const Dir = "/var/lib/tero-shared/logs/deploys"
+
+// logFileMode lets the group, which holds the service, read a log.
+const logFileMode = 0o640
 
 // MaxSize caps a log so a noisy build can't fill the disk.
 const MaxSize = 10 << 20
@@ -40,12 +47,23 @@ type Writer struct {
 
 // Create starts a deploy's log, replacing any earlier file of that name.
 func Create(dir string, deployID int64) (*Writer, error) {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, err
 	}
 
-	file, err := os.OpenFile(Path(dir, deployID), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	// The log is created afresh, never through a link someone left in its
+	// place.
+	path := Path(dir, deployID)
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, logFileMode)
 	if err != nil {
+		return nil, err
+	}
+	// The agent's umask would otherwise leave the service unable to read it.
+	if err := file.Chmod(logFileMode); err != nil {
+		file.Close()
 		return nil, err
 	}
 

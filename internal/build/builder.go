@@ -38,8 +38,8 @@ type Request struct {
 	Log     io.Writer
 }
 
-// Build plans and builds the app and loads the image into tero's Podman
-// store, returning the image name. Errors the admin can act on are Failures.
+// Build plans and builds the app and loads the image into tero-agent's
+// Podman store, returning the image name. Errors the admin can act on are Failures.
 func Build(ctx context.Context, req Request) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, buildTimeout)
 	defer cancel()
