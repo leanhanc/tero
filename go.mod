@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	github.com/caddyserver/caddy/v2 v2.11.7
-	github.com/fxamacker/cbor/v2 v2.9.4
+	github.com/fxamacker/cbor/v2 v2.9.6
 	github.com/go-git/go-git/v5 v5.19.3
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/moby/buildkit v0.34.1
