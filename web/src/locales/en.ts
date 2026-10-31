@@ -66,7 +66,8 @@ export const en = {
 	},
 	github: {
 		heading: 'Connecting GitHub',
-		working: 'Finishing on this server…',
+		savingApp: 'Saving the new GitHub App on this server. Next, GitHub asks which repositories it may read…',
+		readingInstallation: 'Reading which repositories the App may read…',
 		failed: "GitHub couldn't be connected. Try again from Settings.",
 		backToSettings: 'Back to Settings',
 	},
@@ -98,7 +99,7 @@ export const en = {
 		},
 		confirm: {
 			heading: "Confirm it's you",
-			intro: 'Ending sessions and changing passkeys need your password and a new code from your authenticator app. It lasts 5 minutes.',
+			intro: 'Ending sessions, changing passkeys, and connecting or disconnecting GitHub need your password and a new code from your authenticator app. It lasts 5 minutes.',
 			passwordLabel: 'Password',
 			codeLabel: '6-digit code from your authenticator app',
 			submit: 'Confirm',

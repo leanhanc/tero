@@ -61,7 +61,8 @@ export const es: Messages = {
 	},
 	github: {
 		heading: 'Conectando GitHub',
-		working: 'Terminando en este servidor…',
+		savingApp: 'Guardando la nueva GitHub App en este servidor. Después, GitHub te pregunta qué repositorios puede leer…',
+		readingInstallation: 'Leyendo qué repositorios puede leer la App…',
 		failed: 'No se pudo conectar GitHub. Volvé a intentarlo desde Configuración.',
 		backToSettings: 'Volver a Configuración',
 	},
@@ -93,7 +94,7 @@ export const es: Messages = {
 		},
 		confirm: {
 			heading: 'Confirmá que sos vos',
-			intro: 'Para cerrar sesiones y cambiar llaves de acceso hacen falta tu contraseña y un código nuevo de tu app de autenticación. Dura 5 minutos.',
+			intro: 'Para cerrar sesiones, cambiar llaves de acceso y conectar o desconectar GitHub hacen falta tu contraseña y un código nuevo de tu app de autenticación. Dura 5 minutos.',
 			passwordLabel: 'Contraseña',
 			codeLabel: 'Código de 6 dígitos de tu app de autenticación',
 			submit: 'Confirmar',

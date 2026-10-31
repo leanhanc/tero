@@ -1,4 +1,4 @@
-import { type SubmitEvent, useState } from 'react';
+import { type SubmitEvent, useEffect, useRef, useState } from 'react';
 
 import { AccountNameField } from '../../../components/account-name-field';
 import { confirmIdentity, errorMessage } from '../../../lib/utils/api';
@@ -20,6 +20,13 @@ export function ConfirmForm({ onConfirm, onCancel }: ConfirmFormProps) {
 	const [code, setCode] = useState('');
 	const [formError, setFormError] = useState('');
 	const [isSubmitting, setIsSubmitting] = useState(false);
+	const passwordRef = useRef<HTMLInputElement>(null);
+
+	// The form opens at the top of the account sections, which can be far
+	// from the button that asked for it, so it takes focus and scrolls in.
+	useEffect(() => {
+		passwordRef.current?.focus();
+	}, []);
 
 	const submit = async (event: SubmitEvent<HTMLFormElement>) => {
 		event.preventDefault();
@@ -46,6 +53,7 @@ export function ConfirmForm({ onConfirm, onCancel }: ConfirmFormProps) {
 				<AccountNameField />
 				<label htmlFor="confirm-password">{messages.settings.confirm.passwordLabel}</label>
 				<input
+					ref={passwordRef}
 					id="confirm-password"
 					name="password"
 					type="password"

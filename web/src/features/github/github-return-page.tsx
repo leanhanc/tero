@@ -19,6 +19,8 @@ type Outcome = { isFailed: false } | { isFailed: true; reason: string };
 export function GitHubReturnPage({ path, onLogout }: { path: string; onLogout: () => void }) {
 	const messages = useMessages();
 	const [outcome, setOutcome] = useState<Outcome>({ isFailed: false });
+	const isConnecting = path === '/github/connected';
+	const workingMessage = isConnecting ? messages.github.savingApp : messages.github.readingInstallation;
 	// GitHub's code and the state work once, so the page finishes once.
 	const hasStarted = useRef(false);
 
@@ -28,7 +30,7 @@ export function GitHubReturnPage({ path, onLogout }: { path: string; onLogout: (
 		}
 		hasStarted.current = true;
 
-		const finish = path === '/github/connected' ? finishConnecting : finishInstalling;
+		const finish = isConnecting ? finishConnecting : finishInstalling;
 		const query = new URLSearchParams(window.location.search);
 		// They are spent once read, so they don't stay in the address bar or
 		// the history either.
@@ -36,7 +38,7 @@ export function GitHubReturnPage({ path, onLogout }: { path: string; onLogout: (
 		finish(query)
 			.then(setOutcome)
 			.catch((failure: unknown) => setOutcome({ isFailed: true, reason: errorMessage(failure, messages.errors) }));
-	}, [path, messages]);
+	}, [path, isConnecting, messages]);
 
 	return (
 		<>
@@ -49,7 +51,7 @@ export function GitHubReturnPage({ path, onLogout }: { path: string; onLogout: (
 						<InternalLink to="/settings">{messages.github.backToSettings}</InternalLink>
 					</>
 				) : (
-					<p role="status">{messages.github.working}</p>
+					<p role="status">{workingMessage}</p>
 				)}
 			</main>
 		</>

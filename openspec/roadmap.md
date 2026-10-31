@@ -180,3 +180,7 @@ Opt-in ways to keep the server off the public internet, for admins who want a sm
 - [ ] Once on, SSH and the dashboard answer only over WireGuard; Tero first checks for a recent handshake from one of your devices, so turning it on can't lock you out
 - [ ] Only accept web traffic from Cloudflare's IP ranges, for apps whose domain is behind Cloudflare
 - [ ] Later, a Cloudflare Tunnel mode where the server answers on no public port at all
+
+### Private container registries
+
+- [ ] Pull app images from and push built images to private registries (Artifactory, GHCR, ECR, Docker Hub), with their credentials sealed in `tero-keys` and used only by the agent, never stored in plain form as Coolify and Dokploy do

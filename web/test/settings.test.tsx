@@ -92,6 +92,7 @@ describe('settings page', () => {
 		expect(calls.some((call) => call.path === '/api/sessions/end')).toBe(false);
 
 		const confirm = screen.getByRole('region', { name: "Confirm it's you" });
+		expect(within(confirm).getByLabelText('Password')).toBe(document.activeElement);
 		await userEvent.type(within(confirm).getByLabelText('Password'), 'a long enough passphrase');
 		await userEvent.type(within(confirm).getByLabelText('6-digit code from your authenticator app'), '123456');
 		await userEvent.click(within(confirm).getByRole('button', { name: 'Confirm' }));

@@ -7,6 +7,12 @@
 #   scripts/dev-vm.sh update   rebuild, install the new binary, restart Tero
 #   scripts/dev-vm.sh up       create the VM if missing, otherwise start it if
 #                              stopped and ship the current build into it
+#   scripts/dev-vm.sh tunnel   recreate the VM with the dashboard on a public
+#                              Cloudflare quick tunnel, so GitHub can reach
+#                              its webhook
+#
+# A tunnel's name is random and lasts until the VM stops, so after a restart
+# run tunnel again. The dashboard keeps its name across update.
 #
 # Certificates come from the VM's test CA, so the browser warns once. Each
 # step prints one line; LOG_LEVEL=debug shows the commands' own output.
@@ -15,6 +21,8 @@ set -euo pipefail
 instance="tero-dev"
 release="${TERO_DEV_RELEASE:-26.04}"
 domain="tero.localhost"
+domain_file="/etc/tero-dev/domain"
+cloudflared_version="2026.10.0"
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 pebble_version="v2.10.1"
 cd "$repo_root"
@@ -72,7 +80,17 @@ print_setup_link_if_needed() {
 	echo "  $link"
 }
 
+# A tunnel VM saved its dashboard name; any other VM uses the default.
+load_domain() {
+	local saved
+	saved="$(limactl shell --workdir / "$instance" cat "$domain_file" 2>/dev/null || true)"
+	if [[ -n "$saved" ]]; then
+		domain="$saved"
+	fi
+}
+
 update_tero() {
+	load_domain
 	if ! limactl shell --workdir / "$instance" test -f /etc/systemd/system/tero-keys.service; then
 		echo "$instance was set up before the key service existed. Run scripts/dev-vm.sh to recreate it." >&2
 		exit 1
@@ -125,6 +143,82 @@ set_up_test_ca() {
 }
 step "Setting up the test certificate authority" set_up_test_ca
 step "Installing the build in $instance" install_tero
+
+# cloudflared serves the dashboard on a random trycloudflare.com name. A quick
+# tunnel can't set the SNI it sends to the origin from that name, and Caddy
+# needs it to pick the certificate it got from Pebble, so cloudflared speaks
+# plain HTTP to a socat bridge on 127.0.0.1:8080, which opens TLS to Caddy
+# with the tunnel's name once it is known.
+start_tunnel() {
+	local checksum
+	case "$arch" in
+	arm64) checksum="e6422b9d4f72d3194bc5a38676f13667c06666523217b842a877d72a80b5ac08" ;;
+	amd64) checksum="d33ff2d14475178d2012c2c56beba87389ac5ded27649519f198a7d3134a99db" ;;
+	esac
+
+	limactl shell --workdir / "$instance" sudo bash -euo pipefail -c "
+		curl -fsSL -o /tmp/cloudflared https://github.com/cloudflare/cloudflared/releases/download/$cloudflared_version/cloudflared-linux-$arch
+		echo '$checksum  /tmp/cloudflared' | sha256sum -c -
+		install -m 0755 /tmp/cloudflared /usr/local/bin/cloudflared
+		DEBIAN_FRONTEND=noninteractive apt-get install -y -qq socat
+		cat > /etc/systemd/system/cloudflared-dev.service <<'UNIT'
+[Unit]
+Description=Cloudflare quick tunnel to the dashboard (Tero dev only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+DynamicUser=yes
+ExecStart=/usr/local/bin/cloudflared --no-autoupdate tunnel --url http://127.0.0.1:8080
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+		systemctl daemon-reload
+		systemctl enable --now cloudflared-dev.service
+	"
+}
+
+# The tunnel prints its name once it has registered with Cloudflare.
+read_tunnel_domain() {
+	local found
+	for _ in $(seq 60); do
+		found="$(limactl shell --workdir / "$instance" sudo journalctl -u cloudflared-dev.service --no-pager -o cat |
+			grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -n 1 || true)"
+		if [[ -n "$found" ]]; then
+			echo "${found#https://}"
+			return
+		fi
+		sleep 1
+	done
+	echo "The Cloudflare tunnel didn't start. See: limactl shell $instance sudo journalctl -u cloudflared-dev.service" >&2
+	return 1
+}
+
+start_sni_bridge() {
+	limactl shell --workdir / "$instance" sudo bash -euo pipefail -c "
+		cat > /etc/systemd/system/tero-dev-sni-bridge.service <<UNIT
+[Unit]
+Description=Plain HTTP from the Cloudflare tunnel to Caddy over TLS (Tero dev only)
+
+[Service]
+DynamicUser=yes
+ExecStart=/usr/bin/socat TCP-LISTEN:8080,bind=127.0.0.1,fork,reuseaddr OPENSSL:127.0.0.1:443,verify=0,snihost=$domain
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+		systemctl daemon-reload
+		systemctl enable --now tero-dev-sni-bridge.service
+	"
+}
+
+if [[ "$mode" == "tunnel" ]]; then
+	step "Starting a Cloudflare tunnel" start_tunnel
+	domain="$(read_tunnel_domain)"
+	limactl shell --workdir / "$instance" sudo install -D -m 0644 /dev/stdin "$domain_file" <<<"$domain"
+	step "Bridging the tunnel to Caddy" start_sni_bridge
+fi
 
 # The VM's public IP isn't reachable from the browser, so apps go under
 # localhost instead of nip.io.
