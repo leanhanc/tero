@@ -98,6 +98,7 @@ Drafts: [apps](drafts/apps/spec.md)
 - [ ] Deploy history with commit, trigger, state and duration
 - [ ] One-click rollback to a kept image with that deploy's variables
 - [ ] Image retention and pruning
+- [ ] Start apps without copying their image: `--userns=auto` makes rootless Podman copy every layer with new owners before each start, about 6 minutes per deploy on a slow disk. Measure it, then try a fixed id range per app or fuse-overlayfs
 
 Drafts: [deployments](drafts/deployments/spec.md)
 
