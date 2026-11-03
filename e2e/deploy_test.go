@@ -413,15 +413,20 @@ func testRedeployNewCommit(t *testing.T) {
 		t.Errorf("redeploy while one is queued = %d %s, want 202", second.status, second.body)
 	}
 
+	// On a fast server the agent can claim the first Redeploy before the
+	// second arrives, so the second queues behind it: three deploys, never
+	// more.
 	detail := waitForDeploy(t, redeployApp)
-	if len(detail.Deploys) != 2 {
-		t.Errorf("deploys after two quick redeploys = %d, want 2", len(detail.Deploys))
+	if len(detail.Deploys) != 2 && len(detail.Deploys) != 3 {
+		t.Errorf("deploys after two quick redeploys = %d, want 2 or 3", len(detail.Deploys))
 	}
 	if detail.Deploys[0].State != "live" || detail.Deploys[0].CommitSHA == first.CommitSHA {
 		t.Fatalf("redeploy = %s on %s, want live on a new commit", detail.Deploys[0].State, detail.Deploys[0].CommitSHA)
 	}
-	if detail.Deploys[1].State != "superseded" {
-		t.Errorf("previous deploy = %s, want superseded", detail.Deploys[1].State)
+	for _, previous := range detail.Deploys[1:] {
+		if previous.State != "superseded" {
+			t.Errorf("previous deploy %d = %s, want superseded", previous.ID, previous.State)
+		}
 	}
 	waitUntil(t, 15*time.Second, func() bool {
 		return strings.Contains(fetchApp(t, redeployApp, "/").output, "second commit")
