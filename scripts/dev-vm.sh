@@ -6,13 +6,15 @@
 #   scripts/dev-vm.sh          recreate the VM, run init, print the setup link
 #   scripts/dev-vm.sh update   rebuild, install the new binary, restart Tero
 #   scripts/dev-vm.sh up       create the VM if missing, otherwise start it if
-#                              stopped and ship the current build into it
+#                              stopped and ship the current build into it; a
+#                              tunnel VM is recreated on https://tero.localhost
 #   scripts/dev-vm.sh tunnel   recreate the VM with the dashboard on a public
 #                              Cloudflare quick tunnel, so GitHub can reach
 #                              its webhook
 #
 # A tunnel's name is random and lasts until the VM stops, so after a restart
-# run tunnel again. The dashboard keeps its name across update.
+# run tunnel again. The dashboard keeps its name across update. Init fixes the
+# dashboard's name, so moving a VM between a tunnel and localhost recreates it.
 #
 # Certificates come from the VM's test CA, so the browser warns once. Each
 # step prints one line; LOG_LEVEL=debug shows the commands' own output.
@@ -80,10 +82,14 @@ print_setup_link_if_needed() {
 	echo "  $link"
 }
 
-# A tunnel VM saved its dashboard name; any other VM uses the default.
+# A tunnel VM saved its dashboard name; any other VM has none.
+saved_domain() {
+	limactl shell --workdir / "$instance" cat "$domain_file" 2>/dev/null || true
+}
+
 load_domain() {
 	local saved
-	saved="$(limactl shell --workdir / "$instance" cat "$domain_file" 2>/dev/null || true)"
+	saved="$(saved_domain)"
 	if [[ -n "$saved" ]]; then
 		domain="$saved"
 	fi
@@ -116,10 +122,19 @@ if [[ "$mode" == "up" && "$instance_status" == "Stopped" ]]; then
 	step "Starting $instance" limactl start --tty=false "$instance"
 fi
 
-# A missing VM falls through to the full setup below.
-if [[ "$mode" == "update" || ( "$mode" == "up" && -n "$instance_status" ) ]]; then
+if [[ "$mode" == "update" ]]; then
 	update_tero
 	exit 0
+fi
+
+# A missing VM falls through to the full setup below, and so does a tunnel VM,
+# which can't answer on localhost.
+if [[ "$mode" == "up" && -n "$instance_status" ]]; then
+	if [[ -z "$(saved_domain)" ]]; then
+		update_tero
+		exit 0
+	fi
+	echo "$instance is set up on a Cloudflare tunnel. Recreating it on https://$domain..."
 fi
 
 pebble_bin="$(go env GOPATH)/bin"
