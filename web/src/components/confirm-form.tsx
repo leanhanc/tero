@@ -1,8 +1,8 @@
 import { type SubmitEvent, useEffect, useRef, useState } from 'react';
 
-import { AccountNameField } from '../../../components/account-name-field';
-import { confirmIdentity, errorMessage } from '../../../lib/utils/api';
-import { useMessages } from '../../../lib/utils/locale';
+import { AccountNameField } from './account-name-field';
+import { confirmIdentity, errorMessage } from '../lib/utils/api';
+import { useMessages } from '../lib/utils/locale';
 import { CodeInput } from './code-input';
 
 type ConfirmFormProps = {
@@ -11,8 +11,9 @@ type ConfirmFormProps = {
 };
 
 /**
- * Asks for the password and a code so this session may end sessions and
- * change passkeys. It appears when the admin asks for one of those actions.
+ * Asks for the password and a code so this session may do what needs a fresh
+ * check, such as changing passkeys or an app's sealed variables. It appears when
+ * the admin asks for one of those actions.
  */
 export function ConfirmForm({ onConfirm, onCancel }: ConfirmFormProps) {
 	const messages = useMessages();
@@ -22,8 +23,8 @@ export function ConfirmForm({ onConfirm, onCancel }: ConfirmFormProps) {
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const passwordRef = useRef<HTMLInputElement>(null);
 
-	// The form opens at the top of the account sections, which can be far
-	// from the button that asked for it, so it takes focus and scrolls in.
+	// The form can open far from the button that asked for it, so it takes
+	// focus and scrolls in.
 	useEffect(() => {
 		passwordRef.current?.focus();
 	}, []);

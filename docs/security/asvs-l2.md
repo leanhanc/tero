@@ -139,10 +139,11 @@ ASVS 11.1.2. Every key and algorithm Tero uses:
 | GitHub App tokens (JWT) | RS256 over a fixed header, signed by `tero-keys` with the App's key | Not stored; returned only to the agent | Valid 5 minutes, backdated 60 s for clock skew |
 | Installation tokens | Issued by GitHub, scoped to one repository and `contents: read` | Only in the agent's memory, passed to git as HTTP basic auth | Revoked as soon as the fetch ends; GitHub expires them within an hour |
 | GitHub webhook secret | Made by GitHub; HMAC-SHA256 of each body | AES-256-GCM under the master key in `/var/lib/tero-keys/keys.db`; `tero-keys` answers only valid or invalid | Deleted with the App's key |
+| App variables | Set by the admin | AES-256-GCM under the master key in `/var/lib/tero-keys/keys.db`; the additional data names the table, column, app, variable and key version. On the host, only in tmpfs while the app runs | Replaced or removed from the app page; re-sealed by `rotate-key` and `assume-breach`, which also list their names to rotate |
 
 SHA-1 appears only where a protocol fixes it: inside HMAC for TOTP, which is what authenticator apps support, and in the breach-check prefix, which is a lookup key rather than a security function. Everything Tero chooses itself uses SHA-256 or stronger.
 
-The `tero-keys` service holds the master key and is the only process that reads the password hash, the TOTP secret, the passkeys and the GitHub App's secrets: the dashboard sends the password and code, or the browser's passkey answer, over a Unix socket and gets back a session or a refusal. App secrets are encrypted under the same key with slice 6 (ADR 0001, section 5).
+The `tero-keys` service holds the master key and is the only process that reads the password hash, the TOTP secret, the passkeys and the GitHub App's secrets: the dashboard sends the password and code, or the browser's passkey answer, over a Unix socket and gets back a session or a refusal. Apps' variables are encrypted under the same key, and only the agent receives sealed ones, for the app's approved source.
 
 ### Sensitive data
 
@@ -156,7 +157,18 @@ ASVS 14.1.1 and 14.1.2.
 | TLS private key | Readable only by `tero` |
 | GitHub App private key and webhook secret | Never returned by `tero-keys`; the dashboard never receives them, even while connecting |
 | Installation tokens | In the agent's memory for one fetch; never written to the database, the checkout (`.git` is removed before the build), the image or the build log |
+| Unsealed app variables | Encrypted by `tero-keys`; returned to the dashboard only for a live session; released to the agent only for the app's approved source. Never in the shared database, an image, Podman's storage or a command line, and masked in deploy logs when they are 8 bytes or longer |
+| Sealed app variables | The same, and never returned to the dashboard or to root. Each release to the agent is recorded. Any change on an app with one needs a session confirmed in the last 5 minutes |
 | Source IPs in security events | Kept for the admin; kept for one year, then deleted |
+
+Limits of what protects app variables, stated so nobody assumes more:
+
+- A value typed into a compromised dashboard is exposed: the process handles it in clear on its way to `tero-keys`, and it serves the page, so encrypting in the browser wouldn't help. Sealing protects stored values.
+- A confirmed session doesn't say what it approves. A compromised dashboard can do something else in the 5 minutes after the admin confirms; each change is recorded by `tero-keys`.
+- An app can read its own values, and a build can read those scoped to reach it, including through a dependency's install script.
+- Masking catches exact matches only, not encoded or split values.
+- tmpfs pages can reach swap on a server that has it. Tero doesn't manage swap.
+- Without a TPM2, a copy of the disk can open the master key, and with it every stored value.
 
 API responses carry `Cache-Control: no-store`, and logout sends `Clear-Site-Data: "cache", "storage"`. Nothing is kept in browser storage other than the two cookies.
 
@@ -493,8 +505,8 @@ Tero isn't an OAuth client, resource server, authorization server or OpenID prov
 | 13.2.3 | 2 | No default credentials | Met | None exist | — |
 | 13.2.4 | 2 | Outbound allowlist | Gap | The firewall filters inbound only | — |
 | 13.2.5 | 2 | Server allowlist for requests | Gap | As 13.2.4 | — |
-| 13.3.1 | 2 | Secrets management solution | Met | The `tero-keys` service holds the master key sealed by `systemd-creds` and keeps the login secrets and the GitHub App's secrets encrypted; app secrets join it in slice 6. The TLS key stays in Caddy's storage, readable only by `tero` | `TestSecretSealedAtRest`, e2e `Stored form` |
-| 13.3.2 | 2 | Least privilege for secrets | Met | Only `tero-keys` can read the master key and the login secrets; the dashboard can only ask yes-or-no questions, by verb, and is identified by its exact systemd unit. Only `tero` can read its database and Caddy storage | `TestCallersLimitedToTheirVerbs`, `TestOnlyTheDashboardsExactCgroupCounts`, `TestDatabaseHoldsNoCredentials` |
+| 13.3.1 | 2 | Secrets management solution | Met | The `tero-keys` service holds the master key sealed by `systemd-creds` and keeps the login secrets, the GitHub App's secrets and apps' variables encrypted. The TLS key stays in Caddy's storage, readable only by `tero` | `TestSecretSealedAtRest`, `TestValuesSealedAtRest`, e2e `Stored form`, `process-isolation: Disk search` |
+| 13.3.2 | 2 | Least privilege for secrets | Met | Only `tero-keys` can read the master key and the login secrets, and only the agent gets sealed variables, for the approved source; the dashboard can only ask yes-or-no questions, by verb, and is identified by its exact systemd unit. Only `tero` can read its database and Caddy storage | `TestCallersLimitedToTheirVerbs`, `TestOnlyTheDashboardsExactCgroupCounts`, `TestDatabaseHoldsNoCredentials`, `TestWhoGetsValues`, `TestReleaseOnlyForTheApprovedSource` |
 | 13.4.1 | 1 | No source control metadata | Met | One binary with the built web app embedded | — |
 | 13.4.2 | 2 | Debug modes off | Met | Caddy's admin API is disabled; no debug endpoints | — |
 | 13.4.3 | 2 | No directory listings | Met | Assets are served by exact name; any other path gets the app page | — |
@@ -542,7 +554,7 @@ Tero isn't an OAuth client, resource server, authorization server or OpenID prov
 | 16.2.2 | 2 | Synchronized clocks, UTC | Met | Stored as Unix time and returned in UTC; Ubuntu syncs the clock with systemd-timesyncd | — |
 | 16.2.3 | 2 | Logs only go to documented places | Met | [Logging](#logging) | — |
 | 16.2.4 | 2 | Readable log format | Met | Structured journal fields | — |
-| 16.2.5 | 2 | Sensitive data kept out of logs | Met | No passwords, codes, secrets or tokens | `TestEventsRecordedWithoutSecrets` |
+| 16.2.5 | 2 | Sensitive data kept out of logs | Met | No passwords, codes, secrets or tokens; events name variables, never their values, and deploy logs mask known values | `TestEventsRecordedWithoutSecrets`, `TestVariableEvents`, `TestMaskerHidesValues`, e2e `build-pipeline: Build prints a value` |
 | 16.3.1 | 2 | All authentication logged | Met | Every login path records its events | `TestEventsRecordedWithoutSecrets`, `TestRateLimitTriggerIsRecorded` |
 | 16.3.2 | 2 | Failed authorization logged | Met | Requests refused for a missing or expired session are written to the journal | `TestRefusedRequests_v5_0_0_16_3_2_MissingSessionIsJournaled` |
 | 16.3.3 | 2 | Bypass attempts logged | Met | Rate limiting is recorded as an event; cross-site requests, non-JSON requests and malformed bodies are written to the journal | `TestRefusedRequests_v5_0_0_16_3_3_BypassAttemptsAreJournaled` |

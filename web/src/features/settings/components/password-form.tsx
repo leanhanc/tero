@@ -3,7 +3,7 @@ import { type SubmitEvent, useState } from 'react';
 import { AccountNameField } from '../../../components/account-name-field';
 import { ApiError, changePassword, errorMessage } from '../../../lib/utils/api';
 import { useMessages } from '../../../lib/utils/locale';
-import { CodeInput } from './code-input';
+import { CodeInput } from '../../../components/code-input';
 
 /**
  * Changes the password with the current one and a code in the same form, so

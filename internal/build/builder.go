@@ -2,12 +2,16 @@ package build
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/moby/buildkit/client"
@@ -19,6 +23,8 @@ import (
 	"github.com/railwayapp/railpack/core/plan"
 	"github.com/tonistiigi/fsutil"
 
+	"github.com/leanhanc/tero/internal/containers"
+	"github.com/leanhanc/tero/internal/keys"
 	"github.com/leanhanc/tero/internal/podman"
 )
 
@@ -36,6 +42,12 @@ type Request struct {
 	// WorkDir holds the image tarball between the build and `podman load`.
 	WorkDir string
 	Log     io.Writer
+	// Source is recorded in the image, for the key service's check when the
+	// image is run.
+	Source keys.AppSource
+	// Variables are the values build steps get, as secret mounts, so they
+	// stay out of the image's layers.
+	Variables map[string]string
 }
 
 // Build plans and builds the app and loads the image into tero-agent's
@@ -45,7 +57,7 @@ func Build(ctx context.Context, req Request) (string, error) {
 	defer cancel()
 
 	fmt.Fprintln(req.Log, "==> Planning the build with Railpack")
-	buildPlan, err := planBuild(req.SourceDir, req.Log)
+	buildPlan, err := planBuild(req.SourceDir, req.Variables, req.Log)
 	if err != nil {
 		return "", err
 	}
@@ -69,7 +81,7 @@ func Build(ctx context.Context, req Request) (string, error) {
 // buildTarball runs the build in a throwaway BuildKit daemon, which is
 // removed whatever the outcome.
 func buildTarball(ctx context.Context, req Request, buildPlan *plan.BuildPlan, imageName, tarballPath string) error {
-	buildkitDaemon, err := startDaemon(ctx, req.DeployID)
+	buildkitDaemon, err := startDaemon(ctx, req.DeployID, req.WorkDir)
 	if err != nil {
 		return explainContextError(ctx, err)
 	}
@@ -106,9 +118,19 @@ func solve(ctx context.Context, buildkitClient *client.Client, req Request, buil
 		return err
 	}
 
-	state, image, err := buildkit.ConvertPlanToLLB(buildPlan, buildkit.ConvertPlanOptions{BuildPlatform: platform})
+	// The cache key keeps cache mounts such as ~/.npm apart per app and source,
+	// so a build can't plant what another app's, or this app's from another
+	// source, installs. Layers are content-addressed and stay shared.
+	state, image, err := buildkit.ConvertPlanToLLB(buildPlan, buildkit.ConvertPlanOptions{
+		BuildPlatform: platform,
+		CacheKey:      cacheKey(req.AppName, req.Source),
+		SecretsHash:   hashVariables(req.Variables),
+	})
 	if err != nil {
 		return fmt.Errorf("convert the plan to LLB: %w", err)
+	}
+	if err := labelSource(image, req.Source); err != nil {
+		return err
 	}
 	imageConfig, err := json.Marshal(image)
 	if err != nil {
@@ -131,8 +153,8 @@ func solve(ctx context.Context, buildkitClient *client.Client, req Request, buil
 
 	solveOpt := client.SolveOpt{
 		LocalMounts: map[string]fsutil.FS{"context": sourceFS},
-		// Railpack plans mount secrets by name; apps have none yet.
-		Session: []session.Attachable{secretsprovider.FromMap(map[string][]byte{})},
+		// Railpack plans mount variables as secrets by name.
+		Session: []session.Attachable{secretsprovider.FromMap(secretMounts(req.Variables))},
 		Exports: []client.ExportEntry{{
 			Type:   client.ExporterDocker,
 			Attrs:  map[string]string{"name": imageName, "containerimage.config": string(imageConfig)},
@@ -141,6 +163,50 @@ func solve(ctx context.Context, buildkitClient *client.Client, req Request, buil
 	}
 
 	return solveWithProgress(ctx, buildkitClient, definition, solveOpt, req.Log)
+}
+
+// labelSource records what the image was built from. The image's own
+// configuration is set here, after the build, so a build can't choose it.
+func labelSource(image *buildkit.Image, source keys.AppSource) error {
+	label, err := json.Marshal(source)
+	if err != nil {
+		return err
+	}
+	if image.Config.Labels == nil {
+		image.Config.Labels = map[string]string{}
+	}
+	image.Config.Labels[containers.SourceLabel] = string(label)
+
+	return nil
+}
+
+func cacheKey(appName string, source keys.AppSource) string {
+	sum := sha256.Sum256(fmt.Appendf(nil, "%q %q %q %q", appName, source.Repository, source.Branch, source.RootDirectory))
+	return hex.EncodeToString(sum[:8])
+}
+
+func secretMounts(variables map[string]string) map[string][]byte {
+	mounts := make(map[string][]byte, len(variables))
+	for name, value := range variables {
+		mounts[name] = []byte(value)
+	}
+
+	return mounts
+}
+
+// hashVariables changes when any value does, so the steps that use a variable
+// run again rather than coming from the cache. Empty with no variables.
+func hashVariables(variables map[string]string) string {
+	if len(variables) == 0 {
+		return ""
+	}
+
+	hash := sha256.New()
+	for _, name := range slices.Sorted(maps.Keys(variables)) {
+		fmt.Fprintf(hash, "%d:%s=%d:%s\n", len(name), name, len(variables[name]), variables[name])
+	}
+
+	return hex.EncodeToString(hash.Sum(nil))
 }
 
 func solveWithProgress(ctx context.Context, buildkitClient *client.Client, definition *llb.Definition, solveOpt client.SolveOpt, log io.Writer) error {

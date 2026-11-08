@@ -90,7 +90,7 @@ func newTestDashboard(t *testing.T) testDashboard {
 		Webhooks:   githubapp.Webhooks{DB: db, Events: dashboardKeys, Now: clock},
 		Verifier:   dashboardKeys,
 	}
-	handler := NewHandler(service, appService, gitHub, "dash.example.com", logDir)
+	handler := NewHandler(service, appService, gitHub, dashboardKeys, "dash.example.com", logDir)
 
 	return testDashboard{handler: handler, service: service, db: db, logDir: logDir, now: &now, secret: &secret, refusals: refusals,
 		keysRoot: keys.NewLocalClient(keyService, keys.CallerRoot), keysAgent: keys.NewLocalClient(keyService, keys.CallerAgent)}

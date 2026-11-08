@@ -34,6 +34,9 @@ type Deploy struct {
 	ID    int64
 	AppID int64
 	State State
+	// NeedsBuild is false for a deploy that restarts the live image with new
+	// values. It only changes how much work a deploy does.
+	NeedsBuild bool
 }
 
 // TriggerType is what queued a deploy.
@@ -44,6 +47,8 @@ const (
 	TriggerManual TriggerType = "manual"
 	TriggerPush   TriggerType = "push"
 	TriggerPoll   TriggerType = "poll"
+	// TriggerVariables applies saved changes when the admin redeploys them.
+	TriggerVariables TriggerType = "variables"
 )
 
 // Trigger is what queued a deploy. PushedBy and RequestedSHA are set for a
@@ -52,11 +57,15 @@ type Trigger struct {
 	Type         TriggerType
 	PushedBy     string
 	RequestedSHA string
+	// SkipsBuild restarts the live image instead of building.
+	SkipsBuild bool
 }
 
 // Enqueue queues a deploy of the app's tracked branch and returns its id.
 // When the app already has a deploy queued, that one takes the newer
-// trigger instead, and its id is returned.
+// trigger instead, and its id is returned. A queued deploy that needs a build
+// keeps needing one and keeps its trigger when a trigger that skips the build
+// arrives, so applying saved changes can't cancel a queued push.
 func Enqueue(ctx context.Context, db *sql.DB, appID int64, trigger Trigger, now time.Time) (int64, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -65,16 +74,20 @@ func Enqueue(ctx context.Context, db *sql.DB, appID int64, trigger Trigger, now 
 	defer tx.Rollback()
 
 	var queuedID int64
-	err = tx.QueryRowContext(ctx, "SELECT id FROM deploys WHERE app_id = ? AND state = 'queued'", appID).Scan(&queuedID)
+	var queuedNeedsBuild bool
+	err = tx.QueryRowContext(ctx, "SELECT id, needs_build FROM deploys WHERE app_id = ? AND state = 'queued'", appID).Scan(&queuedID, &queuedNeedsBuild)
 	isAlreadyQueued := err == nil
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return 0, err
 	}
 
+	if isAlreadyQueued && queuedNeedsBuild && trigger.SkipsBuild {
+		return queuedID, tx.Commit()
+	}
 	if isAlreadyQueued {
 		_, err = tx.ExecContext(ctx,
-			"UPDATE deploys SET trigger_type = ?, pushed_by = ?, requested_sha = ? WHERE id = ?",
-			string(trigger.Type), trigger.PushedBy, trigger.RequestedSHA, queuedID)
+			"UPDATE deploys SET trigger_type = ?, pushed_by = ?, requested_sha = ?, needs_build = ? WHERE id = ?",
+			string(trigger.Type), trigger.PushedBy, trigger.RequestedSHA, !trigger.SkipsBuild, queuedID)
 		if err != nil {
 			return 0, fmt.Errorf("update the queued deploy: %w", err)
 		}
@@ -82,8 +95,8 @@ func Enqueue(ctx context.Context, db *sql.DB, appID int64, trigger Trigger, now 
 	}
 
 	result, err := tx.ExecContext(ctx,
-		"INSERT INTO deploys (app_id, trigger_type, pushed_by, requested_sha, queued_at) VALUES (?, ?, ?, ?, ?)",
-		appID, string(trigger.Type), trigger.PushedBy, trigger.RequestedSHA, now.Unix())
+		"INSERT INTO deploys (app_id, trigger_type, pushed_by, requested_sha, needs_build, queued_at) VALUES (?, ?, ?, ?, ?, ?)",
+		appID, string(trigger.Type), trigger.PushedBy, trigger.RequestedSHA, !trigger.SkipsBuild, now.Unix())
 	if err != nil {
 		return 0, fmt.Errorf("queue the deploy: %w", err)
 	}
@@ -123,8 +136,8 @@ func ClaimNext(ctx context.Context, db *sql.DB, now time.Time) (Deploy, bool, er
 	}
 
 	deploy := Deploy{State: Building}
-	err = tx.QueryRowContext(ctx, "SELECT id, app_id FROM deploys WHERE state = 'queued' ORDER BY id LIMIT 1").
-		Scan(&deploy.ID, &deploy.AppID)
+	err = tx.QueryRowContext(ctx, "SELECT id, app_id, needs_build FROM deploys WHERE state = 'queued' ORDER BY id LIMIT 1").
+		Scan(&deploy.ID, &deploy.AppID, &deploy.NeedsBuild)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Deploy{}, false, nil
 	}
@@ -132,7 +145,10 @@ func ClaimNext(ctx context.Context, db *sql.DB, now time.Time) (Deploy, bool, er
 		return Deploy{}, false, err
 	}
 
-	_, err = tx.ExecContext(ctx, "UPDATE deploys SET state = 'building', started_at = ? WHERE id = ?", now.Unix(), deploy.ID)
+	_, err = tx.ExecContext(ctx, `
+		UPDATE deploys SET state = 'building', started_at = ?,
+			pending_through = (SELECT coalesce(max(id), 0) FROM app_pending_changes WHERE app_id = ?)
+		WHERE id = ?`, now.Unix(), deploy.AppID, deploy.ID)
 	if err != nil {
 		return Deploy{}, false, err
 	}
@@ -205,6 +221,9 @@ type Release struct {
 	Image     string
 	Container string
 	HostPort  int
+	// HasVariables says the agent must ask the key service for values before
+	// starting this release's container.
+	HasVariables bool
 }
 
 // LiveRelease returns the app's live release, if it has one.
@@ -261,13 +280,46 @@ func Promote(ctx context.Context, db *sql.DB, deployID int64, now time.Time) err
 	if err != nil {
 		return err
 	}
+	_, err = tx.ExecContext(ctx, `
+		DELETE FROM app_pending_changes
+		WHERE app_id = (SELECT app_id FROM deploys WHERE id = ?)
+			AND id <= (SELECT pending_through FROM deploys WHERE id = ?)
+			AND (touches_build = 0 OR (SELECT needs_build FROM deploys WHERE id = ?) = 1)`, deployID, deployID, deployID)
+	if err != nil {
+		return err
+	}
 
 	return tx.Commit()
 }
 
+// MarkBuilt records that a deploy built, though it was queued to restart: the
+// app had no live release, or its live image came from another source. Its
+// changes that reach a build are then applied too.
+func MarkBuilt(ctx context.Context, db *sql.DB, deployID int64) error {
+	_, err := db.ExecContext(ctx, "UPDATE deploys SET needs_build = 1 WHERE id = ?", deployID)
+	return err
+}
+
+// ReuseRelease makes a deploy that needs no build run the given release's
+// image and commit.
+func ReuseRelease(ctx context.Context, db *sql.DB, deployID, releaseID int64) error {
+	_, err := db.ExecContext(ctx, `
+		UPDATE deploys SET (image, commit_sha, commit_message) =
+			(SELECT image, commit_sha, commit_message FROM deploys WHERE id = ?)
+		WHERE id = ?`, releaseID, deployID)
+	return err
+}
+
+// RecordStartProblem records why the agent can't start an app's live release,
+// or clears it with an empty reason.
+func RecordStartProblem(ctx context.Context, db *sql.DB, appID int64, reason string) error {
+	_, err := db.ExecContext(ctx, "UPDATE apps SET start_problem = ? WHERE id = ? AND start_problem != ?", reason, appID, reason)
+	return err
+}
+
 func queryReleases(ctx context.Context, db *sql.DB, filter string, args ...any) ([]Release, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT deploys.id, deploys.app_id, apps.name, deploys.image, deploys.container, deploys.host_port
+		SELECT deploys.id, deploys.app_id, apps.name, deploys.image, deploys.container, deploys.host_port, apps.has_variables
 		FROM deploys JOIN apps ON apps.id = deploys.app_id
 		WHERE deploys.state = 'live' `+filter+` ORDER BY apps.name`, args...)
 	if err != nil {
@@ -278,7 +330,7 @@ func queryReleases(ctx context.Context, db *sql.DB, filter string, args ...any) 
 	var releases []Release
 	for rows.Next() {
 		var release Release
-		err := rows.Scan(&release.DeployID, &release.AppID, &release.AppName, &release.Image, &release.Container, &release.HostPort)
+		err := rows.Scan(&release.DeployID, &release.AppID, &release.AppName, &release.Image, &release.Container, &release.HostPort, &release.HasVariables)
 		if err != nil {
 			return nil, err
 		}

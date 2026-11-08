@@ -58,7 +58,7 @@ for release in "${releases[@]}"; do
 	limactl shell --workdir / "$instance" sudo bash /tmp/vm-test-release.sh "$arch"
 	scripts/vm-test-repo.sh "$instance"
 
-	if ! TERO_VM="$instance" go test -tags e2e -count=1 -v -timeout 60m ./e2e/...; then
+	if ! TERO_VM="$instance" go test -tags e2e -count=1 -v -timeout 120m ./e2e/...; then
 		failed+=("$release")
 	fi
 done

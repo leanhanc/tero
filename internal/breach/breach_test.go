@@ -438,3 +438,44 @@ var testAppKey = func() string {
 	}
 	return string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}))
 }()
+
+// breach-response: Names and sources listed, Apps keep their variables
+func TestAssumeBreachListsVariablesWithoutValues(t *testing.T) {
+	server := newFakeServer(t)
+	server.setUp(t)
+	ctx := context.Background()
+	dashboard := keys.NewLocalClient(server.service, keys.CallerDashboard)
+	source := keys.AppSource{Repository: "https://github.com/acme/shop", Branch: "main"}
+	plain, sealedValue := "plain-marker", "sealed-marker"
+	_, err := dashboard.SaveVariables(ctx, server.session, "198.51.100.7", "shop", source, []keys.VariableChange{
+		{Name: "PLAIN", Value: &plain, Scope: keys.ScopeRuntime},
+		{Name: "API_KEY", Value: &sealedValue, Scope: keys.ScopeRuntime, IsSealed: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	if err := Run(ctx, server.options(&out, "yes\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	report := out.String()
+	for _, want := range []string{"shop, from https://github.com/acme/shop (branch main)", "PLAIN\n", "API_KEY (sealed)"} {
+		if !strings.Contains(report, want) {
+			t.Errorf("the report lacks %q:\n%s", want, report)
+		}
+	}
+	if strings.Contains(report, "marker") {
+		t.Errorf("the report holds a value:\n%s", report)
+	}
+
+	agent := keys.NewLocalClient(server.service, keys.CallerAgent)
+	released, err := agent.ReleaseVariables(ctx, keys.ReleaseRequest{App: "shop", Source: source, Phase: keys.PhaseRun, DeployID: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(released) != 2 {
+		t.Errorf("released %d values after the reset", len(released))
+	}
+}

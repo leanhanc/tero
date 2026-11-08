@@ -21,7 +21,9 @@ import (
 	"github.com/leanhanc/tero/internal/deploylog"
 	"github.com/leanhanc/tero/internal/deploys"
 	"github.com/leanhanc/tero/internal/githubapp"
+	"github.com/leanhanc/tero/internal/keys"
 	"github.com/leanhanc/tero/internal/source"
+	"github.com/leanhanc/tero/internal/variables"
 )
 
 const (
@@ -51,7 +53,9 @@ type Pipeline struct {
 	// Tokens mints the token a repository the GitHub App covers is fetched
 	// with. Without it, only public repositories outside the App deploy.
 	Tokens RepositoryTokens
-	Now    func() time.Time
+	// Variables gives the agent the values of apps that have them.
+	Variables variables.Releaser
+	Now       func() time.Time
 }
 
 // RepositoryTokens mints a token that reads one covered repository. revoke
@@ -72,16 +76,22 @@ type app struct {
 	RunTogether   bool
 	// GitHubRepositoryID is set when the GitHub App covers the repository.
 	GitHubRepositoryID int64
+	HasVariables       bool
+	// Source is the row as stored, compared exactly with the approved source
+	// before anything is fetched.
+	Source keys.AppSource
 }
 
 // Run takes a claimed deploy to live or failed. Failures the admin can act
 // on are recorded on the deploy and return nil; other errors are returned
 // for the agent to record.
 func (p Pipeline) Run(ctx context.Context, deploy deploys.Deploy) error {
-	log, err := deploylog.Create(p.LogDir, deploy.ID)
+	logFile, err := deploylog.Create(p.LogDir, deploy.ID)
 	if err != nil {
 		return err
 	}
+	defer logFile.Close()
+	log := deploylog.NewMasker(logFile)
 	defer log.Close()
 
 	deployApp, err := p.loadApp(ctx, deploy.AppID)
@@ -90,7 +100,28 @@ func (p Pipeline) Run(ctx context.Context, deploy deploys.Deploy) error {
 		return err
 	}
 
-	image, err := p.buildImage(ctx, deploy, deployApp, log)
+	live, hasLive, err := deploys.LiveRelease(ctx, p.DB, deployApp.ID)
+	if err != nil {
+		return err
+	}
+	// The row is written where the dashboard can reach it: a container or
+	// image the agent didn't make for this app is never stopped, run or removed.
+	if hasLive && !containers.IsReleaseOf(deployApp.Name, live.DeployID, live.Container, live.Image) {
+		fmt.Fprintf(log, "\n%s\n", internalErrorNote)
+		return fmt.Errorf("app %s's live release names container %q and image %q, which the agent didn't make for it", deployApp.Name, live.Container, live.Image)
+	}
+
+	isRestart, err := p.canRestart(ctx, deploy, deployApp, live, hasLive)
+	if err != nil {
+		return err
+	}
+	image := live.Image
+	if isRestart {
+		fmt.Fprintln(log, "==> Restarting the live image with the saved variables. Nothing to fetch or build")
+		err = deploys.ReuseRelease(ctx, p.DB, deploy.ID, live.DeployID)
+	} else {
+		image, err = p.buildImage(ctx, deploy, deployApp, log)
+	}
 	if err != nil {
 		return p.recordFailure(ctx, deploy.ID, deploys.Building, err, log)
 	}
@@ -99,13 +130,44 @@ func (p Pipeline) Run(ctx context.Context, deploy deploys.Deploy) error {
 		return err
 	}
 
-	err = p.release(ctx, deploy, deployApp, image, log)
+	err = p.release(ctx, deploy, deployApp, image, isRestart, live, hasLive, log)
 	return p.recordFailure(ctx, deploy.ID, deploys.Starting, err, log)
+}
+
+// canRestart reports whether the deploy can restart the live image rather than
+// build. A deploy queued to restart builds when there is no live image, or when
+// that image came from another source, such as before a rename was approved,
+// since its values are only released for the approved source. Such a deploy
+// then counts as a build.
+func (p Pipeline) canRestart(ctx context.Context, deploy deploys.Deploy, deployApp app, live deploys.Release, hasLive bool) (bool, error) {
+	if deploy.NeedsBuild {
+		return false, nil
+	}
+
+	isSameSource := false
+	if hasLive {
+		imageSource, err := containers.ImageSource(ctx, deployApp.Name, live.Image)
+		if err != nil {
+			return false, err
+		}
+		isSameSource = imageSource == deployApp.Source
+	}
+	if isSameSource {
+		return true, nil
+	}
+
+	return false, deploys.MarkBuilt(ctx, p.DB, deploy.ID)
 }
 
 // buildImage fetches the commit into a fresh checkout and builds it. The
 // checkout is removed afterwards.
-func (p Pipeline) buildImage(ctx context.Context, deploy deploys.Deploy, deployApp app, log io.Writer) (string, error) {
+func (p Pipeline) buildImage(ctx context.Context, deploy deploys.Deploy, deployApp app, log *deploylog.Masker) (string, error) {
+	// Asked first, so a source that isn't approved does no work at all.
+	buildValues, err := p.releaseForBuild(ctx, deploy, deployApp, log)
+	if err != nil {
+		return "", err
+	}
+
 	checkoutDir := filepath.Join(p.WorkDir, "deploy-"+strconv.FormatInt(deploy.ID, 10))
 	if err := os.RemoveAll(checkoutDir); err != nil {
 		return "", err
@@ -133,6 +195,8 @@ func (p Pipeline) buildImage(ctx context.Context, deploy deploys.Deploy, deployA
 		SourceDir: sourceDir,
 		WorkDir:   p.WorkDir,
 		Log:       log,
+		Source:    deployApp.Source,
+		Variables: buildValues.Map(),
 	})
 	if err != nil {
 		return "", err
@@ -141,10 +205,59 @@ func (p Pipeline) buildImage(ctx context.Context, deploy deploys.Deploy, deployA
 	return image, deploys.RecordImage(ctx, p.DB, deploy.ID, image)
 }
 
-// release starts the new container and makes it live once it answers.
-func (p Pipeline) release(ctx context.Context, deploy deploys.Deploy, deployApp app, image string, log io.Writer) error {
-	live, hasLive, err := deploys.LiveRelease(ctx, p.DB, deployApp.ID)
+// releaseForBuild gets the values this deploy's build uses.
+func (p Pipeline) releaseForBuild(ctx context.Context, deploy deploys.Deploy, deployApp app, log *deploylog.Masker) (variables.Released, error) {
+	return p.releaseValues(deployApp, log, func(releaser variables.Releaser) (variables.Released, error) {
+		return variables.ForBuild(ctx, releaser, deployApp.Name, deployApp.Source, deploy.ID)
+	})
+}
+
+// releaseValues asks the key service for an app's values. It always asks,
+// since has_variables is written where the dashboard can reach it: turning it
+// off must not skip the source check. The flag only decides whether an app may
+// go ahead without values while the key service can't answer.
+func (p Pipeline) releaseValues(deployApp app, log *deploylog.Masker, ask func(variables.Releaser) (variables.Released, error)) (variables.Released, error) {
+	if p.Variables == nil {
+		if deployApp.HasVariables {
+			return nil, errNoKeyService
+		}
+		return nil, nil
+	}
+
+	released, err := ask(p.Variables)
+	if errors.Is(err, keys.ErrUnavailable) && !deployApp.HasVariables {
+		return nil, nil
+	}
 	if err != nil {
+		return nil, asVariablesFailure(err)
+	}
+	log.Add(released.Masked())
+
+	return released, nil
+}
+
+// releaseForRun gets the values the container of image runs with.
+func (p Pipeline) releaseForRun(ctx context.Context, deploy deploys.Deploy, deployApp app, image string, log *deploylog.Masker) (map[string]string, error) {
+	released, err := p.releaseValues(deployApp, log, func(releaser variables.Releaser) (variables.Released, error) {
+		return variables.ForImage(ctx, releaser, deployApp.Name, image, deploy.ID)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return released.Map(), nil
+}
+
+// release starts the new container and makes it live once it answers. A
+// restart shares its image with the live release, so that image stays when
+// either container goes.
+func (p Pipeline) release(ctx context.Context, deploy deploys.Deploy, deployApp app, image string, isRestart bool, live deploys.Release, hasLive bool, log *deploylog.Masker) error {
+	// Before the old release stops: a refusal must leave it serving.
+	values, err := p.releaseForRun(ctx, deploy, deployApp, image, log)
+	if err != nil {
+		if !isRestart {
+			p.discardNewRelease(ctx, "", image, log)
+		}
 		return err
 	}
 
@@ -157,7 +270,7 @@ func (p Pipeline) release(ctx context.Context, deploy deploys.Deploy, deployApp 
 	}
 
 	fmt.Fprintln(log, "==> Starting the app")
-	container, hostPort, startErr := containers.Start(ctx, deployApp.Name, deploy.ID, image)
+	container, hostPort, startErr := containers.Start(ctx, deployApp.Name, deploy.ID, image, values)
 	if startErr == nil {
 		startErr = deploys.RecordContainer(ctx, p.DB, deploy.ID, container, hostPort)
 	}
@@ -166,7 +279,11 @@ func (p Pipeline) release(ctx context.Context, deploy deploys.Deploy, deployApp 
 	}
 
 	if startErr != nil {
-		p.discardNewRelease(ctx, container, image, log)
+		discardedImage := image
+		if isRestart {
+			discardedImage = ""
+		}
+		p.discardNewRelease(ctx, container, discardedImage, log)
 		if shouldStopOldFirst {
 			p.resumeOldRelease(ctx, live, log)
 		}
@@ -179,6 +296,9 @@ func (p Pipeline) release(ctx context.Context, deploy deploys.Deploy, deployApp 
 	fmt.Fprintln(log, "==> Live")
 
 	if hasLive {
+		if isRestart {
+			live.Image = ""
+		}
 		p.retireOldRelease(ctx, deployApp.Name, hostPort, live, log)
 	}
 
@@ -237,7 +357,7 @@ func (p Pipeline) resumeOldRelease(ctx context.Context, live deploys.Release, lo
 
 // recordFailure fails the deploy at step with a reason the admin can act
 // on. Errors that aren't the admin's to fix are returned for the agent.
-func (p Pipeline) recordFailure(ctx context.Context, deployID int64, step deploys.State, err error, log io.Writer) error {
+func (p Pipeline) recordFailure(ctx context.Context, deployID int64, step deploys.State, err error, log *deploylog.Masker) error {
 	if err == nil {
 		return nil
 	}
@@ -253,6 +373,7 @@ func (p Pipeline) recordFailure(ctx context.Context, deployID int64, step deploy
 		return err
 	}
 
+	reason = log.Mask(reason)
 	fmt.Fprintf(log, "\n%s\n", reason)
 	return deploys.Fail(context.WithoutCancel(ctx), p.DB, deployID, step, reason, p.Now())
 }
@@ -297,6 +418,24 @@ func (p Pipeline) fetch(ctx context.Context, deployApp app, checkoutDir string) 
 	return source.Clone(ctx, deployApp.Repository, token, deployApp.Branch, checkoutDir)
 }
 
+// errNoKeyService means the app has variables and this agent can't ask for
+// them.
+var errNoKeyService = errors.New("the agent has no key service to ask for this app's variables")
+
+// asVariablesFailure marks the key service's answers the admin can act on.
+func asVariablesFailure(err error) error {
+	switch {
+	case errors.Is(err, keys.ErrSourceNotApproved):
+		return build.Failure{Reason: "This app's source changed since its variables were saved. Approve the new source on the app's page to deploy with them"}
+	case errors.Is(err, keys.ErrKeyNotLoaded):
+		return build.Failure{Reason: "Some of this app's variables were sealed with a master key that was lost. Set them again on the app's page"}
+	case errors.Is(err, keys.ErrUnavailable):
+		return build.Failure{Reason: "The key service isn't running, so this app's variables aren't available. Check `systemctl status tero-keys` on the server and redeploy"}
+	default:
+		return err
+	}
+}
+
 func asFailure(err error) error {
 	isActionable := errors.Is(err, source.ErrRepositoryNotFound) || errors.Is(err, source.ErrBranchNotFound) ||
 		errors.Is(err, source.ErrFolderNotFound) || errors.Is(err, githubapp.ErrNotInstalled)
@@ -311,8 +450,8 @@ func (p Pipeline) loadApp(ctx context.Context, appID int64) (app, error) {
 	var loaded app
 	var repositoryURL string
 	err := p.DB.QueryRowContext(ctx,
-		"SELECT id, name, repository, branch, root_directory, run_together, github_repository_id FROM apps WHERE id = ?", appID).
-		Scan(&loaded.ID, &loaded.Name, &repositoryURL, &loaded.Branch, &loaded.RootDirectory, &loaded.RunTogether, &loaded.GitHubRepositoryID)
+		"SELECT id, name, repository, branch, root_directory, run_together, github_repository_id, has_variables FROM apps WHERE id = ?", appID).
+		Scan(&loaded.ID, &loaded.Name, &repositoryURL, &loaded.Branch, &loaded.RootDirectory, &loaded.RunTogether, &loaded.GitHubRepositoryID, &loaded.HasVariables)
 	if err != nil {
 		return app{}, fmt.Errorf("load app %d: %w", appID, err)
 	}
@@ -328,6 +467,7 @@ func (p Pipeline) loadApp(ctx context.Context, appID int64) (app, error) {
 		return app{}, fmt.Errorf("app %s has an invalid branch %q", loaded.Name, loaded.Branch)
 	}
 	loaded.Repository = repository
+	loaded.Source = keys.AppSource{Repository: repositoryURL, Branch: loaded.Branch, RootDirectory: loaded.RootDirectory}
 
 	return loaded, nil
 }

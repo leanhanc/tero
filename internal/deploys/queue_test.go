@@ -187,3 +187,154 @@ func TestIsSettledLiveOnlyWhileLiveWithNoDeployStarting(t *testing.T) {
 	}
 	assertSettled(false)
 }
+
+// deployments: Variable change while a push is queued
+func TestSkippingTheBuildCantCancelAQueuedBuild(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t, "api")
+
+	pushed, err := Enqueue(ctx, db, 1, Trigger{Type: TriggerPush, PushedBy: "ana"}, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged, err := Enqueue(ctx, db, 1, Trigger{Type: TriggerVariables, SkipsBuild: true}, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged != pushed {
+		t.Fatalf("got a second deploy %d", merged)
+	}
+
+	deploy, isClaimed, err := ClaimNext(ctx, db, testNow)
+	if err != nil || !isClaimed {
+		t.Fatalf("claim: %v, %v", isClaimed, err)
+	}
+	if !deploy.NeedsBuild {
+		t.Error("the queued push no longer builds")
+	}
+
+	var trigger string
+	if err := db.QueryRow("SELECT trigger_type FROM deploys WHERE id = ?", pushed).Scan(&trigger); err != nil {
+		t.Fatal(err)
+	}
+	if trigger != string(TriggerPush) {
+		t.Errorf("trigger = %s", trigger)
+	}
+}
+
+func TestABuildUpgradesAQueuedRestart(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t, "api")
+
+	if _, err := Enqueue(ctx, db, 1, Trigger{Type: TriggerVariables, SkipsBuild: true}, testNow); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Enqueue(ctx, db, 1, Trigger{Type: TriggerManual}, testNow); err != nil {
+		t.Fatal(err)
+	}
+
+	deploy, _, err := ClaimNext(ctx, db, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !deploy.NeedsBuild {
+		t.Error("the restart wasn't upgraded to a build")
+	}
+}
+
+// app-variables: Runtime variable changed, New values break the app; a save
+// made after a deploy started stays pending.
+func TestPromoteClearsOnlyWhatTheDeployApplied(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t, "api")
+	pend := func(name string) {
+		t.Helper()
+		if _, err := db.Exec("INSERT INTO app_pending_changes (app_id, name, touches_build) VALUES (1, ?, 0)", name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pending := func() int {
+		t.Helper()
+		var count int
+		if err := db.QueryRow("SELECT count(*) FROM app_pending_changes").Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		return count
+	}
+
+	pend("A")
+	failing := mustEnqueue(t, db, 1)
+	if _, _, err := ClaimNext(ctx, db, testNow); err != nil {
+		t.Fatal(err)
+	}
+	if err := Fail(ctx, db, failing, Building, "no", testNow); err != nil {
+		t.Fatal(err)
+	}
+	if pending() != 1 {
+		t.Error("a failed deploy cleared the notice")
+	}
+
+	deployID := mustEnqueue(t, db, 1)
+	if _, _, err := ClaimNext(ctx, db, testNow); err != nil {
+		t.Fatal(err)
+	}
+	pend("B")
+	if err := Promote(ctx, db, deployID, testNow); err != nil {
+		t.Fatal(err)
+	}
+	if pending() != 1 {
+		t.Errorf("pending after promote = %d, want the save made during the deploy", pending())
+	}
+}
+
+func TestReuseReleaseCopiesImageAndCommit(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t, "api")
+	first := mustEnqueue(t, db, 1)
+	if _, err := db.Exec("UPDATE deploys SET state = 'live', image = 'img', commit_sha = 'abc', commit_message = 'msg' WHERE id = ?", first); err != nil {
+		t.Fatal(err)
+	}
+	second := mustEnqueue(t, db, 1)
+
+	if err := ReuseRelease(ctx, db, second, first); err != nil {
+		t.Fatal(err)
+	}
+	var image, sha, message string
+	if err := db.QueryRow("SELECT image, commit_sha, commit_message FROM deploys WHERE id = ?", second).Scan(&image, &sha, &message); err != nil {
+		t.Fatal(err)
+	}
+	if image != "img" || sha != "abc" || message != "msg" {
+		t.Errorf("got %s %s %s", image, sha, message)
+	}
+}
+
+// A restart applies runtime-only changes and leaves a change that reaches the
+// build pending.
+func TestRestartLeavesBuildChangesPending(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t, "api")
+	for name, touchesBuild := range map[string]bool{"RUN": false, "BUILD": true} {
+		if _, err := db.Exec("INSERT INTO app_pending_changes (app_id, name, touches_build) VALUES (1, ?, ?)", name, touchesBuild); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	deployID, err := Enqueue(ctx, db, 1, Trigger{Type: TriggerVariables, SkipsBuild: true}, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ClaimNext(ctx, db, testNow); err != nil {
+		t.Fatal(err)
+	}
+	if err := Promote(ctx, db, deployID, testNow); err != nil {
+		t.Fatal(err)
+	}
+
+	var left string
+	if err := db.QueryRow("SELECT group_concat(name) FROM app_pending_changes").Scan(&left); err != nil {
+		t.Fatal(err)
+	}
+	if left != "BUILD" {
+		t.Errorf("pending after a restart = %q, want BUILD", left)
+	}
+}

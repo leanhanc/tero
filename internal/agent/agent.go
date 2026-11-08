@@ -16,6 +16,7 @@ import (
 
 	"github.com/leanhanc/tero/internal/build"
 	"github.com/leanhanc/tero/internal/deploys"
+	"github.com/leanhanc/tero/internal/variables"
 )
 
 // pollInterval is how often the agent looks for a queued deploy. A deploy
@@ -41,7 +42,10 @@ type Options struct {
 	DB         *sql.DB
 	Pipeline   Pipeline
 	Background []Background
-	Now        func() time.Time
+	// Variables gives the agent the values of apps that have them, when it
+	// starts their containers again.
+	Variables variables.Releaser
+	Now       func() time.Time
 }
 
 // Run claims and runs queued deploys until ctx is cancelled.
@@ -66,7 +70,7 @@ func Run(ctx context.Context, opts Options) error {
 		slog.Error("remove containers left by an interrupted deploy", "error", err)
 	}
 
-	go reconcilePeriodically(ctx, opts.DB)
+	go reconcilePeriodically(ctx, newReconciler(opts.DB, opts.Variables))
 	go pullBuildKit(ctx)
 	for _, work := range opts.Background {
 		go work.Run(ctx)
@@ -91,12 +95,12 @@ func Run(ctx context.Context, opts Options) error {
 // reconcilePeriodically runs alongside deploys. It leaves apps with a deploy
 // starting alone, and a deploy promotes its release before removing the old
 // container, so the two never fight over a container.
-func reconcilePeriodically(ctx context.Context, db *sql.DB) {
+func reconcilePeriodically(ctx context.Context, keeper *reconciler) {
 	ticker := time.NewTicker(reconcileInterval)
 	defer ticker.Stop()
 
 	for {
-		if err := keepLiveAppsRunning(ctx, db); err != nil {
+		if err := keeper.keepLiveAppsRunning(ctx); err != nil {
 			slog.Error("keep live apps running", "error", err)
 		}
 

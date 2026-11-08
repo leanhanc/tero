@@ -2,7 +2,7 @@
 
 Tero is like Vercel, but on your own VPS. Push to GitHub and your app is live with HTTPS on a server you own, and the server comes locked down from the first command.
 
-> **Status:** early development. Tero is not ready for use yet. The install script, the server setup (`sudo tero init`), the dashboard with its account security, and deploying a JavaScript backend from a public GitHub repository by hand all work. Deploy on push, environment variables, custom domains and rollback are still being built.
+> **Status:** early development. Tero is not ready for use yet. The install script, the server setup (`sudo tero init`), the dashboard with its account security, and deploying a JavaScript backend from a public GitHub repository by hand all work. Custom domains and rollback are still being built.
 
 ## What makes Tero cool
 
@@ -13,7 +13,7 @@ Tero is like Vercel, but on your own VPS. Push to GitHub and your app is live wi
 - 🌐 **Automatic HTTPS.** Every app gets a free `<app>.<server-ip>.nip.io` address with a Let's Encrypt certificate, with no DNS to set up. Your own domain is *(planned)*.
 - 🟢 **Safe releases.** A new release takes traffic only once it answers HTTP. If it fails, the old one keeps serving.
 - 📜 **Live build logs,** and a clear reason when a deploy fails. Logs of running apps are *(planned)*.
-- 🔑 **Environment variables and secrets,** set from the dashboard *(planned)*.
+- 🔑 **Environment variables and sealed secrets,** set from the dashboard or pasted from a `.env` file. Values stay encrypted in the key service and only in memory on the host. [How they work](docs/variables.md).
 - ⏪ **One-click rollback** to an earlier deploy *(planned)*.
 - ⚙️ **Web apps** today; **background workers** *(planned)*.
 - 👀 **Preview deploys for pull requests** *(later)*.

@@ -253,6 +253,102 @@ func (s *Service) Redeploy(ctx context.Context, name string) error {
 	return err
 }
 
+// PendingChange is a change saved for an app's next deploy. Touching a build
+// means redeploying it builds.
+type PendingChange struct {
+	Name         string
+	TouchesBuild bool
+}
+
+// RecordPendingChanges notes what a save changed and whether the app has any
+// variables after it. Saving deploys nothing: the app page offers to redeploy.
+// Neither value is trusted by the agent: the first only decides what the page
+// shows and how much work a deploy does, the second whether the agent asks the
+// key service for values.
+func (s *Service) RecordPendingChanges(ctx context.Context, name string, changes []PendingChange, hasVariables bool) error {
+	appID, err := s.appID(ctx, name)
+	if err != nil {
+		return err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, "UPDATE apps SET has_variables = ? WHERE id = ?", hasVariables, appID); err != nil {
+		return err
+	}
+	for _, change := range changes {
+		if err := recordPendingChange(ctx, tx, appID, change); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// recordPendingChange gives a change a newer id each time, so a deploy already
+// running doesn't clear it, and keeps a need for a build once there is one.
+func recordPendingChange(ctx context.Context, tx *sql.Tx, appID int64, change PendingChange) error {
+	var touchedBuild bool
+	err := tx.QueryRowContext(ctx, "SELECT touches_build FROM app_pending_changes WHERE app_id = ? AND name = ?", appID, change.Name).Scan(&touchedBuild)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+
+	_, err = tx.ExecContext(ctx, "DELETE FROM app_pending_changes WHERE app_id = ? AND name = ?", appID, change.Name)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, "INSERT INTO app_pending_changes (app_id, name, touches_build) VALUES (?, ?, ?)",
+		appID, change.Name, touchedBuild || change.TouchesBuild)
+
+	return err
+}
+
+// RedeployChanges applies what was saved, with the least work that does it: a
+// restart of the live image, unless a change reaches a build. With nothing
+// pending it does nothing.
+func (s *Service) RedeployChanges(ctx context.Context, name string) error {
+	appID, err := s.appID(ctx, name)
+	if err != nil {
+		return err
+	}
+
+	pending, needsBuild, err := s.pendingChanges(ctx, appID)
+	if err != nil || len(pending) == 0 {
+		return err
+	}
+
+	trigger := deploys.Trigger{Type: deploys.TriggerVariables, SkipsBuild: !needsBuild}
+	_, err = deploys.Enqueue(ctx, s.db, appID, trigger, s.now())
+	return err
+}
+
+func (s *Service) pendingChanges(ctx context.Context, appID int64) ([]string, bool, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT name, touches_build FROM app_pending_changes WHERE app_id = ? ORDER BY name", appID)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+
+	names := []string{}
+	needsBuild := false
+	for rows.Next() {
+		var name string
+		var touchesBuild bool
+		if err := rows.Scan(&name, &touchesBuild); err != nil {
+			return nil, false, err
+		}
+		names = append(names, name)
+		needsBuild = needsBuild || touchesBuild
+	}
+
+	return names, needsBuild, rows.Err()
+}
+
 // SetDisplayName changes the name the dashboard shows for the app.
 func (s *Service) SetDisplayName(ctx context.Context, name, displayName string) error {
 	cleaned, err := CleanDisplayName(displayName)
@@ -307,13 +403,16 @@ type Summary struct {
 	DisplayName string `json:"displayName"`
 	Address     string `json:"address"`
 	LatestState string `json:"latestState"`
+	// PendingChanges counts what was saved since the app's last live deploy.
+	PendingChanges int `json:"pendingChanges"`
 }
 
 // List returns every app with the state of its latest deploy.
 func (s *Service) List(ctx context.Context) ([]Summary, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT apps.name, apps.display_name,
-			COALESCE((SELECT state FROM deploys WHERE app_id = apps.id ORDER BY id DESC LIMIT 1), '')
+			COALESCE((SELECT state FROM deploys WHERE app_id = apps.id ORDER BY id DESC LIMIT 1), ''),
+			(SELECT count(*) FROM app_pending_changes WHERE app_id = apps.id)
 		FROM apps ORDER BY apps.display_name COLLATE NOCASE, apps.name`)
 	if err != nil {
 		return nil, err
@@ -323,7 +422,7 @@ func (s *Service) List(ctx context.Context) ([]Summary, error) {
 	summaries := []Summary{}
 	for rows.Next() {
 		var summary Summary
-		if err := rows.Scan(&summary.Name, &summary.DisplayName, &summary.LatestState); err != nil {
+		if err := rows.Scan(&summary.Name, &summary.DisplayName, &summary.LatestState, &summary.PendingChanges); err != nil {
 			return nil, err
 		}
 		summary.Address = s.address(summary.Name)
@@ -358,8 +457,15 @@ type Detail struct {
 	RunTogether   bool   `json:"runTogether"`
 	DeployOnPush  bool   `json:"deployOnPush"`
 	// PollError says why polling stopped, after repeated failures.
-	PollError string   `json:"pollError"`
-	Deploys   []Deploy `json:"deploys"`
+	PollError string `json:"pollError"`
+	// StartProblem says why the live release can't start, while the agent
+	// keeps trying.
+	StartProblem string `json:"startProblem"`
+	// PendingChanges names what was saved since the last live deploy.
+	PendingChanges []string `json:"pendingChanges"`
+	// PendingNeedsBuild says redeploying those changes builds.
+	PendingNeedsBuild bool     `json:"pendingNeedsBuild"`
+	Deploys           []Deploy `json:"deploys"`
 }
 
 // Get returns an app with its recent deploys, newest first.
@@ -368,13 +474,18 @@ func (s *Service) Get(ctx context.Context, name string) (Detail, error) {
 	detail := Detail{Name: name, Address: s.address(name)}
 	err := s.db.QueryRowContext(ctx,
 		`SELECT id, display_name, repository, branch, root_directory, run_together, deploy_on_push,
-			CASE WHEN poll_failures >= ? THEN poll_error ELSE '' END
+			CASE WHEN poll_failures >= ? THEN poll_error ELSE '' END, start_problem
 		FROM apps WHERE name = ?`, MaxPollFailures, name).
 		Scan(&appID, &detail.DisplayName, &detail.Repository, &detail.Branch, &detail.RootDirectory, &detail.RunTogether,
-			&detail.DeployOnPush, &detail.PollError)
+			&detail.DeployOnPush, &detail.PollError, &detail.StartProblem)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Detail{}, ErrNotFound
 	}
+	if err != nil {
+		return Detail{}, err
+	}
+
+	detail.PendingChanges, detail.PendingNeedsBuild, err = s.pendingChanges(ctx, appID)
 	if err != nil {
 		return Detail{}, err
 	}

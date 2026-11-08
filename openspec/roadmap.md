@@ -69,28 +69,39 @@ Requirements: ASVS 6.2.2, 6.2.3, 6.2.11, 6.3.3, 7.4.3, 7.4.5, 7.5.1, 7.5.2 ([asv
 
 Change: [add-deploy-on-push-slice-5](changes/add-deploy-on-push-slice-5/)
 
-- [ ] The agent runs as its own `tero-agent` user, which owns Podman and every container, so `tero-keys` can tell it apart from the dashboard
-- [ ] Connect GitHub through a per-server GitHub App (manifest flow), for a personal account or an organization
-- [ ] Private repositories with short-lived installation tokens, minted and held only by the agent
-- [ ] Signed push webhooks start a deploy of the tracked branch, with a per-app "Deploy on push" setting, on by default
-- [ ] Polling for public repositories, and failed webhook deliveries redelivered when the agent starts
-- [ ] One deploy at a time per app; a newer commit replaces a queued one
-- [ ] `sudo tero assume-breach` deletes the GitHub connection
+- [x] The agent runs as its own `tero-agent` user, which owns Podman and every container, so `tero-keys` can tell it apart from the dashboard
+- [x] Connect GitHub through a per-server GitHub App (manifest flow), for a personal account or an organization
+- [x] Private repositories with short-lived installation tokens, minted and held only by the agent
+- [x] Signed push webhooks start a deploy of the tracked branch, with a per-app "Deploy on push" setting, on by default
+- [x] Polling for public repositories, and failed webhook deliveries redelivered when the agent starts
+- [x] One deploy at a time per app; a newer commit replaces a queued one
+- [x] `sudo tero assume-breach` deletes the GitHub connection
 
 Drafts: [github-connection](drafts/github-connection/spec.md), [deployments](drafts/deployments/spec.md)
 
 ## Slice 6: Environment variables and secrets
 
-- [ ] Set, change and remove variables per app
-- [ ] A change restarts the live image with the new values, with no build; only variables marked "needed at build" rebuild
-- [ ] Secrets encrypted per app under the slice 3 master key and kept out of logs and images
-- [ ] Sealed variables, as Railway's: optional per variable, write-only once saved, held by `tero-keys` and never returned to the dashboard, so the internet-facing process can't read app secrets in clear (the failure behind slice 3). Sealing can't be undone; a sealed value can be replaced, with a fresh TOTP code
-- [ ] Decide which deploys `tero-keys` releases an app's secrets for: the agent has its own uid since slice 5, but the dashboard still writes the deploys it runs. Candidate: only for a source the admin approved with a fresh TOTP check in `tero-keys`
-- [ ] Per-secret list of when it was read, from the security log
-- [ ] `sudo tero assume-breach` lists each app's secret names to rotate at their providers
-- [ ] Recovery key printed once, and `sudo tero restore` for moving encrypted secrets to a new server
+Change: [add-env-vars-slice-6](changes/add-env-vars-slice-6/)
 
-Drafts: [apps](drafts/apps/spec.md)
+- [x] Set, change and remove variables per app, as fields or by pasting a `.env` file
+- [x] Each variable is runtime only, build only or both: new ones start as both, and sealing one switches it to runtime only
+- [x] Saving deploys nothing: the app shows how many variables changed and offers to redeploy, which restarts the live image unless a change reaches a build
+- [x] Every value encrypted in `tero-keys` under the slice 3 master key, kept out of images and masked in deploy logs, and only in memory on the host
+- [x] Sealed variables, as Railway's: optional per variable, write-only once saved and never returned to the dashboard. Sealing can't be undone, and any change on an app with one needs a fresh check
+- [x] `tero-keys` releases an app's values only to the agent, and only for the source the admin approved
+- [x] Per-secret list of when it was read, from the security log
+- [x] `sudo tero assume-breach` lists each app's variable names to rotate and its approved source to check
+
+Requirements: ASVS 13.3.1, 13.3.2, 14.2.4, 16.2.5; NIST SP 800-190 4.1.4 ([asvs-l2.md](../docs/security/asvs-l2.md), [sp800-190.md](../docs/security/sp800-190.md))
+
+## Moving secrets to a new server
+
+- [ ] Recovery key printed once, and `sudo tero restore` for moving encrypted variables to a new server
+- [ ] A backup of the apps' database, which restoring also needs and nothing makes yet
+
+## Harden the agent's helpers
+
+- [ ] Run Podman's network helpers (pasta or slirp4netns, rootlessport), which carry the apps' traffic, under a uid apart from `tero-agent`, which `tero-keys` trusts with every value
 
 ## Slice 7: Safe releases and rollback
 

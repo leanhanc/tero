@@ -91,6 +91,35 @@ func (o Options) users() []serviceUser {
 	}
 }
 
+// reportVariables lists what to rotate at its provider, and each app's approved
+// source, since someone holding a confirmed session could have approved their
+// own. It never prints a value: root's verb doesn't return any.
+func reportVariables(out io.Writer, summary []keys.AppVariablesSummary) {
+	if len(summary) == 0 {
+		return
+	}
+
+	fmt.Fprintln(out, "  - Rotate these variables at their providers, then replace them in the dashboard, and check each app's source:")
+	for _, app := range summary {
+		fmt.Fprintf(out, "      %s, from %s (%s)\n", app.App, app.Source.Repository, sourceLocation(app.Source))
+		for _, variable := range app.Variables {
+			label := ""
+			if variable.IsSealed {
+				label = " (sealed)"
+			}
+			fmt.Fprintf(out, "        %s%s\n", variable.Name, label)
+		}
+	}
+}
+
+func sourceLocation(source keys.AppSource) string {
+	if source.RootDirectory == "" {
+		return "branch " + source.Branch
+	}
+
+	return "branch " + source.Branch + ", folder " + source.RootDirectory
+}
+
 const plan = `This resets everything a compromised dashboard could have read or planted:
 
   - stops the dashboard, the agent, the apps and every other process running as
@@ -98,7 +127,7 @@ const plan = `This resets everything a compromised dashboard could have read or 
   - moves aside units and cron jobs something running as either user added
   - ends every dashboard session and forgets every trusted browser
   - deletes the dashboard's and apps' certificates and keys, so new ones are issued
-  - replaces the master key
+  - replaces the master key, keeping apps' variables and listing them to rotate
   - deletes the GitHub connection; you then delete the App on GitHub and connect again
   - resets the dashboard password, TOTP and passkeys, and prints a new setup link
 
@@ -161,12 +190,12 @@ func Run(ctx context.Context, opts Options) (err error) {
 	}
 	moved = append(moved, units...)
 
-	link, gitHubApp, err := reset(ctx, opts)
+	result, err := reset(ctx, opts)
 	if err != nil {
 		return err
 	}
 
-	report(ctx, opts, aside, moved, link, gitHubApp)
+	report(ctx, opts, aside, moved, result)
 	return nil
 }
 
@@ -225,56 +254,73 @@ func stopProcesses(ctx context.Context, opts Options, user serviceUser) error {
 	return fmt.Errorf("processes running as %s didn't stop; see `ps -u %s`", user.name, user.name)
 }
 
+// resetResult is what the report needs from the reset.
+type resetResult struct {
+	link      string
+	gitHubApp keys.GitHubApp
+	variables []keys.AppVariablesSummary
+}
+
 // reset replaces everything the dashboard and the agent could have read or
-// used, and returns the new setup link and the GitHub App it disconnected,
-// if any.
-func reset(ctx context.Context, opts Options) (string, keys.GitHubApp, error) {
+// used. Apps' variables stay, since apps need them to come back: the report
+// lists them to rotate at their providers.
+func reset(ctx context.Context, opts Options) (resetResult, error) {
 	if err := os.RemoveAll(filepath.Join(opts.Root, caddyStorage)); err != nil {
-		return "", keys.GitHubApp{}, fmt.Errorf("delete the certificates: %w", err)
+		return resetResult{}, fmt.Errorf("delete the certificates: %w", err)
 	}
 
 	client := opts.Keys.Keys
 	if err := client.ResetLogin(ctx); err != nil {
-		return "", keys.GitHubApp{}, fmt.Errorf("reset the login: %w", err)
+		return resetResult{}, fmt.Errorf("reset the login: %w", err)
 	}
 
 	// The agent could have read the App's private key while it connected,
 	// so the App itself has to go, not just its copy here.
 	gitHubApp, err := client.GitHubStatus(ctx)
 	if err != nil {
-		return "", keys.GitHubApp{}, fmt.Errorf("read the GitHub connection: %w", err)
+		return resetResult{}, fmt.Errorf("read the GitHub connection: %w", err)
 	}
 	if err := client.ForgetGitHub(ctx); err != nil {
-		return "", keys.GitHubApp{}, fmt.Errorf("delete the GitHub connection: %w", err)
+		return resetResult{}, fmt.Errorf("delete the GitHub connection: %w", err)
+	}
+
+	variables, err := client.VariablesSummary(ctx)
+	if err != nil {
+		return resetResult{}, fmt.Errorf("list the apps' variables: %w", err)
+	}
+	// A lost master key mustn't stop the response to a breach.
+	if err := client.MarkLostVariables(ctx); err != nil {
+		return resetResult{}, fmt.Errorf("mark lost variables: %w", err)
 	}
 
 	if _, err := opts.Keys.Rotate(ctx); err != nil {
-		return "", keys.GitHubApp{}, fmt.Errorf("replace the master key: %w", err)
+		return resetResult{}, fmt.Errorf("replace the master key: %w", err)
 	}
 
 	token, err := client.IssueSetupLink(ctx)
 	if err != nil {
-		return "", keys.GitHubApp{}, fmt.Errorf("issue a setup link: %w", err)
+		return resetResult{}, fmt.Errorf("issue a setup link: %w", err)
 	}
 	if err := client.AppendEvent(ctx, keys.EventBreachReset, ""); err != nil {
-		return "", keys.GitHubApp{}, err
+		return resetResult{}, err
 	}
 
-	return auth.SetupLink(opts.Domain, token), gitHubApp, nil
+	return resetResult{link: auth.SetupLink(opts.Domain, token), gitHubApp: gitHubApp, variables: variables}, nil
 }
 
-func report(ctx context.Context, opts Options, aside string, moved []string, link string, gitHubApp keys.GitHubApp) {
+func report(ctx context.Context, opts Options, aside string, moved []string, result resetResult) {
 	out := opts.Out
 	fmt.Fprintln(out, "\nThe server was reset. Outside the server:")
 	fmt.Fprintln(out, "  - Install the latest Tero if this may have come from a bug in Tero")
 	fmt.Fprintln(out, "  - Change the old dashboard password anywhere else you used it")
 	fmt.Fprintln(out, "  - Remove the old Tero entry from your authenticator app, and the old Tero passkeys from your devices")
-	if gitHubApp.IsConnected {
+	if result.gitHubApp.IsConnected {
 		fmt.Fprintf(out, "  - Delete the GitHub App %s at %s, then connect GitHub again from Settings\n",
-			gitHubApp.Slug, githubapp.SettingsPage(gitHubApp))
+			result.gitHubApp.Slug, githubapp.SettingsPage(result.gitHubApp))
 	}
 	fmt.Fprintln(out, "  - Check the SSH keys in ~/.ssh/authorized_keys of every user on this server")
 	fmt.Fprintln(out, "  - Redeploy every app, so its image is built again from source")
+	reportVariables(out, result.variables)
 
 	for _, path := range moved {
 		fmt.Fprintf(out, "  - Check %s, moved to %s: Tero never creates it, so something else put it there\n",
@@ -286,7 +332,7 @@ func report(ctx context.Context, opts Options, aside string, moved []string, lin
 		fmt.Fprintln(out, "A copy of the disk taken before now can still open the new master key.")
 	}
 
-	fmt.Fprintf(out, "\nOpen this link to set up your dashboard login again:\n\n  %s\n", link)
+	fmt.Fprintf(out, "\nOpen this link to set up your dashboard login again:\n\n  %s\n", result.link)
 }
 
 // quarantineDir creates a new directory under QuarantineDir for this run.

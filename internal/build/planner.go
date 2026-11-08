@@ -19,8 +19,9 @@ import (
 const noStartCommandLog = "No start command detected"
 
 // planBuild asks Railpack for a build plan of the app in sourceDir and
-// writes Railpack's log lines to the build log.
-func planBuild(sourceDir string, log io.Writer) (*plan.BuildPlan, error) {
+// writes Railpack's log lines to the build log. Railpack lists variables in the
+// plan by name only, as secrets, and reads RAILPACK_* ones as its own settings.
+func planBuild(sourceDir string, variables map[string]string, log io.Writer) (*plan.BuildPlan, error) {
 	if err := ensureMiseDirectory(); err != nil {
 		return nil, err
 	}
@@ -30,7 +31,7 @@ func planBuild(sourceDir string, log io.Writer) (*plan.BuildPlan, error) {
 		return nil, fmt.Errorf("open the app for Railpack: %w", err)
 	}
 
-	result, err := core.GenerateBuildPlan(source, app.NewEnvironment(nil), &core.GenerateBuildPlanOptions{
+	result, err := core.GenerateBuildPlan(source, app.NewEnvironment(&variables), &core.GenerateBuildPlanOptions{
 		ErrorMissingStartCommand: true,
 	})
 	if err != nil {

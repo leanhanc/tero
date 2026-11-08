@@ -1,0 +1,5 @@
+{
+  "name": "tero-fixture-variables",
+  "private": true,
+  "scripts": { "build": "node build.js", "start": "node index.js" }
+}

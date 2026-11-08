@@ -20,6 +20,7 @@ import (
 
 	"github.com/leanhanc/tero/internal/apps"
 	"github.com/leanhanc/tero/internal/auth"
+	"github.com/leanhanc/tero/internal/keys"
 	"github.com/leanhanc/tero/internal/password"
 )
 
@@ -36,6 +37,7 @@ type Handler struct {
 	auth          *auth.Service
 	apps          *apps.Service
 	github        GitHub
+	keys          *keys.Client
 	logDir        string
 	origin        string
 	mux           *http.ServeMux
@@ -44,8 +46,8 @@ type Handler struct {
 
 // NewHandler returns the dashboard served at https://domain. logDir holds
 // the deploy logs the agent writes.
-func NewHandler(service *auth.Service, appService *apps.Service, gitHub GitHub, domain, logDir string) *Handler {
-	h := &Handler{auth: service, apps: appService, github: gitHub, logDir: logDir, origin: "https://" + domain, mux: http.NewServeMux()}
+func NewHandler(service *auth.Service, appService *apps.Service, gitHub GitHub, keyService *keys.Client, domain, logDir string) *Handler {
+	h := &Handler{auth: service, apps: appService, github: gitHub, keys: keyService, logDir: logDir, origin: "https://" + domain, mux: http.NewServeMux()}
 
 	h.mux.HandleFunc("GET /api/state", h.state)
 	h.mux.HandleFunc("POST /api/setup/begin", h.beginSetup)
@@ -57,6 +59,7 @@ func NewHandler(service *auth.Service, appService *apps.Service, gitHub GitHub, 
 	h.mux.HandleFunc("GET /api/events", h.requireSession(h.events))
 	h.registerAccountRoutes()
 	h.registerAppRoutes()
+	h.registerVariableRoutes()
 	h.registerGitHubRoutes()
 	h.mux.HandleFunc("/api/", h.notFound)
 	h.mux.Handle("/", newWebApp())
@@ -422,7 +425,11 @@ func clientIP(r *http.Request) string {
 }
 
 func (h *Handler) readJSON(w http.ResponseWriter, r *http.Request, target any) bool {
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	return h.readJSONUpTo(w, r, maxBodyBytes, target)
+}
+
+func (h *Handler) readJSONUpTo(w http.ResponseWriter, r *http.Request, limit int64, target any) bool {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		h.auth.RecordRefusal(clientIP(r), r.URL.Path, auth.RefusedMalformedBody)

@@ -2,7 +2,8 @@
 // rootless Podman, with the ADR 0001 rules: no capabilities, no privilege
 // gain, a user namespace slice of their own, and a network namespace of
 // their own that can't reach other apps. Each app's PORT is published on
-// loopback only, for the built-in proxy.
+// loopback only, for the built-in proxy. An app's variables reach its
+// container from memory; see variables.go.
 package containers
 
 import (
@@ -44,10 +45,10 @@ const startTimeout = 10 * time.Minute
 var ErrStartTimedOut = fmt.Errorf("Your app's container took longer than %d minutes to start and was stopped. The server's disk may be too slow or too busy",
 	int(startTimeout.Minutes()))
 
-// Start runs a deploy's image and returns the container name and the
-// loopback port its PORT is published on. When podman run fails, the name
-// is still returned, since a container may have been half created.
-func Start(ctx context.Context, appName string, deployID int64, image string) (string, int, error) {
+// Start runs a deploy's image with variables and returns the container name
+// and the loopback port its PORT is published on. When podman run fails, the
+// name is still returned, since a container may have been half created.
+func Start(ctx context.Context, appName string, deployID int64, image string, variables map[string]string) (string, int, error) {
 	network, err := isolatedNetwork(ctx)
 	if err != nil {
 		return "", 0, err
@@ -63,21 +64,38 @@ func Start(ctx context.Context, appName string, deployID int64, image string) (s
 		return "", 0, err
 	}
 
+	// The image name comes from a database the dashboard can write. Only images
+	// the agent built for this app may run, and nothing is ever pulled, so a
+	// row can't name an image whose label someone else chose.
+	if !IsAppImage(appName, image) {
+		return "", 0, fmt.Errorf("%q isn't an image built for app %s", image, appName)
+	}
+
 	startCtx, cancel := context.WithTimeout(ctx, startTimeout)
 	defer cancel()
 
-	scope := scopeName(name)
-	_, err = podman.RunInOwnScope(startCtx, scope, "run", "--detach", "--name", name,
-		"--label", AppLabel+"="+appName,
-		"--label", DeployLabel+"="+strconv.FormatInt(deployID, 10),
+	entryArgs, command, err := passVariables(startCtx, name, image, variables)
+	if err != nil {
+		return "", 0, err
+	}
+
+	args := []string{"run", "--detach", "--pull=never", "--name", name,
+		"--label", AppLabel + "=" + appName,
+		"--label", DeployLabel + "=" + strconv.FormatInt(deployID, 10),
 		"--network", network,
 		"--cap-drop=ALL",
 		"--security-opt", "no-new-privileges",
 		"--userns=auto",
 		"--log-driver", "k8s-file", "--log-opt", "max-size=10mb",
-		"--env", "PORT="+strconv.Itoa(containerPort),
+		"--env", "PORT=" + strconv.Itoa(containerPort),
 		"--publish", fmt.Sprintf("127.0.0.1:%d:%d", hostPort, containerPort),
-		image)
+	}
+	args = append(args, entryArgs...)
+	args = append(args, image)
+	args = append(args, command...)
+
+	scope := scopeName(name)
+	_, err = podman.RunInOwnScope(startCtx, scope, args...)
 	if err != nil && startCtx.Err() != nil {
 		// Killing podman leaves its children running in the scope, holding
 		// the storage locks the cleanup needs.
@@ -236,8 +254,13 @@ func Stop(ctx context.Context, container string) error {
 
 // Remove removes a container and, when given, its image.
 func Remove(ctx context.Context, container, image string) error {
-	if err := podman.RemoveContainer(ctx, container); err != nil {
-		return err
+	if container != "" {
+		if err := podman.RemoveContainer(ctx, container); err != nil {
+			return err
+		}
+		if err := RemoveEnvFile(container); err != nil {
+			return err
+		}
 	}
 	if image == "" {
 		return nil

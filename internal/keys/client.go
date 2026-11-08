@@ -274,3 +274,53 @@ func (c *Client) VerifyWebhook(ctx context.Context, body []byte, signature, ip s
 	err := c.call(ctx, VerbGitHubWebhookVerify, webhookVerifyArgs{Body: body, Signature: signature, IP: ip}, &result)
 	return result.IsValid, err
 }
+
+// ListVariables returns an app's variables and approved source. Sealed
+// variables come without their values.
+func (c *Client) ListVariables(ctx context.Context, session, app string) (AppVariables, error) {
+	var variables AppVariables
+	err := c.call(ctx, VerbVariablesList, variablesListArgs{Session: session, App: app}, &variables)
+	return variables, err
+}
+
+// SaveVariables applies all of changes or none, and returns what changed.
+func (c *Client) SaveVariables(ctx context.Context, session, ip, app string, source AppSource, changes []VariableChange) (SavedVariables, error) {
+	var saved SavedVariables
+	args := variablesSaveArgs{Session: session, IP: ip, App: app, Source: source, Changes: changes}
+	err := c.call(ctx, VerbVariablesSave, args, &saved)
+	return saved, err
+}
+
+// VariableReads lists when a sealed variable was last released.
+func (c *Client) VariableReads(ctx context.Context, session, app, name string) ([]VariableRead, error) {
+	var reads []VariableRead
+	err := c.call(ctx, VerbVariablesReads, variablesReadsArgs{Session: session, App: app, Name: name}, &reads)
+	return reads, err
+}
+
+// ApproveSource replaces an app's approved source. The session must be
+// confirmed.
+func (c *Client) ApproveSource(ctx context.Context, session, ip, app string, source AppSource) error {
+	return c.call(ctx, VerbSourceApprove, sourceApproveArgs{Session: session, IP: ip, App: app, Source: source}, nil)
+}
+
+// ReleaseVariables returns the values for one phase of a deploy. Agent only.
+func (c *Client) ReleaseVariables(ctx context.Context, release ReleaseRequest) ([]ReleasedVariable, error) {
+	var released []ReleasedVariable
+	err := c.call(ctx, VerbVariablesRelease, release, &released)
+	return released, err
+}
+
+// VariablesSummary lists every app's variable names and approved source,
+// with no value. Root only.
+func (c *Client) VariablesSummary(ctx context.Context) ([]AppVariablesSummary, error) {
+	var summary []AppVariablesSummary
+	err := c.call(ctx, VerbVariablesSummary, nil, &summary)
+	return summary, err
+}
+
+// MarkLostVariables records that values sealed with a master key that isn't
+// loaded are gone. Root only.
+func (c *Client) MarkLostVariables(ctx context.Context) error {
+	return c.call(ctx, VerbVariablesLost, nil, nil)
+}

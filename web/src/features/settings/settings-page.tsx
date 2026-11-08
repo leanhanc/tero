@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 
+import { ConfirmForm } from '../../components/confirm-form';
 import { PageHeader } from '../../components/page-header';
 import { type Account, errorMessage, getAccount, isConfirmationRequired } from '../../lib/utils/api';
 import { useMessages } from '../../lib/utils/locale';
-import { ConfirmForm } from './components/confirm-form';
 import { GitHubSection } from './components/github-section';
 import { PasskeyList } from './components/passkey-list';
 import { PasswordForm } from './components/password-form';

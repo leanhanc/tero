@@ -10,8 +10,10 @@ import { BuildLog } from './components/build-log';
 import { DeployList } from './components/deploy-list';
 import { DeployOnPushSetting } from './components/deploy-on-push-setting';
 import { DisplayNameSetting } from './components/display-name-setting';
+import { PendingChanges } from './components/pending-changes';
 import { RedeployButton } from './components/redeploy-button';
 import { RunTogetherSetting } from './components/run-together-setting';
+import { VariablesSection } from './components/variables-section';
 
 // How often the page refreshes while a deploy is on its way.
 const refreshIntervalMs = 2000;
@@ -69,6 +71,7 @@ function AppPageContent({ loaded, selectedDeployID, onSelectDeploy, onChange }: 
 	return (
 		<>
 			<AppSummary app={app} />
+			<PendingChanges app={app} onRedeploy={onChange} />
 			<RedeployButton
 				appName={app.name}
 				hasDeployRunning={hasDeployRunning}
@@ -78,6 +81,7 @@ function AppPageContent({ loaded, selectedDeployID, onSelectDeploy, onChange }: 
 			<DisplayNameSetting key={app.displayName} appName={app.name} displayName={app.displayName} onChange={onChange} />
 			<DeployOnPushSetting appName={app.name} deployOnPush={app.deployOnPush} onChange={onChange} />
 			<RunTogetherSetting appName={app.name} runTogether={app.runTogether} onChange={onChange} />
+			<VariablesSection appName={app.name} onChange={onChange} />
 			<DeployList deploys={app.deploys} shownDeployID={shownDeploy?.id} onSelect={onSelectDeploy} />
 			{shownDeploy && <BuildLog key={shownDeploy.id} deploy={shownDeploy} />}
 		</>

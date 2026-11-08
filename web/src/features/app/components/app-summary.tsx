@@ -11,6 +11,7 @@ export function AppSummary({ app }: { app: AppDetail }) {
 	return (
 		<>
 			{app.pollError && <p role="alert">{messages.pollStopped(app.pollError)}</p>}
+			{app.startProblem && <p role="alert">{app.startProblem}</p>}
 			<SummaryList app={app} liveCommit={liveCommit} />
 		</>
 	);

@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -7,6 +7,9 @@ import { App } from '../src/app';
 type MockResponse = { status: number; body?: unknown };
 
 const loggedIn = { status: 200, body: { isSetUp: true, isLoggedIn: true } };
+const noSource = { repository: '', branch: '', rootDirectory: '' };
+const appSource = { repository: 'https://github.com/leanhanc/api', branch: 'main', rootDirectory: '' };
+const noVariables = { status: 200, body: { variables: [], approvedSource: noSource, source: appSource, isSourceApproved: true } };
 
 /** Answers API calls in order and records what was sent. */
 function mockAPI(responses: Record<string, MockResponse[]>) {
@@ -16,7 +19,8 @@ function mockAPI(responses: Record<string, MockResponse[]>) {
 		vi.fn(async (path: string, init?: RequestInit) => {
 			calls.push({ path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
 			const queue = responses[path];
-			const next = (queue && queue.length > 1 ? queue.shift() : queue?.[0]) ?? { status: 500, body: { error: 'unexpected call' } };
+			const fallback = path.endsWith('/variables') ? noVariables : { status: 500, body: { error: 'unexpected call' } };
+			const next = (queue && queue.length > 1 ? queue.shift() : queue?.[0]) ?? fallback;
 			return new Response(next.body === undefined ? null : JSON.stringify(next.body), { status: next.status });
 		}),
 	);
@@ -68,6 +72,10 @@ const failedApp = {
 	rootDirectory: '',
 	runTogether: true,
 	deployOnPush: true,
+	pollError: '',
+	startProblem: '',
+	pendingChanges: [] as string[],
+	pendingNeedsBuild: false,
 	deploys: [
 		{
 			id: 7,
@@ -327,5 +335,200 @@ describe('new app from GitHub', () => {
 		const created = calls.find((call) => call.path === '/api/apps')?.body as Record<string, unknown>;
 		expect(created.githubRepositoryId).toBe(555);
 		expect(created.repository).toBe('https://github.com/leanhanc/secret-api');
+	});
+});
+
+const sealedVariable = { name: 'API_KEY', scope: 'runtime', isSealed: true, replacedAt: 1_800_000_000 };
+const plainVariable = { name: 'FOO', value: 'bar', scope: 'both', isSealed: false, replacedAt: 1_800_000_000 };
+const withVariables = (...variables: unknown[]) => ({
+	status: 200,
+	body: { variables, approvedSource: appSource, source: appSource, isSourceApproved: true },
+});
+
+function savedChanges(calls: { path: string; body: unknown }[]) {
+	return (calls.find((call) => call.path === '/api/apps/api/variables' && call.body)?.body as { changes: unknown[] }).changes;
+}
+
+describe('variables', () => {
+	// app-variables: New variable
+	it('saves a new variable as both, and deploys nothing', async () => {
+		openAt('/apps/api');
+		const calls = mockAPI({
+			'/api/state': [loggedIn],
+			'/api/apps/api': [{ status: 200, body: failedApp }],
+			'/api/apps/api/variables': [noVariables, { status: 204 }, withVariables(plainVariable)],
+		});
+		mockEventSource([]);
+		render(<App />);
+
+		await userEvent.click(await screen.findByRole('button', { name: 'Add a variable' }));
+		await userEvent.type(screen.getByLabelText('Name of the new variable'), 'FOO');
+		await userEvent.type(screen.getByLabelText('Value of FOO'), 'bar');
+		await userEvent.click(screen.getByRole('button', { name: 'Save variables' }));
+
+		await waitFor(() => expect(savedChanges(calls)).toEqual([{ name: 'FOO', value: 'bar', scope: 'both', isSealed: false }]));
+		expect(calls.some((call) => call.path.endsWith('/deploys') || call.path.endsWith('/redeploy'))).toBe(false);
+	});
+
+	// app-variables: Sealing switches the scope
+	it('switches a variable to runtime only when it is sealed', async () => {
+		openAt('/apps/api');
+		mockAPI({
+			'/api/state': [loggedIn],
+			'/api/apps/api': [{ status: 200, body: failedApp }],
+			'/api/apps/api/variables': [withVariables(plainVariable)],
+		});
+		mockEventSource([]);
+		render(<App />);
+
+		const scope = await screen.findByLabelText<HTMLSelectElement>('Where FOO is used');
+		expect(scope.value).toBe('both');
+		await userEvent.click(screen.getByLabelText('Seal FOO'));
+
+		expect(scope.value).toBe('runtime');
+		expect(screen.getByText(/Sealing can't be undone/)).toBeTruthy();
+		await userEvent.selectOptions(scope, 'both');
+		expect(scope.value).toBe('both');
+	});
+
+	// app-variables: Sealed value never returned, No way back
+	it('offers only replacing and removing a sealed variable, and keeps its value without a new one', async () => {
+		openAt('/apps/api');
+		const calls = mockAPI({
+			'/api/state': [loggedIn],
+			'/api/apps/api': [{ status: 200, body: failedApp }],
+			'/api/apps/api/variables': [withVariables(sealedVariable), { status: 204 }, withVariables(sealedVariable)],
+		});
+		mockEventSource([]);
+		render(<App />);
+
+		const value = await screen.findByLabelText<HTMLTextAreaElement>('Value of API_KEY');
+		expect(value.value).toBe('');
+		expect(screen.queryByLabelText('Seal API_KEY')).toBeNull();
+		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Save variables' }).disabled).toBe(true);
+
+		await userEvent.selectOptions(screen.getByLabelText('Where API_KEY is used'), 'both');
+		await userEvent.click(screen.getByRole('button', { name: 'Save variables' }));
+
+		await waitFor(() => expect(savedChanges(calls)).toEqual([{ name: 'API_KEY', scope: 'both', isSealed: true }]));
+	});
+
+	// app-variables: Unconfirmed seal, Several saves after one check
+	it('asks for a fresh check when the server wants one, then saves', async () => {
+		openAt('/apps/api');
+		const calls = mockAPI({
+			'/api/state': [loggedIn],
+			'/api/apps/api': [{ status: 200, body: failedApp }],
+			'/api/apps/api/variables': [
+				withVariables(sealedVariable),
+				{ status: 403, body: { error: 'Confirm', code: 'not_confirmed' } },
+				{ status: 204 },
+				withVariables(sealedVariable),
+			],
+			'/api/account/confirm': [{ status: 204 }],
+		});
+		mockEventSource([]);
+		render(<App />);
+
+		await userEvent.type(await screen.findByLabelText('Value of API_KEY'), 'new');
+		await userEvent.click(screen.getByRole('button', { name: 'Save variables' }));
+
+		await userEvent.type(await screen.findByLabelText('Password'), 'pw');
+		await userEvent.type(screen.getByLabelText('6-digit code from your authenticator app'), '123456');
+		await userEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+
+		await waitFor(() => expect(calls.filter((call) => call.path === '/api/apps/api/variables' && call.body).length).toBe(2));
+	});
+
+	// app-variables: Paste then save, Paste isn't saved by itself, Paste names a sealed variable
+	it('fills the form from a pasted .env file and skips sealed names', async () => {
+		openAt('/apps/api');
+		const calls = mockAPI({
+			'/api/state': [loggedIn],
+			'/api/apps/api': [{ status: 200, body: failedApp }],
+			'/api/apps/api/variables': [withVariables(sealedVariable, plainVariable), { status: 204 }, withVariables(sealedVariable)],
+		});
+		mockEventSource([]);
+		render(<App />);
+
+		const paste = await screen.findByLabelText('Contents of the .env file');
+		await userEvent.click(paste);
+		await userEvent.paste('export A="1"\n# comment\nFOO=changed\nAPI_KEY=nope\nbad line');
+		await userEvent.click(screen.getByRole('button', { name: 'Add to the form' }));
+
+		expect(screen.getByText(/can only be replaced in their own row: API_KEY/)).toBeTruthy();
+		expect(screen.getByText(/couldn't be read: 5/)).toBeTruthy();
+		expect(calls.some((call) => call.path === '/api/apps/api/variables' && call.body)).toBe(false);
+
+		await userEvent.click(screen.getByRole('button', { name: 'Save variables' }));
+		await waitFor(() =>
+			expect(savedChanges(calls)).toEqual([
+				{ name: 'FOO', value: 'changed', scope: 'both', isSealed: false },
+				{ name: 'A', value: '1', scope: 'both', isSealed: false },
+			]),
+		);
+	});
+
+	// app-variables: Save deploys nothing, Runtime variable changed
+	it('says how many variables changed and redeploys them', async () => {
+		openAt('/apps/api');
+		const calls = mockAPI({
+			'/api/state': [loggedIn],
+			'/api/apps/api': [{ status: 200, body: { ...failedApp, pendingChanges: ['A', 'B'], pendingNeedsBuild: false } }],
+			'/api/apps/api/variables/redeploy': [{ status: 202 }],
+		});
+		mockEventSource([]);
+		render(<App />);
+
+		expect(await screen.findByText('2 variables changed. Redeploy to apply them.')).toBeTruthy();
+		expect(screen.getByText('Restarts the app with the saved values, with no build.')).toBeTruthy();
+
+		const section = screen.getByRole('region', { name: 'Changes waiting for a redeploy' });
+		await userEvent.click(within(section).getByRole('button', { name: 'Redeploy' }));
+		await waitFor(() => expect(calls.some((call) => call.path === '/api/apps/api/variables/redeploy')).toBe(true));
+	});
+
+	// app-variables: Approving a new source
+	it('shows both sources and approves the current one', async () => {
+		openAt('/apps/api');
+		const calls = mockAPI({
+			'/api/state': [loggedIn],
+			'/api/apps/api': [{ status: 200, body: failedApp }],
+			'/api/apps/api/variables': [
+				{
+					status: 200,
+					body: {
+						variables: [plainVariable],
+						approvedSource: { ...appSource, repository: 'https://github.com/leanhanc/old' },
+						source: appSource,
+						isSourceApproved: false,
+					},
+				},
+				withVariables(plainVariable),
+			],
+			'/api/apps/api/variables/approve-source': [{ status: 204 }],
+		});
+		mockEventSource([]);
+		render(<App />);
+
+		expect(await screen.findByText('https://github.com/leanhanc/old, branch main')).toBeTruthy();
+		await userEvent.click(screen.getByRole('button', { name: 'Approve the current source' }));
+		await waitFor(() => expect(calls.some((call) => call.path === '/api/apps/api/variables/approve-source')).toBe(true));
+	});
+
+	// app-variables: Release shown
+	it('lists when a sealed variable was read', async () => {
+		openAt('/apps/api');
+		mockAPI({
+			'/api/state': [loggedIn],
+			'/api/apps/api': [{ status: 200, body: failedApp }],
+			'/api/apps/api/variables': [withVariables(sealedVariable)],
+			'/api/apps/api/variables/API_KEY/reads': [{ status: 200, body: [{ at: 1_800_000_000, phase: 'run', deployId: 7 }] }],
+		});
+		mockEventSource([]);
+		render(<App />);
+
+		await userEvent.click(await screen.findByRole('button', { name: 'Show when it was read' }));
+		expect(await screen.findByText(/to run deploy 7/)).toBeTruthy();
 	});
 });

@@ -82,6 +82,33 @@ CREATE TABLE github_app (
 	connected_at   INTEGER NOT NULL
 );
 
+-- Apps' environment variables. The app's name never changes, so it identifies
+-- the app here. value is sealed with the master key version in key_version,
+-- for the app and variable named in the row. value_bytes counts the clear
+-- value, for the per-app limit. scope says which phases of a deploy get it.
+CREATE TABLE app_variables (
+	app         TEXT    NOT NULL,
+	name        TEXT    NOT NULL,
+	key_version INTEGER NOT NULL,
+	value       BLOB    NOT NULL,
+	value_bytes INTEGER NOT NULL,
+	scope       TEXT    NOT NULL CHECK (scope IN ('runtime', 'build', 'both')),
+	is_sealed   INTEGER NOT NULL CHECK (is_sealed IN (0, 1)),
+	replaced_at INTEGER NOT NULL,
+	PRIMARY KEY (app, name)
+);
+
+-- The source each app with variables may have them released for. The dashboard
+-- can't change a row without a confirmed session, and the shared database can't
+-- change it at all.
+CREATE TABLE app_sources (
+	app            TEXT    PRIMARY KEY,
+	repository     TEXT    NOT NULL,
+	branch         TEXT    NOT NULL,
+	root_directory TEXT    NOT NULL,
+	approved_at    INTEGER NOT NULL
+);
+
 -- Connections the admin started on a confirmed session. Only the state's
 -- hash is stored. The admin approves it when GitHub sends them back, and the
 -- agent then uses it once to store the App.
@@ -105,14 +132,18 @@ CREATE TABLE login_lock (
 
 -- source is who recorded the event: tero-keys itself, the dashboard or root.
 -- count is above 1 only for events that stand for several, such as
--- events_dropped.
+-- events_dropped. subject names what the event concerns, such as an app or a
+-- variable, and detail adds what it needs, such as a deploy.
 CREATE TABLE security_events (
 	id     INTEGER PRIMARY KEY AUTOINCREMENT,
 	at     INTEGER NOT NULL,
 	type   TEXT    NOT NULL,
 	source TEXT    NOT NULL,
 	ip     TEXT    NOT NULL DEFAULT '',
-	count  INTEGER NOT NULL DEFAULT 1
+	count  INTEGER NOT NULL DEFAULT 1,
+	subject TEXT   NOT NULL DEFAULT '',
+	detail TEXT    NOT NULL DEFAULT ''
 );
 
 CREATE INDEX security_events_at ON security_events (at);
+CREATE INDEX security_events_by_subject ON security_events (type, subject, id) WHERE subject != '';

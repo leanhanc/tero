@@ -61,7 +61,7 @@ func Run(ctx context.Context) error {
 		Webhooks:   githubapp.Webhooks{DB: db, Events: keyService, Now: time.Now},
 		Verifier:   keyService,
 	}
-	dashboard.Activate(dashboard.NewHandler(service, appService, gitHub, cfg.DashboardDomain, deploylog.Dir))
+	dashboard.Activate(dashboard.NewHandler(service, appService, gitHub, keyService, cfg.DashboardDomain, deploylog.Dir))
 
 	settings := caddySettings{Domain: cfg.DashboardDomain, PublicIP: cfg.PublicIP, Issuer: acmeIssuer()}
 	routes, err := loadAppRoutes(ctx, db, settings.PublicIP)

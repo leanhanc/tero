@@ -198,6 +198,11 @@ func testAssumeBreach(t *testing.T) {
 	if !strings.HasPrefix(lastLine(got), "https://") {
 		t.Errorf("the last line of assume-breach is not a link: %q", lastLine(got))
 	}
+	// breach-response: Names and sources listed
+	assertContains(t, got, variablesApp+", from "+fixtureRepository, "E2E_SEALED (sealed)", "E2E_RUNTIME")
+	if strings.Contains(got, valueMarker) {
+		t.Errorf("assume-breach printed a value:\n%s", got)
+	}
 	if after := must(t, "sudo ls /etc/tero/keys"); after == versionsBefore {
 		t.Errorf("the master key was not replaced: still %q", after)
 	}

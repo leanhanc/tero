@@ -404,6 +404,7 @@ func (s *Service) versionsInUse(ctx context.Context) ([]int, error) {
 		SELECT totp_key_version FROM admin
 		UNION SELECT pending_totp_key_version FROM setup_links WHERE pending_totp_key_version IS NOT NULL
 		UNION SELECT key_version FROM github_app
+		UNION SELECT key_version FROM app_variables WHERE key_version != 0
 		ORDER BY 1`)
 	if err != nil {
 		return nil, err
@@ -440,6 +441,9 @@ func (s *Service) RotateKey(ctx context.Context) ([]int, error) {
 		return nil, err
 	}
 	if err := s.resealGitHubApp(ctx, tx); err != nil {
+		return nil, err
+	}
+	if err := s.resealVariables(ctx, tx); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -548,7 +552,8 @@ func (s *Service) Prune(ctx context.Context) error {
 		{`DELETE FROM security_events WHERE id <= (SELECT max(id) FROM security_events) - ?
 			AND type NOT IN ('login_succeeded', 'passkey_login_succeeded', 'setup_completed', 'login_reset', 'key_rotated',
 				'breach_reset', 'totp_locked', 'password_changed', 'passkey_added', 'passkey_removed',
-				'github_connected', 'github_disconnected')`,
+				'github_connected', 'github_disconnected', 'source_approved', 'variable_sealed', 'variable_replaced',
+				'variables_release_refused')`,
 			[]any{maxEvents}},
 	}
 

@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/leanhanc/tero/internal/agent"
+	"github.com/leanhanc/tero/internal/appentry"
 	"github.com/leanhanc/tero/internal/breach"
 	"github.com/leanhanc/tero/internal/config"
 	"github.com/leanhanc/tero/internal/deployer"
@@ -50,6 +51,13 @@ const usage = `Usage:
 `
 
 func main() {
+	// Before anything else: this process is about to become the app's.
+	if len(os.Args) > 1 && os.Args[1] == appentry.Command {
+		err := appentry.Run(os.Args[2:])
+		fmt.Fprintln(os.Stderr, "tero:", err)
+		os.Exit(1)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -205,12 +213,13 @@ func runAgent(ctx context.Context) error {
 	}
 	defer db.Close()
 
-	gitHubApp := githubapp.Worker{DB: db, Keys: keys.NewClient(keys.SocketPath), GitHub: github.New(), Now: time.Now}
-	pipeline := deployer.Pipeline{DB: db, LogDir: deploylog.Dir, WorkDir: deployer.WorkDir, Tokens: gitHubApp, Now: time.Now}
+	keyService := keys.NewClient(keys.SocketPath)
+	gitHubApp := githubapp.Worker{DB: db, Keys: keyService, GitHub: github.New(), Now: time.Now}
+	pipeline := deployer.Pipeline{DB: db, LogDir: deploylog.Dir, WorkDir: deployer.WorkDir, Tokens: gitHubApp, Variables: keyService, Now: time.Now}
 
 	poller := agent.Poller{DB: db, Now: time.Now}
 
-	return agent.Run(ctx, agent.Options{DB: db, Pipeline: pipeline, Background: []agent.Background{gitHubApp, poller}})
+	return agent.Run(ctx, agent.Options{DB: db, Pipeline: pipeline, Variables: keyService, Background: []agent.Background{gitHubApp, poller}})
 }
 
 func isTerminal(file *os.File) bool {

@@ -55,6 +55,14 @@ const (
 	VerbGitHubStatus         = "github.status"
 	VerbGitHubJWT            = "github.jwt"
 	VerbGitHubWebhookVerify  = "github.webhook.verify"
+
+	VerbVariablesList    = "variables.list"
+	VerbVariablesSave    = "variables.save"
+	VerbVariablesReads   = "variables.reads"
+	VerbVariablesRelease = "variables.release"
+	VerbVariablesSummary = "variables.summary"
+	VerbVariablesLost    = "variables.mark-lost"
+	VerbSourceApprove    = "source.approve"
 )
 
 var verbs = map[Caller]map[string]bool{
@@ -68,16 +76,20 @@ var verbs = map[Caller]map[string]bool{
 		VerbEventAppend:   true, VerbEventList: true,
 		VerbGitHubConnectBegin: true, VerbGitHubConnectApprove: true, VerbGitHubDisconnect: true,
 		VerbGitHubStatus: true, VerbGitHubWebhookVerify: true,
+		VerbVariablesList: true, VerbVariablesSave: true, VerbVariablesReads: true, VerbSourceApprove: true,
 	},
 	// Only the agent talks to GitHub with the App's credentials, so only it
-	// stores the App and gets App tokens.
+	// stores the App and gets App tokens. Only it starts containers, so only
+	// it gets apps' sealed values.
 	CallerAgent: {
 		VerbGitHubConnect: true, VerbGitHubStatus: true, VerbGitHubJWT: true,
+		VerbVariablesRelease: true,
 	},
 	CallerRoot: {
 		VerbStatus: true, VerbSetupIssue: true, VerbLoginReset: true, VerbKeyRotate: true,
 		VerbEventAppend: true, VerbEventList: true,
 		VerbGitHubForget: true, VerbGitHubStatus: true,
+		VerbVariablesSummary: true, VerbVariablesLost: true,
 	},
 }
 
@@ -116,6 +128,11 @@ var errorCodes = map[string]error{
 	"github_not_connected": ErrGitHubNotConnected,
 	"invalid_connection":   ErrInvalidConnection,
 	"invalid_app_key":      ErrInvalidAppKey,
+
+	"invalid_variable":    ErrInvalidVariable,
+	"variable_sealed":     ErrVariableSealed,
+	"too_many_variables":  ErrTooManyVariables,
+	"source_not_approved": ErrSourceNotApproved,
 }
 
 const rateLimitedCode = "rate_limited"
@@ -258,6 +275,28 @@ type (
 	gitHubApproveArgs struct {
 		Session string `json:"session"`
 		State   string `json:"state"`
+	}
+	variablesListArgs struct {
+		Session string `json:"session"`
+		App     string `json:"app"`
+	}
+	variablesSaveArgs struct {
+		Session string           `json:"session"`
+		IP      string           `json:"ip"`
+		App     string           `json:"app"`
+		Source  AppSource        `json:"source"`
+		Changes []VariableChange `json:"changes"`
+	}
+	variablesReadsArgs struct {
+		Session string `json:"session"`
+		App     string `json:"app"`
+		Name    string `json:"name"`
+	}
+	sourceApproveArgs struct {
+		Session string    `json:"session"`
+		IP      string    `json:"ip"`
+		App     string    `json:"app"`
+		Source  AppSource `json:"source"`
 	}
 	webhookVerifyArgs struct {
 		Body      []byte `json:"body"`
@@ -426,6 +465,30 @@ func (s *Service) dispatch(ctx context.Context, caller Caller, req request) (any
 			isValid, err := s.VerifyWebhook(ctx, args.Body, args.Signature, args.IP)
 			return webhookVerifyResult{IsValid: isValid}, err
 		})
+	case VerbVariablesList:
+		return withArgs(req, func(args variablesListArgs) (any, error) {
+			return s.ListVariables(ctx, args.Session, args.App)
+		})
+	case VerbVariablesSave:
+		return withArgs(req, func(args variablesSaveArgs) (any, error) {
+			return s.SaveVariables(ctx, args.Session, args.IP, args.App, args.Source, args.Changes)
+		})
+	case VerbVariablesReads:
+		return withArgs(req, func(args variablesReadsArgs) (any, error) {
+			return s.VariableReads(ctx, args.Session, args.App, args.Name)
+		})
+	case VerbSourceApprove:
+		return withArgs(req, func(args sourceApproveArgs) (any, error) {
+			return struct{}{}, s.ApproveSource(ctx, args.Session, args.IP, args.App, args.Source)
+		})
+	case VerbVariablesRelease:
+		return withArgs(req, func(args ReleaseRequest) (any, error) {
+			return s.ReleaseVariables(ctx, args)
+		})
+	case VerbVariablesSummary:
+		return s.VariablesSummary(ctx)
+	case VerbVariablesLost:
+		return struct{}{}, s.MarkLostVariables(ctx)
 	default:
 		return nil, ErrRefused
 	}

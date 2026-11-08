@@ -18,6 +18,12 @@ CREATE TABLE apps (
 	-- Failed polls in a row; polling stops at 3 and poll_error says why.
 	poll_failures  INTEGER NOT NULL DEFAULT 0,
 	poll_error     TEXT    NOT NULL DEFAULT '',
+	-- Whether the app has variables in the key service. It only decides whether
+	-- the agent asks for them, and the key service decides what it answers, so
+	-- nothing is gained by changing it.
+	has_variables  INTEGER NOT NULL DEFAULT 0 CHECK (has_variables IN (0, 1)),
+	-- Why the agent can't start the live release, while it keeps trying.
+	start_problem  TEXT    NOT NULL DEFAULT '',
 	created_at     INTEGER NOT NULL
 );
 
@@ -25,7 +31,9 @@ CREATE TABLE apps (
 -- moves them through the other states; failed_step and reason are set on
 -- failure. trigger_type says what queued it, with the pusher's login and the
 -- pushed commit for a push. The agent always builds the branch head, so
--- requested_sha is only shown, never built.
+-- requested_sha is only shown, never built. needs_build is 0 for a deploy that
+-- restarts the live image with new values. pending_through is the newest
+-- pending change this deploy applies, recorded when it is claimed.
 CREATE TABLE deploys (
 	id             INTEGER PRIMARY KEY AUTOINCREMENT,
 	app_id         INTEGER NOT NULL REFERENCES apps (id),
@@ -36,7 +44,9 @@ CREATE TABLE deploys (
 	commit_sha     TEXT    NOT NULL DEFAULT '',
 	commit_message TEXT    NOT NULL DEFAULT '',
 	trigger_type   TEXT    NOT NULL DEFAULT 'manual'
-		CHECK (trigger_type IN ('create', 'manual', 'push', 'poll')),
+		CHECK (trigger_type IN ('create', 'manual', 'push', 'poll', 'variables')),
+	needs_build    INTEGER NOT NULL DEFAULT 1 CHECK (needs_build IN (0, 1)),
+	pending_through INTEGER NOT NULL DEFAULT 0,
 	pushed_by      TEXT    NOT NULL DEFAULT '',
 	requested_sha  TEXT    NOT NULL DEFAULT '',
 	image          TEXT    NOT NULL DEFAULT '',
@@ -55,6 +65,17 @@ CREATE UNIQUE INDEX deploys_one_queued ON deploys (app_id) WHERE state = 'queued
 
 CREATE INDEX deploys_by_app ON deploys (app_id, id);
 CREATE INDEX deploys_by_state ON deploys (state, id);
+
+-- Changes saved since the app's last live deploy, by name: the notice on the
+-- dashboard, and whether redeploying them needs a build. A change again gets a
+-- newer id, so a deploy that started before it doesn't clear it.
+CREATE TABLE app_pending_changes (
+	id            INTEGER PRIMARY KEY AUTOINCREMENT,
+	app_id        INTEGER NOT NULL REFERENCES apps (id),
+	name          TEXT    NOT NULL,
+	touches_build INTEGER NOT NULL CHECK (touches_build IN (0, 1)),
+	UNIQUE (app_id, name)
+);
 
 -- The GitHub App's installation as the agent last read it from GitHub. A
 -- private App has at most one. The App's secrets are in the key service.

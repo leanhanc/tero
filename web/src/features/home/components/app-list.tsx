@@ -72,7 +72,10 @@ function AppListContent({ loaded }: { loaded: LoadedApps }) {
 								{app.address}
 							</a>
 						</td>
-						<td>{describeState(app.latestState, messages.deployStates)}</td>
+						<td>
+							{describeState(app.latestState, messages.deployStates)}
+							{app.pendingChanges > 0 && <p>{messages.app.pendingChanges.count(app.pendingChanges)}</p>}
+						</td>
 					</tr>
 				))}
 			</tbody>

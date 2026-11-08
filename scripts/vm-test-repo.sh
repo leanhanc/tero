@@ -15,7 +15,13 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
 mkdir "$work/tree"
+# ls-files still lists a tracked file that was deleted or moved in the tree.
 git -C "$repo_root" ls-files -co --exclude-standard -z |
+	while IFS= read -r -d '' file; do
+		if [[ -e "$repo_root/$file" ]]; then
+			printf '%s\0' "$file"
+		fi
+	done |
 	COPYFILE_DISABLE=1 tar -C "$repo_root" --null -T - -cf - | tar -C "$work/tree" -xf -
 
 git -C "$work/tree" init -q -b main

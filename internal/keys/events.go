@@ -2,6 +2,7 @@ package keys
 
 import (
 	"context"
+	"database/sql"
 	"strconv"
 	"sync"
 	"time"
@@ -43,6 +44,13 @@ const (
 	EventGitHubDisconnected        EventType = "github_disconnected"
 	EventGitHubInstallationChanged EventType = "github_installation_changed"
 	EventWebhookSignatureFailed    EventType = "webhook_signature_failed"
+
+	EventVariablesChanged       EventType = "variables_changed"
+	EventVariableSealed         EventType = "variable_sealed"
+	EventVariableReplaced       EventType = "variable_replaced"
+	EventSourceApproved         EventType = "source_approved"
+	EventVariablesRefused       EventType = "variables_release_refused"
+	EventSealedVariableReleased EventType = "sealed_variable_released"
 )
 
 // Source is who recorded an event. The key service records its own events;
@@ -82,6 +90,13 @@ var eventMessages = map[EventType]string{
 	EventGitHubDisconnected:        "GitHub disconnected",
 	EventGitHubInstallationChanged: "The GitHub App's installation or its repositories changed",
 	EventWebhookSignatureFailed:    "GitHub webhook refused: its signature didn't match",
+
+	EventVariablesChanged:       "App variable changed",
+	EventVariableSealed:         "App variable sealed",
+	EventVariableReplaced:       "Sealed app variable replaced",
+	EventSourceApproved:         "App source approved for its variables",
+	EventVariablesRefused:       "App variables refused to a deploy from an unapproved source",
+	EventSealedVariableReleased: "Sealed app variable released to the agent",
 }
 
 // warnings are written to the journal at warning priority.
@@ -91,6 +106,7 @@ var warnings = map[EventType]bool{
 	EventBreachReset: true, EventConfirmFailed: true, EventConfirmCodeFailed: true, EventPasskeyLoginFailed: true,
 	EventPasskeyCounterMismatch: true, EventPasswordChanged: true, EventPasskeyAdded: true, EventPasskeyRemoved: true,
 	EventGitHubConnected: true, EventGitHubDisconnected: true, EventWebhookSignatureFailed: true,
+	EventVariablesRefused: true, EventSourceApproved: true,
 }
 
 // appendable lists the events each caller may append. Everything else is
@@ -109,6 +125,10 @@ type Event struct {
 	Source Source    `json:"source"`
 	IP     string    `json:"ip,omitempty"`
 	Count  int       `json:"count,omitempty"`
+	// Subject names what the event concerns, such as an app or a variable.
+	// Names are validated before they get here, so they can't forge a line.
+	Subject string `json:"subject,omitempty"`
+	Detail  string `json:"detail,omitempty"`
 }
 
 // JournalWriter sends events to the system journal.
@@ -140,6 +160,21 @@ const (
 // trusted _SYSTEMD_UNIT field marks the genuine copy. A journal failure
 // doesn't fail the request: the database copy is the record.
 func (s *Service) record(ctx context.Context, event Event) error {
+	event = normalizeEvent(event)
+	if err := insertEvent(ctx, s.db, event); err != nil {
+		return err
+	}
+
+	s.writeJournal(event)
+	return nil
+}
+
+// eventWriter is a database or a transaction.
+type eventWriter interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func normalizeEvent(event Event) Event {
 	if event.Count == 0 {
 		event.Count = 1
 	}
@@ -147,15 +182,15 @@ func (s *Service) record(ctx context.Context, event Event) error {
 		event.IP = event.IP[:maxIPLength]
 	}
 
-	_, err := s.db.ExecContext(ctx,
-		"INSERT INTO security_events (at, type, source, ip, count) VALUES (?, ?, ?, ?, ?)",
-		event.At.Unix(), string(event.Type), string(event.Source), event.IP, event.Count)
-	if err != nil {
-		return err
-	}
+	return event
+}
 
-	s.writeJournal(event)
-	return nil
+// insertEvent stores an event as normalizeEvent left it.
+func insertEvent(ctx context.Context, db eventWriter, event Event) error {
+	_, err := db.ExecContext(ctx,
+		"INSERT INTO security_events (at, type, source, ip, count, subject, detail) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		event.At.Unix(), string(event.Type), string(event.Source), event.IP, event.Count, event.Subject, event.Detail)
+	return err
 }
 
 func (s *Service) writeJournal(event Event) {
@@ -173,6 +208,14 @@ func (s *Service) writeJournal(event Event) {
 	if event.IP != "" {
 		fields["TERO_SOURCE_IP"] = event.IP
 		message += " from " + event.IP
+	}
+	if event.Subject != "" {
+		fields["TERO_EVENT_SUBJECT"] = event.Subject
+		message += ": " + event.Subject
+	}
+	if event.Detail != "" {
+		fields["TERO_EVENT_DETAIL"] = event.Detail
+		message += " (" + event.Detail + ")"
 	}
 	if event.Count > 1 {
 		fields["TERO_EVENT_COUNT"] = strconv.Itoa(event.Count)
@@ -204,7 +247,7 @@ func (s *Service) AppendEvent(ctx context.Context, caller Caller, eventType Even
 // RecentEvents returns the latest events, newest first.
 func (s *Service) RecentEvents(ctx context.Context, limit int) ([]Event, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT at, type, source, ip, count FROM security_events ORDER BY id DESC LIMIT ?", limit)
+		"SELECT at, type, source, ip, count, subject, detail FROM security_events ORDER BY id DESC LIMIT ?", limit)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +257,7 @@ func (s *Service) RecentEvents(ctx context.Context, limit int) ([]Event, error) 
 	for rows.Next() {
 		var unix int64
 		var event Event
-		if err := rows.Scan(&unix, &event.Type, &event.Source, &event.IP, &event.Count); err != nil {
+		if err := rows.Scan(&unix, &event.Type, &event.Source, &event.IP, &event.Count, &event.Subject, &event.Detail); err != nil {
 			return nil, err
 		}
 		event.At = time.Unix(unix, 0).UTC()
