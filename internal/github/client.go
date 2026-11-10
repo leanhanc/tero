@@ -146,6 +146,18 @@ type Repository struct {
 	DefaultBranch string  `json:"default_branch"`
 }
 
+// RepositoryID returns GitHub's id for owner/name, following a rename. token
+// is needed for a private repository and may be empty for a public one.
+func (c *Client) RepositoryID(ctx context.Context, owner, name, token string) (int64, error) {
+	var repository Repository
+	path := "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(name)
+	if err := c.do(ctx, http.MethodGet, path, token, nil, &repository); err != nil {
+		return 0, err
+	}
+
+	return repository.ID, nil
+}
+
 // InstallationRepositories lists every repository the installation token
 // can read, up to maxPages pages of 100.
 func (c *Client) InstallationRepositories(ctx context.Context, token string) ([]Repository, error) {

@@ -20,6 +20,7 @@ import (
 	"github.com/leanhanc/tero/internal/containers"
 	"github.com/leanhanc/tero/internal/deploylog"
 	"github.com/leanhanc/tero/internal/deploys"
+	"github.com/leanhanc/tero/internal/github"
 	"github.com/leanhanc/tero/internal/githubapp"
 	"github.com/leanhanc/tero/internal/keys"
 	"github.com/leanhanc/tero/internal/source"
@@ -55,7 +56,15 @@ type Pipeline struct {
 	Tokens RepositoryTokens
 	// Variables gives the agent the values of apps that have them.
 	Variables variables.Releaser
-	Now       func() time.Time
+	// GitHub finds the repository id an app's values are pinned to.
+	GitHub RepositoryIDs
+	Now    func() time.Time
+}
+
+// RepositoryIDs looks up GitHub's id for a repository. token may be empty for
+// a public one.
+type RepositoryIDs interface {
+	RepositoryID(ctx context.Context, owner, name, token string) (int64, error)
 }
 
 // RepositoryTokens mints a token that reads one covered repository. revoke
@@ -98,6 +107,12 @@ func (p Pipeline) Run(ctx context.Context, deploy deploys.Deploy) error {
 	if err != nil {
 		fmt.Fprintf(log, "\n%s\n", internalErrorNote)
 		return err
+	}
+	if deployApp.HasVariables {
+		deployApp.Source.RepositoryID, err = p.repositoryID(ctx, deployApp)
+		if err != nil {
+			return p.recordFailure(ctx, deploy.ID, deploys.Building, err, log)
+		}
 	}
 
 	live, hasLive, err := deploys.LiveRelease(ctx, p.DB, deployApp.ID)
@@ -416,6 +431,55 @@ func (p Pipeline) fetch(ctx context.Context, deployApp app, checkoutDir string) 
 	defer revoke()
 
 	return source.Clone(ctx, deployApp.Repository, token, deployApp.Branch, checkoutDir)
+}
+
+// errRepositoryMismatch means the app's repository URL and the repository the
+// GitHub App connected it with are two repositories.
+var errRepositoryMismatch = build.Failure{Reason: "This app's repository address now leads to another repository than the one GitHub connected it with. Check the repository on GitHub, then create the app again"}
+
+// repositoryID looks up GitHub's id for the repository at the app's URL, which
+// the key service compares with the one pinned when the source was approved:
+// a repository that took over the name after a deletion or a rename has
+// another id. A repository the GitHub App covers is looked up with a token for
+// its own id alone, and must be the repository at the URL that is cloned.
+func (p Pipeline) repositoryID(ctx context.Context, deployApp app) (int64, error) {
+	if p.GitHub == nil {
+		return 0, errors.New("the agent has no GitHub client to look the repository up")
+	}
+	if deployApp.GitHubRepositoryID == 0 {
+		return p.lookUpRepositoryID(ctx, deployApp, "")
+	}
+	if p.Tokens == nil {
+		return 0, githubapp.ErrNotInstalled
+	}
+
+	token, revoke, err := p.Tokens.RepositoryToken(ctx, deployApp.GitHubRepositoryID)
+	if err != nil {
+		return 0, err
+	}
+	defer revoke()
+
+	repositoryID, err := p.lookUpRepositoryID(ctx, deployApp, string(token))
+	if err != nil {
+		return 0, err
+	}
+	if repositoryID != deployApp.GitHubRepositoryID {
+		return 0, errRepositoryMismatch
+	}
+
+	return repositoryID, nil
+}
+
+func (p Pipeline) lookUpRepositoryID(ctx context.Context, deployApp app, token string) (int64, error) {
+	repositoryID, err := p.GitHub.RepositoryID(ctx, deployApp.Repository.Owner, deployApp.Repository.Name, token)
+	if errors.Is(err, github.ErrNotFound) {
+		return 0, build.Failure{Reason: source.ErrRepositoryNotFound.Error()}
+	}
+	if err != nil {
+		return 0, build.Failure{Reason: "Tero couldn't look the repository up on GitHub, which an app with variables needs. Try again in a few minutes: " + err.Error()}
+	}
+
+	return repositoryID, nil
 }
 
 // errNoKeyService means the app has variables and this agent can't ask for

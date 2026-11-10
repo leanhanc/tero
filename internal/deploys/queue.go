@@ -194,6 +194,23 @@ func MarkInterrupted(ctx context.Context, db *sql.DB, now time.Time) (int64, err
 	return result.RowsAffected()
 }
 
+// breachReason is why `tero assume-breach` failed an app's live release.
+const breachReason = "Stopped by `tero assume-breach`, which deleted its image. Redeploy to build it again from source"
+
+// FailLiveReleases fails every live release, whose image `tero
+// assume-breach` deletes, so the agent doesn't try to start it again and the
+// dashboard tells the admin to redeploy. It returns how many there were.
+func FailLiveReleases(ctx context.Context, db *sql.DB, now time.Time) (int64, error) {
+	result, err := db.ExecContext(ctx,
+		"UPDATE deploys SET state = 'failed', reason = ?, finished_at = ? WHERE state = 'live'",
+		breachReason, now.Unix())
+	if err != nil {
+		return 0, err
+	}
+
+	return result.RowsAffected()
+}
+
 // RecordCommit stores the commit a deploy builds.
 func RecordCommit(ctx context.Context, db *sql.DB, deployID int64, sha, message string) error {
 	_, err := db.ExecContext(ctx, "UPDATE deploys SET commit_sha = ?, commit_message = ? WHERE id = ?", sha, message, deployID)

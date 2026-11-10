@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/leanhanc/tero/internal/apps"
+	"github.com/leanhanc/tero/internal/auth"
 	"github.com/leanhanc/tero/internal/deploylog"
 	"github.com/leanhanc/tero/internal/deploys"
 	"github.com/leanhanc/tero/internal/githubapp"
@@ -23,6 +24,10 @@ const (
 	// maxLogStream bounds one log stream; a build stops after 30 minutes.
 	maxLogStream = 40 * time.Minute
 )
+
+// sessionRecheckInterval is how long a log stream goes on after its session
+// ends, by logout, revocation or timeout, at most.
+var sessionRecheckInterval = 5 * time.Second
 
 // fieldErrors maps errors from creating an app to the form field they
 // belong to.
@@ -184,15 +189,27 @@ func (h *Handler) streamLog(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), maxLogStream)
 	defer cancel()
 
-	if err := h.followLog(ctx, w, flusher, deployID); err != nil && ctx.Err() == nil {
+	if err := h.followLog(ctx, w, flusher, deployID, sessionToken(r)); err != nil && ctx.Err() == nil && !errors.Is(err, auth.ErrSessionExpired) {
 		writeEvent(w, "problem", "The log couldn't be read")
 		_ = flusher.Flush()
 	}
 }
 
-func (h *Handler) followLog(ctx context.Context, w io.Writer, flusher *http.ResponseController, deployID int64) error {
+// followLog streams the log until the deploy ends. It stops once the
+// session that opened the stream has ended, so a revoked session stops
+// getting output (OWASP ASVS v5.0.0-7.4.1).
+func (h *Handler) followLog(ctx context.Context, w io.Writer, flusher *http.ResponseController, deployID int64, session string) error {
 	var offset int64
+	sessionCheckedAt := time.Now()
 	for {
+		isSessionCheckDue := time.Since(sessionCheckedAt) >= sessionRecheckInterval
+		if isSessionCheckDue {
+			if err := h.auth.CheckStillLive(ctx, session); err != nil {
+				return err
+			}
+			sessionCheckedAt = time.Now()
+		}
+
 		state, err := h.apps.DeployState(ctx, deployID)
 		if err != nil {
 			return err

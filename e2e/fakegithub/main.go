@@ -62,6 +62,7 @@ func main() {
 	mux.HandleFunc("POST /app/installations/{id}/access_tokens", fake.withAppToken(fake.accessToken))
 	mux.HandleFunc("DELETE /installation/token", fake.revoke)
 	mux.HandleFunc("GET /installation/repositories", fake.repositories)
+	mux.HandleFunc("GET /repos/{owner}/{repo}", fake.repository)
 	mux.HandleFunc("GET /app/hook/deliveries", fake.withAppToken(fake.deliveries))
 	mux.HandleFunc("POST /app/hook/deliveries/{id}/attempts", fake.withAppToken(fake.redeliver))
 	mux.HandleFunc("GET /e2e/state", fake.state)
@@ -154,6 +155,19 @@ func (f *fakeGitHub) repositories(w http.ResponseWriter, r *http.Request) {
 			"id": repositoryID, "name": "tero", "owner": map[string]string{"login": "leanhanc", "type": "User"},
 			"private": true, "default_branch": "main",
 		}},
+	})
+}
+
+// repository answers the agent's lookup of a repository's id. The fixtures'
+// repository is the only one there is.
+func (f *fakeGitHub) repository(w http.ResponseWriter, r *http.Request) {
+	if r.PathValue("owner") != "leanhanc" || r.PathValue("repo") != "tero" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id": repositoryID, "name": "tero", "owner": map[string]string{"login": "leanhanc", "type": "User"},
+		"private": true, "default_branch": "main",
 	})
 }
 

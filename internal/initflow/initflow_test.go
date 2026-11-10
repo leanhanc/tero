@@ -284,8 +284,9 @@ func TestShareStateCreatesGroupsAndSetgidDirectory(t *testing.T) {
 		"groupadd --system tero-keys-callers",
 		"usermod --append --groups tero-shared,tero-keys-callers tero",
 		"usermod --append --groups tero-shared,tero-keys-callers tero-agent",
-		"install -d -o root -g tero-shared -m 2770 /var/lib/tero-shared",
-		"install -d -o tero-agent -g tero-shared -m 2750 /var/lib/tero-shared/logs /var/lib/tero-shared/logs/deploys",
+		"install -d -o root -g tero-shared -m 0750 /var/lib/tero-shared",
+		"install -d -o root -g tero-shared -m 2770 /var/lib/tero-shared/db",
+		"install -d -o tero-agent -g tero-shared -m 2750 /var/lib/tero-shared/deploy-logs",
 	} {
 		if !strings.Contains(commands, want) {
 			t.Errorf("missing %q in:\n%s", want, commands)
@@ -413,6 +414,24 @@ func TestFirewallOpensEverySSHPort(t *testing.T) {
 	rules, _ := h.files.ReadFile("/etc/tero/firewall.nft")
 	if !strings.Contains(string(rules), "tcp dport { 2200, 2222, 80, 443 } accept") {
 		t.Errorf("rules don't open the SSH ports:\n%s", rules)
+	}
+}
+
+// Audit finding TERO-04: apps and builds could reach the cloud metadata
+// service.
+func TestFirewallBlocksMetadataForTerosUsers(t *testing.T) {
+	rules, err := firewallRules([]int{22})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"type filter hook output priority filter; policy accept;",
+		`meta skuid { "tero", "tero-agent" } ip daddr { 169.254.0.0/16, 168.63.129.16, 100.100.100.200 } reject`,
+		`meta skuid { "tero", "tero-agent" } ip6 daddr { fe80::/10, fd00:ec2::254, fd20:ce::254, fd00:c1::a9fe:a9fe, fd00:a9fe:a9fe::1, fd00:42::42 } reject`,
+	} {
+		if !strings.Contains(string(rules), want) {
+			t.Errorf("rules lack %q:\n%s", want, rules)
+		}
 	}
 }
 

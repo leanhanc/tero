@@ -36,16 +36,16 @@ Sealing protects values the dashboard has stored. A value typed in while the das
 
 ## Where values live
 
-Every value is encrypted by the key service under the master key. The shared database holds only variable names that are waiting for a redeploy. On the server, values are only in memory while an app runs, never in Podman's storage on disk. After a reboot, an app with variables starts once the key service answers, and its page says so while it waits. Apps with no variables start regardless, and a running app is never stopped by a key service problem.
+Every value is encrypted by the key service under the master key. The shared database holds only variable names that are waiting for a redeploy. On the server, values are only in memory while an app runs, never in Podman's storage on disk. What an app prints is kept in memory too, up to 1 MB per app, so a value it prints at start doesn't end up on disk. After a reboot, an app with variables starts once the key service answers, and its page says so while it waits. Apps with no variables start regardless, and a running app is never stopped by a key service problem.
 
 Tero hides known values in deploy logs, for every sealed value and every unsealed value of 8 bytes or more. This catches exact matches only, so don't rely on it to print secrets safely.
 
 ## Approved source
 
-The first time you save a variable, Tero records the app's repository, branch and folder in the key service. Values are released only for that exact source. If it changes, for example when the repository is renamed on GitHub, deploys fail before fetching anything and the page shows both sources, with a button to approve the new one using your password and a code. If you didn't change it, don't approve it: someone may have tampered with the app.
+The first time you save a variable, Tero records the app's repository, branch and folder in the key service, and the next deploy pins the repository's GitHub id. Values are released only for that exact source. A repository renamed on GitHub keeps its id, but one that takes over the address after the original was deleted, or renamed and its old name taken, has another id: its deploys are refused, and the page says GitHub has a different repository at that address. If it changes, for example when the repository is renamed on GitHub, deploys fail before fetching anything and the page shows both sources, with a button to approve the new one using your password and a code. If you didn't change it, don't approve it: someone may have tampered with the app.
 
 ## After a suspected breach
 
-`sudo tero assume-breach` keeps your variables, so apps can come back, and lists each app's variable names to rotate at their providers and its approved source to check. Replace each value in the dashboard once you've rotated it.
+`sudo tero assume-breach` keeps your variables, so apps can come back, and lists each app's variable names to rotate at their providers and its approved source to check. Replace each value in the dashboard once you've rotated it. It also deletes every app's image, so apps stay down until you redeploy them; see [After a suspected breach](breach.md).
 
 If the master key is lost, for example because the TPM was cleared, stored values can't be recovered. Set them again from their providers.

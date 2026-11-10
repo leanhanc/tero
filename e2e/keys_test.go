@@ -242,4 +242,20 @@ func testAssumeBreach(t *testing.T) {
 		}
 	}
 	waitUntil(t, time.Minute, func() bool { return run(t, agentSystemctl+" is-active tero-agent").exitCode == 0 })
+
+	// Audit finding TERO-03: apps came back from images the attacker could
+	// have changed, and the agent started before the build cache was cleared.
+	// The agent downloads BuildKit's image again as soon as it starts.
+	if images := must(t, asAgent("podman images --quiet --filter 'reference=localhost/tero/*'")); images != "" {
+		t.Errorf("app images survived assume-breach: %s", images)
+	}
+	if volumes := must(t, asAgent("podman volume ls --quiet")); volumes != "" {
+		t.Errorf("volumes survived assume-breach: %s", volumes)
+	}
+	if held := run(t, "test -e /etc/tero/reset-in-progress"); held.exitCode == 0 {
+		t.Error("the dashboard and the agent are still held back")
+	}
+	if strings.Contains(fetchApp(t, fixtureApp("npm"), "/").output, "tero fixture npm") {
+		t.Error("an app still serves after assume-breach")
+	}
 }

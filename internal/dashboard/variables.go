@@ -33,11 +33,14 @@ func sourceOf(detail apps.Detail) keys.AppSource {
 
 // variablesResponse is an app's list. ApprovedSource is empty until the first
 // variable is saved; Source is what the app builds from now.
+// IsRepositoryReplaced means GitHub has another repository at the approved URL
+// than the one approved.
 type variablesResponse struct {
-	Variables        []keys.Variable `json:"variables"`
-	ApprovedSource   keys.AppSource  `json:"approvedSource"`
-	Source           keys.AppSource  `json:"source"`
-	IsSourceApproved bool            `json:"isSourceApproved"`
+	Variables            []keys.Variable `json:"variables"`
+	ApprovedSource       keys.AppSource  `json:"approvedSource"`
+	Source               keys.AppSource  `json:"source"`
+	IsSourceApproved     bool            `json:"isSourceApproved"`
+	IsRepositoryReplaced bool            `json:"isRepositoryReplaced"`
 }
 
 func (h *Handler) listVariables(w http.ResponseWriter, r *http.Request) {
@@ -55,9 +58,11 @@ func (h *Handler) listVariables(w http.ResponseWriter, r *http.Request) {
 	}
 
 	source := sourceOf(detail)
-	isApproved := len(listed.Variables) == 0 || listed.Source == source
+	isApprovedLocation := listed.Source.SameLocation(source) && !listed.IsRepositoryReplaced
+	isApproved := len(listed.Variables) == 0 || isApprovedLocation
 	writeJSON(w, http.StatusOK, variablesResponse{
 		Variables: listed.Variables, ApprovedSource: listed.Source, Source: source, IsSourceApproved: isApproved,
+		IsRepositoryReplaced: listed.IsRepositoryReplaced,
 	})
 }
 

@@ -17,7 +17,7 @@ import (
 // Dir holds one log file per deploy, in the directory the service and the
 // agent share. Init creates it with group tero-shared, so the agent writes
 // each log and the service can read it.
-const Dir = "/var/lib/tero-shared/logs/deploys"
+const Dir = "/var/lib/tero-shared/deploy-logs"
 
 // logFileMode lets the group, which holds the service, read a log.
 const logFileMode = 0o640

@@ -54,6 +54,7 @@ export function SourceApproval({ appName, variables, onApprove }: SourceApproval
 	return (
 		<section aria-label={messages.label}>
 			<p role="alert">{messages.changed}</p>
+			{variables.isRepositoryReplaced && <p>{messages.replaced}</p>}
 			<dl>
 				<dt>{messages.approved}</dt>
 				<dd>{describeSource(variables.approvedSource, messages)}</dd>

@@ -22,7 +22,7 @@ import (
 
 // Path is the shared database. Its directory is root's, group tero-shared,
 // mode 2770, so every file in it gets that group.
-const Path = "/var/lib/tero-shared/tero.db"
+const Path = "/var/lib/tero-shared/db/tero.db"
 
 //go:embed migrations/*.sql
 var migrations embed.FS

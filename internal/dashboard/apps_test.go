@@ -1,11 +1,14 @@
 package dashboard
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/leanhanc/tero/internal/deploylog"
 )
@@ -163,5 +166,42 @@ func TestLogStreamSendsTheLogThenTheFinalState(t *testing.T) {
 	want := "event: log\ndata: \"#1 ERROR: \\u003cb\\u003eboom\\u003c/b\\u003e\\n\"\n\nevent: done\ndata: \"failed\"\n\n"
 	if response.Header().Get("Content-Type") != "text/event-stream" || response.Body.String() != want {
 		t.Fatalf("stream = %q", response.Body)
+	}
+}
+
+// Audit finding TERO-10: a log stream outlived the session that opened it.
+func TestLogStreamEndsWithItsSession_v5_0_0_7_4_1(t *testing.T) {
+	original := sessionRecheckInterval
+	sessionRecheckInterval = 10 * time.Millisecond
+	t.Cleanup(func() { sessionRecheckInterval = original })
+
+	d := newTestDashboard(t)
+	session := d.setUp(t)
+	d.insertApp(t, "api", "building")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	request := httptest.NewRequestWithContext(ctx, http.MethodGet, "https://dash.example.com/api/deploys/1/log", nil)
+	request.RemoteAddr = "198.51.100.7:51000"
+	request.AddCookie(session)
+	recorder := httptest.NewRecorder()
+	streamEnded := make(chan struct{})
+	go func() {
+		d.handler.ServeHTTP(recorder, request)
+		close(streamEnded)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	if response := d.post("/api/logout", map[string]string{}, session); response.Code != http.StatusNoContent {
+		t.Fatalf("logout = %d", response.Code)
+	}
+
+	select {
+	case <-streamEnded:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stream went on after logout")
+	}
+	if ctx.Err() != nil || recorder.Code != http.StatusOK || strings.Contains(recorder.Body.String(), "event: ") {
+		t.Errorf("stream = %d %q, ctx %v", recorder.Code, recorder.Body, ctx.Err())
 	}
 }

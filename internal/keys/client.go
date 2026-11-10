@@ -147,6 +147,12 @@ func (c *Client) CheckSession(ctx context.Context, session, ip string) (SessionS
 	return state, err
 }
 
+// PeekSession returns ErrSessionEnded unless session is live, without marking
+// it used.
+func (c *Client) PeekSession(ctx context.Context, session string) error {
+	return c.call(ctx, VerbSessionPeek, sessionArgs{Session: session}, nil)
+}
+
 func (c *Client) EndSession(ctx context.Context, session string) error {
 	return c.call(ctx, VerbSessionEnd, sessionArgs{Session: session}, nil)
 }

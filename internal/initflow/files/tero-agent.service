@@ -7,6 +7,9 @@
 Description=Tero agent (builds and runs apps)
 Documentation=https://github.com/leanhanc/tero
 ConditionUser=tero-agent
+# `tero assume-breach` holds the agent back with this file until it has run
+# to the end.
+ConditionPathExists=!/etc/tero/reset-in-progress
 
 [Service]
 ExecStart=/usr/local/bin/tero agent

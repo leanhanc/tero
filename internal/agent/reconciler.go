@@ -246,6 +246,9 @@ func removeLeftovers(ctx context.Context, db *sql.DB) error {
 	if err := containers.RemoveEnvFilesExcept(liveContainers); err != nil {
 		return err
 	}
+	if err := containers.RemoveOutputsExcept(liveContainers); err != nil {
+		return err
+	}
 
 	return removeLeftoverImages(ctx, liveImages)
 }

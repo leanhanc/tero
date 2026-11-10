@@ -19,6 +19,7 @@ import (
 	"github.com/leanhanc/tero/internal/agent"
 	"github.com/leanhanc/tero/internal/appentry"
 	"github.com/leanhanc/tero/internal/breach"
+	"github.com/leanhanc/tero/internal/build"
 	"github.com/leanhanc/tero/internal/config"
 	"github.com/leanhanc/tero/internal/deployer"
 	"github.com/leanhanc/tero/internal/deploylog"
@@ -90,6 +91,8 @@ func run(ctx context.Context, args []string) error {
 		return runRotateKey(ctx)
 	case "assume-breach":
 		return runAssumeBreach(ctx, commandArgs)
+	case build.PlanCommand:
+		return build.RunPlanCommand(os.Stdin, os.Stdout)
 	case "version", "--version":
 		fmt.Println(version)
 		return nil
@@ -214,8 +217,12 @@ func runAgent(ctx context.Context) error {
 	defer db.Close()
 
 	keyService := keys.NewClient(keys.SocketPath)
-	gitHubApp := githubapp.Worker{DB: db, Keys: keyService, GitHub: github.New(), Now: time.Now}
-	pipeline := deployer.Pipeline{DB: db, LogDir: deploylog.Dir, WorkDir: deployer.WorkDir, Tokens: gitHubApp, Variables: keyService, Now: time.Now}
+	gitHubClient := github.New()
+	gitHubApp := githubapp.Worker{DB: db, Keys: keyService, GitHub: gitHubClient, Now: time.Now}
+	pipeline := deployer.Pipeline{
+		DB: db, LogDir: deploylog.Dir, WorkDir: deployer.WorkDir,
+		Tokens: gitHubApp, Variables: keyService, GitHub: gitHubClient, Now: time.Now,
+	}
 
 	poller := agent.Poller{DB: db, Now: time.Now}
 

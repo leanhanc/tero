@@ -18,7 +18,7 @@ import (
 
 // BuildKitImage is pinned by index digest to the release of the BuildKit
 // client Railpack compiles against, so the daemon understands its LLB.
-const BuildKitImage = "docker.io/moby/buildkit:v0.33.0-rootless@sha256:80b15f0735e87bab7bf59ec4d695dfb4a7cfb25521cf56dc75d6f256285b63ef"
+const BuildKitImage = "docker.io/moby/buildkit:v0.34.2-rootless@sha256:c8252268760e1baba80780d63d738ef9f260fb7c7c0973c78494cb9ddd99eda1"
 
 // CacheVolume keeps BuildKit's state between throwaway daemons, so base
 // images and package layers are reused.

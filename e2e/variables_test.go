@@ -120,7 +120,7 @@ func appVariables(t *testing.T) variablesAnswer {
 
 func deployLog(t *testing.T, deployID int64) string {
 	t.Helper()
-	return must(t, fmt.Sprintf("sudo cat /var/lib/tero-shared/logs/deploys/%d.log", deployID))
+	return must(t, fmt.Sprintf("sudo cat /var/lib/tero-shared/deploy-logs/%d.log", deployID))
 }
 
 func pendingNames(t *testing.T) []string {
@@ -139,7 +139,7 @@ func pendingNames(t *testing.T) []string {
 // updateAppRow writes to the shared database as a compromised dashboard could.
 func updateAppRow(t *testing.T, assignment string) {
 	t.Helper()
-	script := fmt.Sprintf(`import sqlite3; c = sqlite3.connect("/var/lib/tero-shared/tero.db", timeout=10); c.execute("UPDATE apps SET %s WHERE name = '%s'"); c.commit()`, assignment, variablesApp)
+	script := fmt.Sprintf(`import sqlite3; c = sqlite3.connect("/var/lib/tero-shared/db/tero.db", timeout=10); c.execute("UPDATE apps SET %s WHERE name = '%s'"); c.commit()`, assignment, variablesApp)
 	must(t, asAgent(fmt.Sprintf("python3 -c %q", script)))
 }
 

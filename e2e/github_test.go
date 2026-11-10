@@ -140,7 +140,7 @@ func testPrivateDeploy(t *testing.T) {
 		return strings.Contains(fetchApp(t, privateApp, "/").output, "tero fixture npm on node")
 	})
 
-	if found := run(t, "sudo grep -rl 'ghs_' /var/lib/tero-shared/logs").output; found != "" {
+	if found := run(t, "sudo grep -rl 'ghs_' /var/lib/tero-shared/deploy-logs").output; found != "" {
 		t.Errorf("an installation token is in a build log: %s", found)
 	}
 }
@@ -190,7 +190,7 @@ func testEveryTokenRevoked(t *testing.T) {
 
 func testGitHubSecretsOutOfReach(t *testing.T) {
 	state := fakeGitHub(t)
-	files := "/var/lib/tero-shared/tero.db* /var/lib/tero-keys/keys.db*"
+	files := "/var/lib/tero-shared/db/tero.db* /var/lib/tero-keys/keys.db*"
 	for _, secret := range []string{"PRIVATE KEY", state.WebhookSecret} {
 		if found := run(t, "sudo grep -l -a '"+secret+"' "+files+" 2>/dev/null").output; found != "" {
 			t.Errorf("%q is stored in clear in %s", secret, found)

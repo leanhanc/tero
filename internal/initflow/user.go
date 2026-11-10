@@ -19,7 +19,13 @@ const (
 	// sharedGroup lets the service and the agent open the database and build
 	// logs in sharedDir, and nobody else.
 	sharedGroup = "tero-shared"
-	sharedDir   = "/var/lib/tero-shared"
+	// sharedDir is root's and writable by nobody else, so neither service can
+	// swap an entry in it for a link that root follows when init runs again.
+	// The database is in sharedDBDir, which both write; build logs are in
+	// deployLogDir, which only the agent writes.
+	sharedDir    = "/var/lib/tero-shared"
+	sharedDBDir  = sharedDir + "/db"
+	deployLogDir = sharedDir + "/deploy-logs"
 	// keysCallersGroup owns the key service's socket. The key service still
 	// identifies each caller itself; the group keeps everyone else from
 	// connecting at all.
@@ -90,8 +96,10 @@ func startAgentManager(ctx context.Context, h host) error {
 }
 
 // shareState creates the groups the service and the agent share, puts both
-// users in them, and creates the shared directory. The directory is root's
-// and setgid, so every file either process creates gets the group.
+// users in them, and creates the shared directories. Root changes only paths
+// whose parent no service can write: `install -d` follows a link it finds in
+// place of a directory (OWASP ASVS v5.0.0-5.3.2). The database directory is
+// setgid, so every file either process creates there gets the group.
 func shareState(ctx context.Context, h host) error {
 	for _, name := range []string{sharedGroup, keysCallersGroup} {
 		if err := ensureGroup(ctx, h, name); err != nil {
@@ -106,15 +114,17 @@ func shareState(ctx context.Context, h host) error {
 		}
 	}
 
-	if _, err := h.run.Run(ctx, "install", "-d", "-o", "root", "-g", sharedGroup, "-m", "2770", sharedDir); err != nil {
+	if _, err := h.run.Run(ctx, "install", "-d", "-o", "root", "-g", sharedGroup, "-m", "0750", sharedDir); err != nil {
+		return err
+	}
+	if _, err := h.run.Run(ctx, "install", "-d", "-o", "root", "-g", sharedGroup, "-m", "2770", sharedDBDir); err != nil {
 		return err
 	}
 
 	// Only the agent writes build logs. Were the directory writable by tero,
 	// the dashboard could plant a link where the agent's next log goes and
 	// make the agent write into its own files.
-	_, err := h.run.Run(ctx, "install", "-d", "-o", agentUser, "-g", sharedGroup, "-m", "2750",
-		sharedDir+"/logs", sharedDir+"/logs/deploys")
+	_, err := h.run.Run(ctx, "install", "-d", "-o", agentUser, "-g", sharedGroup, "-m", "2750", deployLogDir)
 	return err
 }
 

@@ -101,11 +101,17 @@ CREATE TABLE app_variables (
 -- The source each app with variables may have them released for. The dashboard
 -- can't change a row without a confirmed session, and the shared database can't
 -- change it at all.
+-- repository_id is GitHub's id for the repository at that URL, pinned by the
+-- first release after an approval: a repository that replaces it under the same
+-- name, after a deletion or a rename, has another id. replaced_by is the id a
+-- release was refused for, until the admin approves again.
 CREATE TABLE app_sources (
 	app            TEXT    PRIMARY KEY,
 	repository     TEXT    NOT NULL,
 	branch         TEXT    NOT NULL,
 	root_directory TEXT    NOT NULL,
+	repository_id  INTEGER NOT NULL DEFAULT 0,
+	replaced_by    INTEGER NOT NULL DEFAULT 0,
 	approved_at    INTEGER NOT NULL
 );
 

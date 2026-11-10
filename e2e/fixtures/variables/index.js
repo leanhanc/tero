@@ -1,6 +1,7 @@
 // A backend for Tero's variable tests. It reports the E2E_ variables it runs
-// with and which ones the build saw. E2E_CRASH makes it fail at start, printing
-// a value on the way out to check it is hidden in the deploy log.
+// with and which ones the build saw, and prints them at start to check its
+// output stays off the disk. E2E_CRASH makes it fail at start, printing a value
+// on the way out to check it is hidden in the deploy log.
 const fs = require("node:fs");
 const http = require("node:http");
 
@@ -10,6 +11,7 @@ if (process.env.E2E_CRASH) {
 }
 
 const running = Object.fromEntries(Object.entries(process.env).filter(([name]) => name.startsWith("E2E_")));
+console.log(`e2e running with ${JSON.stringify(running)}`);
 const seenByBuild = JSON.parse(fs.readFileSync("build-seen.json", "utf8"));
 
 http

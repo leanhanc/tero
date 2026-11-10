@@ -150,6 +150,15 @@ func (s *Service) CheckSession(ctx context.Context, token, ip string) (SessionSt
 	return SessionState{ID: session.id, IsConfirmed: s.isConfirmed(session)}, nil
 }
 
+// PeekSession returns ErrSessionEnded unless the session for token is live,
+// without marking it used: work that goes on without the admin, such as an
+// open log stream, must not keep a session from going idle (OWASP ASVS
+// v5.0.0-7.3.1).
+func (s *Service) PeekSession(ctx context.Context, token string) error {
+	_, err := s.liveSession(ctx, token)
+	return err
+}
+
 // liveSession loads the session for token without marking it used, and ends
 // it when it has expired.
 func (s *Service) liveSession(ctx context.Context, token string) (sessionRow, error) {

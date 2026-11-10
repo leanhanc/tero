@@ -87,6 +87,8 @@ export type AppVariables = {
 	approvedSource: AppSource;
 	source: AppSource;
 	isSourceApproved: boolean;
+	/** GitHub has another repository at the approved address than the one approved. */
+	isRepositoryReplaced: boolean;
 };
 
 /** One change in a save. Without a value, the stored one stays. */

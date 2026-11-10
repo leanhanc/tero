@@ -113,8 +113,17 @@ var requiredSSHSettings = map[string]string{
 }
 
 // checkEffectiveSSH catches settings that override Tero's drop-in: lines
-// placed before its Include in sshd_config, or Match blocks.
+// placed before its Include in sshd_config, or Match blocks, whichever
+// connection they match.
 func checkEffectiveSSH(ctx context.Context, h host) error {
+	override, err := findMatchOverride(h.files)
+	if err != nil {
+		return err
+	}
+	if override != "" {
+		return fmt.Errorf("another SSH setting overrides Tero's: %s. Change or remove it in /etc/ssh/sshd_config or its included files", override)
+	}
+
 	checks := [][]string{{"-T"}}
 	sudoUser := os.Getenv("SUDO_USER")
 	if sudoUser != "" && sudoUser != "root" {

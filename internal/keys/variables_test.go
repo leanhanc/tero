@@ -28,7 +28,14 @@ func (env testEnv) save(changes ...VariableChange) (SavedVariables, error) {
 	return env.dashboard.SaveVariables(context.Background(), *env.session, adminIP, testApp, testSource, changes)
 }
 
+// testRepositoryID is the id the agent finds on GitHub for a source that
+// names none.
+const testRepositoryID = 4242
+
 func (env testEnv) release(phase DeployPhase, source AppSource) ([]ReleasedVariable, error) {
+	if source.RepositoryID == 0 {
+		source.RepositoryID = testRepositoryID
+	}
 	return env.agent().ReleaseVariables(context.Background(), ReleaseRequest{App: testApp, Source: source, Phase: phase, DeployID: 7})
 }
 
@@ -504,5 +511,51 @@ func TestSourceGoesWithTheLastVariableAndFollowsTheFirstSeal(t *testing.T) {
 	}
 	if _, err := env.release(PhaseRun, evil); !errors.Is(err, ErrSourceNotApproved) {
 		t.Errorf("the earlier source still works: err = %v", err)
+	}
+}
+
+// Audit finding TERO-06: a repository that took over the approved URL got the
+// app's values.
+func TestReleasePinsTheRepositoryID(t *testing.T) {
+	env := newTestEnv(t, map[int][]byte{1: testKey(1)})
+	env.setUp(t)
+	ctx := context.Background()
+	env.mustSave(t, sealVariable("API_KEY", "x"))
+
+	withoutID := ReleaseRequest{App: testApp, Source: testSource, Phase: PhaseRun, DeployID: 7}
+	if _, err := env.agent().ReleaseVariables(ctx, withoutID); !errors.Is(err, ErrSourceNotApproved) {
+		t.Errorf("release without a repository id: err = %v", err)
+	}
+	if _, err := env.release(PhaseRun, testSource); err != nil {
+		t.Fatalf("first release: %v", err)
+	}
+
+	replacement := testSource
+	replacement.RepositoryID = testRepositoryID + 1
+	if _, err := env.release(PhaseBuild, replacement); !errors.Is(err, ErrSourceNotApproved) {
+		t.Errorf("release for a replacement repository: err = %v", err)
+	}
+	listed, err := env.dashboard.ListVariables(ctx, *env.session, testApp)
+	if err != nil || !listed.IsRepositoryReplaced || listed.Source.RepositoryID != testRepositoryID {
+		t.Errorf("listed after the refusal = %+v, %v", listed, err)
+	}
+	if _, err := env.release(PhaseRun, testSource); err != nil {
+		t.Errorf("the pinned repository was refused: %v", err)
+	}
+
+	// The session is still confirmed from its login.
+	if err := env.dashboard.ApproveSource(ctx, *env.session, adminIP, testApp, testSource); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.release(PhaseRun, replacement); err != nil {
+		t.Errorf("after approving again: %v", err)
+	}
+	// The old image's run is refused without flagging the approved repository.
+	if _, err := env.release(PhaseRun, testSource); !errors.Is(err, ErrSourceNotApproved) {
+		t.Errorf("the old repository after approving the new one: err = %v", err)
+	}
+	listed, _ = env.dashboard.ListVariables(ctx, *env.session, testApp)
+	if listed.IsRepositoryReplaced || listed.Source.RepositoryID != replacement.RepositoryID {
+		t.Errorf("after approving the replacement: %+v", listed)
 	}
 }

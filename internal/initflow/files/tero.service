@@ -9,6 +9,9 @@ After=network-online.target tero-firewall.service tero-keys.socket
 Wants=network-online.target tero-keys.socket
 # The dashboard only starts behind the firewall.
 Requires=tero-firewall.service
+# `tero assume-breach` holds the dashboard back with this file until it has
+# run to the end.
+ConditionPathExists=!/etc/tero/reset-in-progress
 
 [Service]
 User=tero

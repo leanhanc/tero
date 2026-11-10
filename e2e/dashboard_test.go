@@ -166,14 +166,14 @@ func (d *dashboard) testLinkReused(t *testing.T) {
 }
 
 func testStoredForm(t *testing.T) {
-	if got := must(t, "sudo stat -c '%a %G' /var/lib/tero-shared/tero.db"); got != "660 tero-shared" {
+	if got := must(t, "sudo stat -c '%a %G' /var/lib/tero-shared/db/tero.db"); got != "660 tero-shared" {
 		t.Errorf("database is %q, want 660 tero-shared", got)
 	}
 	if got := must(t, "sudo stat -c '%a %U' /var/lib/tero-keys/keys.db"); got != "600 tero-keys" {
 		t.Errorf("key service database is %q, want 600 tero-keys", got)
 	}
 
-	teroFiles := "sudo cat /var/lib/tero-shared/tero.db /var/lib/tero-shared/tero.db-wal 2>/dev/null"
+	teroFiles := "sudo cat /var/lib/tero-shared/db/tero.db /var/lib/tero-shared/db/tero.db-wal 2>/dev/null"
 	keysFiles := "sudo cat /var/lib/tero-keys/keys.db /var/lib/tero-keys/keys.db-wal 2>/dev/null"
 	for _, files := range []string{teroFiles, keysFiles} {
 		plaintextCount := run(t, files+" | grep -a -c "+adminPassword)
@@ -263,6 +263,7 @@ func (d *dashboard) testNoRootWork(t *testing.T) {
 // testRateLimit gets a valid code before failing, because the first lockout
 // lasts only 30 seconds and waiting for a fresh code could outlast it.
 func (d *dashboard) testRateLimit(t *testing.T) {
+	waitOutLockout(t)
 	validCode := d.nextCode(t)
 
 	var response dashboardResponse
@@ -286,6 +287,24 @@ func (d *dashboard) testRateLimit(t *testing.T) {
 	if afterRestart.status != 429 {
 		t.Errorf("rate limit after a key service restart = %d", afterRestart.status)
 	}
+}
+
+// waitOutLockout waits until failed logins from earlier tests no longer lock
+// 127.0.0.1 out. Otherwise that lockout can end in the middle of
+// testRateLimit, depending on when the next TOTP code comes, and let a login
+// through. A locked-out request isn't counted, and says how long is left.
+func waitOutLockout(t *testing.T) {
+	t.Helper()
+
+	probe := postDashboard(t, "attacker", "/api/login", map[string]string{"password": randomLowercase(30), "code": "000000"})
+	if probe.status != 429 {
+		return
+	}
+	retryAfter, err := strconv.Atoi(headerValue(probe.headers, "retry-after"))
+	if err != nil {
+		t.Fatalf("429 without a Retry-After: %q", probe.headers)
+	}
+	time.Sleep(time.Duration(retryAfter+1) * time.Second)
 }
 
 func (d *dashboard) testResetLogin(t *testing.T) {

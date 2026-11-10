@@ -9,7 +9,7 @@ type MockResponse = { status: number; body?: unknown };
 const loggedIn = { status: 200, body: { isSetUp: true, isLoggedIn: true } };
 const noSource = { repository: '', branch: '', rootDirectory: '' };
 const appSource = { repository: 'https://github.com/leanhanc/api', branch: 'main', rootDirectory: '' };
-const noVariables = { status: 200, body: { variables: [], approvedSource: noSource, source: appSource, isSourceApproved: true } };
+const noVariables = { status: 200, body: { variables: [], approvedSource: noSource, source: appSource, isSourceApproved: true, isRepositoryReplaced: false } };
 
 /** Answers API calls in order and records what was sent. */
 function mockAPI(responses: Record<string, MockResponse[]>) {
@@ -342,7 +342,7 @@ const sealedVariable = { name: 'API_KEY', scope: 'runtime', isSealed: true, repl
 const plainVariable = { name: 'FOO', value: 'bar', scope: 'both', isSealed: false, replacedAt: 1_800_000_000 };
 const withVariables = (...variables: unknown[]) => ({
 	status: 200,
-	body: { variables, approvedSource: appSource, source: appSource, isSourceApproved: true },
+	body: { variables, approvedSource: appSource, source: appSource, isSourceApproved: true, isRepositoryReplaced: false },
 });
 
 function savedChanges(calls: { path: string; body: unknown }[]) {
@@ -502,6 +502,7 @@ describe('variables', () => {
 						approvedSource: { ...appSource, repository: 'https://github.com/leanhanc/old' },
 						source: appSource,
 						isSourceApproved: false,
+						isRepositoryReplaced: false,
 					},
 				},
 				withVariables(plainVariable),
@@ -514,6 +515,32 @@ describe('variables', () => {
 		expect(await screen.findByText('https://github.com/leanhanc/old, branch main')).toBeTruthy();
 		await userEvent.click(screen.getByRole('button', { name: 'Approve the current source' }));
 		await waitFor(() => expect(calls.some((call) => call.path === '/api/apps/api/variables/approve-source')).toBe(true));
+	});
+
+	// Audit finding TERO-06: a repository took over the approved address.
+	it('explains a repository that replaced the approved one', async () => {
+		openAt('/apps/api');
+		mockAPI({
+			'/api/state': [loggedIn],
+			'/api/apps/api': [{ status: 200, body: failedApp }],
+			'/api/apps/api/variables': [
+				{
+					status: 200,
+					body: {
+						variables: [plainVariable],
+						approvedSource: appSource,
+						source: appSource,
+						isSourceApproved: false,
+						isRepositoryReplaced: true,
+					},
+				},
+			],
+		});
+		mockEventSource([]);
+		render(<App />);
+
+		expect(await screen.findByText(/GitHub now has a different repository at this address/)).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Approve the current source' })).toBeTruthy();
 	});
 
 	// app-variables: Release shown

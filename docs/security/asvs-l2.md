@@ -332,7 +332,7 @@ Tero accepts no file uploads and serves no user-supplied files.
 | 5.2.2 | 1 | Upload type checks | N/A | No uploads | — |
 | 5.2.3 | 2 | Archive limits | N/A | No uploads | — |
 | 5.3.1 | 1 | Uploads not executed | N/A | No uploads | — |
-| 5.3.2 | 1 | File paths not from user input | Met | An app's folder is the only path from input. It must be relative, can't leave the repository, and is resolved through symlinks inside the checkout (`source.BuildDirectory`) | `TestBuildDirectoryRefusesSymlinkOutOfCheckout`, `TestCleanRootDirectory` |
+| 5.3.2 | 1 | File paths not from user input | Met | An app's folder is the only path from input. It must be relative, can't leave the repository, and is resolved through symlinks inside the checkout (`source.BuildDirectory`). Railpack opens paths the repository names, so it plans in a child process Landlock confines to the app's folder | `TestBuildDirectoryRefusesSymlinkOutOfCheckout`, `TestCleanRootDirectory`, `TestConfinedPlannerCannotFollowALinkOutOfTheApp` |
 | 5.4.1 | 2 | Download file names | N/A | No downloads | — |
 | 5.4.2 | 2 | File names encoded | N/A | No downloads | — |
 | 5.4.3 | 2 | Antivirus scan | N/A | No user files are served | — |

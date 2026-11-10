@@ -38,7 +38,11 @@ checksum:
   extra_files:
     - glob: install.sh
 
+# A draft until the workflow has attached the provenance. A re-run replaces
+# the draft, so the workflow never publishes one without provenance.
 release:
+  draft: true
+  replace_existing_draft: true
   extra_files:
     - glob: install.sh
   prerelease: auto

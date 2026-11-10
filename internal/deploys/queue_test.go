@@ -338,3 +338,30 @@ func TestRestartLeavesBuildChangesPending(t *testing.T) {
 		t.Errorf("pending after a restart = %q, want BUILD", left)
 	}
 }
+
+// Audit finding TERO-03: after a breach the agent restarted apps from images
+// an attacker could have changed.
+func TestFailLiveReleasesLeavesOtherDeploysAlone(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t, "api", "web")
+	liveID := mustEnqueue(t, db, 1)
+	if _, err := db.Exec("UPDATE deploys SET state = 'live' WHERE id = ?", liveID); err != nil {
+		t.Fatal(err)
+	}
+	queuedID := mustEnqueue(t, db, 2)
+
+	count, err := FailLiveReleases(ctx, db, testNow)
+	if err != nil || count != 1 {
+		t.Fatalf("FailLiveReleases = %d, %v; want 1", count, err)
+	}
+	if state, _ := stateOf(t, db, liveID); state != Failed {
+		t.Errorf("live release = %s, want failed", state)
+	}
+	if state, _ := stateOf(t, db, queuedID); state != Queued {
+		t.Errorf("queued deploy = %s, want it still queued", state)
+	}
+	releases, err := SettledLiveReleases(ctx, db)
+	if err != nil || len(releases) != 0 {
+		t.Errorf("live releases after = %v, %v", releases, err)
+	}
+}

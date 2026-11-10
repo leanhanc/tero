@@ -295,6 +295,8 @@ export const es: Messages = {
 			source: {
 				label: 'Origen de esta app',
 				changed: 'El origen de esta app no es el aprobado para sus variables, así que los despliegues se rechazan hasta que lo apruebes. Si no lo cambiaste vos, no lo apruebes: alguien puede haber manipulado esta app.',
+				replaced:
+					'GitHub tiene ahora otro repositorio en esta dirección que el aprobado: el aprobado se borró, o se renombró y alguien más tomó su nombre anterior.',
 				approved: 'Origen aprobado',
 				current: 'Origen actual',
 				describe: (repository, branch, folder) =>

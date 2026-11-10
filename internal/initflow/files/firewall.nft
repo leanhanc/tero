@@ -1,7 +1,8 @@
 #!/usr/sbin/nft -f
 # Written by `tero init`. Inbound traffic is dropped unless it is a reply,
 # loopback, essential ICMP, DHCP, or SSH (on the ports sshd listens on at
-# init), HTTP or HTTPS. Only Tero's own table is
+# init), HTTP or HTTPS. Outbound, the dashboard, the agent, builds and apps
+# can't reach the cloud's instance metadata services. Only Tero's own table is
 # replaced on reload, so rules other tools add (e.g. Podman) are left alone.
 
 table inet tero
@@ -23,5 +24,20 @@ table inet tero {
 
 		tcp dport { @TCP_PORTS@ } accept
 		udp dport 443 accept
+	}
+
+	# Rootless Podman's network helpers open every connection of a build or an
+	# app as sockets of tero-agent, so matching the two users covers them.
+	# Metadata services hand out the server's cloud credentials (NIST SP
+	# 800-190 4.4.2): AWS, GCP, Azure, Oracle, DigitalOcean and Hetzner answer on
+	# link-local 169.254.169.254, Azure also on 168.63.129.16, Alibaba on
+	# 100.100.100.200. Over IPv6, AWS answers on fd00:ec2::254, GCP on
+	# fd20:ce::254, Oracle on fd00:c1::a9fe:a9fe, Akamai on fd00:a9fe:a9fe::1 and
+	# Scaleway on fd00:42::42.
+	chain output {
+		type filter hook output priority filter; policy accept;
+
+		meta skuid { "tero", "tero-agent" } ip daddr { 169.254.0.0/16, 168.63.129.16, 100.100.100.200 } reject
+		meta skuid { "tero", "tero-agent" } ip6 daddr { fe80::/10, fd00:ec2::254, fd20:ce::254, fd00:c1::a9fe:a9fe, fd00:a9fe:a9fe::1, fd00:42::42 } reject
 	}
 }

@@ -33,6 +33,7 @@ const (
 	VerbLoginPasskeyFinish   = "login.passkey.finish"
 	VerbLoginReset           = "login.reset"
 	VerbSessionCheck         = "session.check"
+	VerbSessionPeek          = "session.peek"
 	VerbSessionEnd           = "session.end"
 	VerbSessionList          = "session.list"
 	VerbSessionRevoke        = "session.revoke"
@@ -69,7 +70,7 @@ var verbs = map[Caller]map[string]bool{
 	CallerDashboard: {
 		VerbStatus: true, VerbSetupBegin: true, VerbSetupFinish: true,
 		VerbLoginPassword: true, VerbLoginPasskeyBegin: true, VerbLoginPasskeyFinish: true,
-		VerbSessionCheck: true, VerbSessionEnd: true, VerbSessionList: true, VerbSessionRevoke: true,
+		VerbSessionCheck: true, VerbSessionPeek: true, VerbSessionEnd: true, VerbSessionList: true, VerbSessionRevoke: true,
 		VerbAccountConfirm: true, VerbPasswordChange: true,
 		VerbPasskeyRegisterBegin: true, VerbPasskeyRegister: true, VerbPasskeyList: true, VerbPasskeyRename: true,
 		VerbPasskeyRemove: true,
@@ -383,6 +384,10 @@ func (s *Service) dispatch(ctx context.Context, caller Caller, req request) (any
 	case VerbSessionCheck:
 		return withArgs(req, func(args sessionArgs) (any, error) {
 			return s.CheckSession(ctx, args.Session, args.IP)
+		})
+	case VerbSessionPeek:
+		return withArgs(req, func(args sessionArgs) (any, error) {
+			return struct{}{}, s.PeekSession(ctx, args.Session)
 		})
 	case VerbSessionEnd:
 		return withArgs(req, func(args sessionArgs) (any, error) {

@@ -177,14 +177,18 @@ func TestAssumeBreachResetsEverything(t *testing.T) {
 	startAgentAt := slices.Index(server.commands, "systemctl start user@998.service")
 	startAt := slices.Index(server.commands, "systemctl start tero.service")
 	clearCacheAt := slices.IndexFunc(server.commands, func(command string) bool {
-		return strings.HasPrefix(command, "systemd-run --machine=tero-agent@.host --user --wait --quiet podman volume rm")
+		return command == "systemd-run --machine=tero-agent@.host --user --wait --quiet podman system reset --force"
 	})
-	isInOrder := clearCacheAt > slices.Index(server.commands, "systemctl start user@998.service") &&
-		stopAt >= 0 && stopTeroAt > stopAt && stopAgentAt > stopAt &&
+	releaseAgentAt := slices.Index(server.commands, "systemctl --user --machine=tero-agent@.host start tero-agent.service")
+	isInOrder := stopAt >= 0 && stopTeroAt > stopAt && stopAgentAt > stopAt &&
 		killTeroAt > stopAgentAt && killAgentAt > stopAgentAt &&
-		clearAt > killTeroAt && clearAt > killAgentAt && startAgentAt > clearAt && startAt > startAgentAt
+		clearAt > killTeroAt && clearAt > killAgentAt && startAgentAt > clearAt &&
+		clearCacheAt > startAgentAt && releaseAgentAt > clearCacheAt && startAt > releaseAgentAt
 	if !isInOrder || !server.dashboardUp {
 		t.Errorf("commands in the wrong order: %v", server.commands)
+	}
+	if _, err := os.Stat(filepath.Join(server.root, ResetHoldPath)); !os.IsNotExist(err) {
+		t.Errorf("the services are still held back: %v", err)
 	}
 	if slices.Contains(server.commands, "systemctl start user@999.service") {
 		t.Error("tero's user manager was started; tero has none")
@@ -230,7 +234,7 @@ func TestAssumeBreachAsksFirst(t *testing.T) {
 	if !errors.Is(err, ErrNotConfirmed) {
 		t.Fatalf("Run = %v", err)
 	}
-	if !strings.Contains(out.String(), "apps are down") {
+	if !strings.Contains(out.String(), "apps stay down") {
 		t.Errorf("the prompt doesn't mention downtime:\n%s", out.String())
 	}
 	if slices.Contains(server.commands, "systemctl stop tero.service") {
@@ -299,17 +303,44 @@ func TestAssumeBreachReportsWhatToCheck(t *testing.T) {
 	}
 }
 
-func TestDashboardStartsAgainWhenAStepFails(t *testing.T) {
+// Audit finding TERO-03: a failed reset restarted the dashboard and the agent.
+func TestEverythingStaysStoppedWhenAStepFails(t *testing.T) {
 	server := newFakeServer(t)
 	server.setUp(t)
 	var out bytes.Buffer
 	server.failing = "systemctl restart tero-keys.service"
 
+	if err := Run(context.Background(), server.options(&out, "yes\n")); err == nil || !strings.Contains(err.Error(), "stay stopped") {
+		t.Fatalf("Run = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(server.root, ResetHoldPath)); err != nil {
+		t.Errorf("a reboot would start the services again: %v", err)
+	}
+	if server.dashboardUp {
+		t.Error("the dashboard started again after a failure")
+	}
+	for _, command := range server.commands {
+		if strings.HasPrefix(command, "systemctl start") || strings.Contains(command, "start tero-agent.service") {
+			t.Errorf("%q ran after a failure", command)
+		}
+	}
+}
+
+// Audit finding TERO-03: the agent started before the build cache was cleared.
+func TestAgentStaysHeldWhenTheCacheCantBeCleared(t *testing.T) {
+	server := newFakeServer(t)
+	server.setUp(t)
+	var out bytes.Buffer
+	server.failing = "systemd-run --machine=tero-agent@.host --user --wait --quiet podman system reset --force"
+
 	if err := Run(context.Background(), server.options(&out, "yes\n")); err == nil {
 		t.Fatal("Run succeeded")
 	}
-	if !server.dashboardUp {
-		t.Error("the dashboard stayed stopped after a failure")
+	if _, err := os.Stat(filepath.Join(server.root, ResetHoldPath)); err != nil {
+		t.Errorf("the agent isn't held back: %v", err)
+	}
+	if slices.Contains(server.commands, "systemctl --user --machine=tero-agent@.host start tero-agent.service") || server.dashboardUp {
+		t.Errorf("services started with the cache still there: %v", server.commands)
 	}
 }
 
@@ -471,11 +502,80 @@ func TestAssumeBreachListsVariablesWithoutValues(t *testing.T) {
 	}
 
 	agent := keys.NewLocalClient(server.service, keys.CallerAgent)
+	source.RepositoryID = 4242
 	released, err := agent.ReleaseVariables(ctx, keys.ReleaseRequest{App: "shop", Source: source, Phase: keys.PhaseRun, DeployID: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(released) != 2 {
 		t.Errorf("released %d values after the reset", len(released))
+	}
+}
+
+// Audit finding TERO-03: apps came back from images the attacker could have
+// changed.
+func TestAssumeBreachFailsLiveReleases(t *testing.T) {
+	server := newFakeServer(t)
+	server.setUp(t)
+	ctx := context.Background()
+	dbPath := filepath.Join(server.root, store.Path)
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec("INSERT INTO apps (name, repository, branch, created_at) VALUES ('api', 'https://github.com/o/r', 'main', 1)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO deploys (app_id, state, queued_at) VALUES (1, 'live', 1)"); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	if err := Run(ctx, server.options(&out, "yes\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	var state string
+	if err := db.QueryRow("SELECT state FROM deploys WHERE id = 1").Scan(&state); err != nil || state != "failed" {
+		t.Errorf("live release after the reset = %q, %v", state, err)
+	}
+	if !slices.Contains(server.commands, "systemd-run --machine=tero-agent@.host --user --wait --quiet podman system reset --force") {
+		t.Errorf("the agent's store wasn't emptied: %v", server.commands)
+	}
+}
+
+// Review finding: a mise binary tero-agent planted in /tmp/railpack outlived
+// the reset, and the planner runs it.
+func TestTemporaryFilesOfTerosUsersGo(t *testing.T) {
+	root := t.TempDir()
+	planted := filepath.Join(root, "tmp", "railpack", "mise", "mise")
+	if err := os.MkdirAll(filepath.Dir(planted), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(planted, []byte("#!/bin/sh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "dev", "shm"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	others := Options{Root: root, TeroUID: os.Getuid() + 1, AgentUID: os.Getuid() + 2}
+	if err := removeTemporaryFiles(others); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(planted); err != nil {
+		t.Fatalf("another user's file was removed: %v", err)
+	}
+
+	agent := Options{Root: root, TeroUID: os.Getuid() + 1, AgentUID: os.Getuid()}
+	if err := removeTemporaryFiles(agent); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "tmp", "railpack")); !os.IsNotExist(err) {
+		t.Errorf("the agent's directory in /tmp survived: %v", err)
 	}
 }

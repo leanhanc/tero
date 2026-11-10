@@ -63,6 +63,17 @@ func (s *Service) Authenticate(ctx context.Context, token, ip string) (Session, 
 	return session, fromKeys(err)
 }
 
+// CheckStillLive returns ErrSessionExpired once the session for token has
+// ended, without marking it used, for requests that outlast the check at
+// their start.
+func (s *Service) CheckStillLive(ctx context.Context, token string) error {
+	if token == "" {
+		return ErrSessionExpired
+	}
+
+	return fromKeys(s.keys.PeekSession(ctx, token))
+}
+
 // Logout ends the session for token.
 func (s *Service) Logout(ctx context.Context, token string) error {
 	if token == "" {

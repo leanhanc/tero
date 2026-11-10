@@ -300,6 +300,8 @@ export const en = {
 			source: {
 				label: "This app's source",
 				changed: "This app's source isn't the one approved for its variables, so deploys are refused until you approve it. If you didn't change it, don't approve it: someone may have tampered with this app.",
+				replaced:
+					'GitHub now has a different repository at this address than the one approved: the approved one was deleted, or renamed and its old name taken by someone else.',
 				approved: 'Approved source',
 				current: 'Current source',
 				describe: (repository: string, branch: string, folder: string) =>

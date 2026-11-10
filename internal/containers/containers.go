@@ -78,6 +78,13 @@ func Start(ctx context.Context, appName string, deployID int64, image string, va
 	if err != nil {
 		return "", 0, err
 	}
+	output, err := outputPath(name)
+	if err != nil {
+		return "", 0, err
+	}
+	if err := prepareOutputDir(); err != nil {
+		return "", 0, err
+	}
 
 	args := []string{"run", "--detach", "--pull=never", "--name", name,
 		"--label", AppLabel + "=" + appName,
@@ -86,7 +93,7 @@ func Start(ctx context.Context, appName string, deployID int64, image string, va
 		"--cap-drop=ALL",
 		"--security-opt", "no-new-privileges",
 		"--userns=auto",
-		"--log-driver", "k8s-file", "--log-opt", "max-size=10mb",
+		"--log-driver", "k8s-file", "--log-opt", "path=" + output, "--log-opt", "max-size=" + maxOutputSize,
 		"--env", "PORT=" + strconv.Itoa(containerPort),
 		"--publish", fmt.Sprintf("127.0.0.1:%d:%d", hostPort, containerPort),
 	}
@@ -236,6 +243,9 @@ func publishedPort(entry psEntry) int {
 
 // Resume starts an existing, stopped container again.
 func Resume(ctx context.Context, container string) error {
+	if err := prepareOutputDir(); err != nil {
+		return err
+	}
 	_, err := podman.RunInOwnScope(ctx, scopeName(container), "start", container)
 	return err
 }
@@ -259,6 +269,9 @@ func Remove(ctx context.Context, container, image string) error {
 			return err
 		}
 		if err := RemoveEnvFile(container); err != nil {
+			return err
+		}
+		if err := RemoveOutput(container); err != nil {
 			return err
 		}
 	}

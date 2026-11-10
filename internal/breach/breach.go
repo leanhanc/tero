@@ -5,8 +5,9 @@
 // later, replaces everything the dashboard could have read or used
 // (sessions, trusted browsers, certificates and their keys, the login and
 // passkeys), rotates the master key, and tells the admin what to do outside
-// the server. Apps are down until tero-agent's user manager and the
-// dashboard start again.
+// the server. It also deletes every image, container and cache in
+// tero-agent's Podman store, which something running as tero-agent could have
+// changed, so apps stay down until the admin redeploys them from source.
 package breach
 
 import (
@@ -20,13 +21,15 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/leanhanc/tero/internal/auth"
-	"github.com/leanhanc/tero/internal/build"
+	"github.com/leanhanc/tero/internal/deploys"
 	"github.com/leanhanc/tero/internal/githubapp"
 	"github.com/leanhanc/tero/internal/keyfiles"
 	"github.com/leanhanc/tero/internal/keys"
+	"github.com/leanhanc/tero/internal/store"
 	"github.com/leanhanc/tero/internal/sysexec"
 )
 
@@ -123,19 +126,27 @@ func sourceLocation(source keys.AppSource) string {
 const plan = `This resets everything a compromised dashboard could have read or planted:
 
   - stops the dashboard, the agent, the apps and every other process running as
-    tero or tero-agent; apps are down until they start again, usually a few minutes
-  - moves aside units and cron jobs something running as either user added
+    tero or tero-agent
+  - deletes every app's image and container and the build cache:
+    apps stay down until you redeploy them
+  - moves aside units and cron jobs something running as either user added, and
+    deletes their temporary files
   - ends every dashboard session and forgets every trusted browser
   - deletes the dashboard's and apps' certificates and keys, so new ones are issued
   - replaces the master key, keeping apps' variables and listing them to rotate
   - deletes the GitHub connection; you then delete the App on GitHub and connect again
   - resets the dashboard password, TOTP and passkeys, and prints a new setup link
 
+If a step fails, the dashboard, the agent and the apps stay stopped until this
+runs to the end.
+
 Type yes to continue: `
 
-// Run performs the reset. Once the dashboard is stopped, it is started again
-// whatever happens next.
-func Run(ctx context.Context, opts Options) (err error) {
+// Run performs the reset. The agent and the dashboard start again only once
+// every step has succeeded: after a failure they stay stopped, so nothing a
+// compromise left behind serves again before the admin has run the reset to
+// the end.
+func Run(ctx context.Context, opts Options) error {
 	if !opts.IsConfirmed {
 		fmt.Fprint(opts.Out, plan)
 		answer, _ := bufio.NewReader(opts.In).ReadString('\n')
@@ -144,36 +155,62 @@ func Run(ctx context.Context, opts Options) (err error) {
 		}
 	}
 
-	if _, err := opts.Run.Run(ctx, "systemctl", "stop", dashboardService); err != nil {
+	if err := holdServices(opts); err != nil {
 		return err
 	}
-	// Deferred starts run in reverse: the agent's user manager starts before
-	// the dashboard, so the agent is back when the dashboard queues deploys.
-	// The build cache is cleared in between, once Podman can run again.
-	defer start(ctx, opts, dashboardService, &err)
-	defer clearBuildCache(ctx, opts, &err)
+	if _, err := opts.Run.Run(ctx, "systemctl", "stop", dashboardService); err != nil {
+		return keepStopped(err)
+	}
+	aside, moved, err := stopAndQuarantine(ctx, opts)
+	if err != nil {
+		return keepStopped(err)
+	}
 
+	result, err := reset(ctx, opts)
+	if err != nil {
+		return keepStopped(err)
+	}
+	if err := emptyAgentStore(ctx, opts); err != nil {
+		return keepStopped(err)
+	}
+	if err := os.Remove(filepath.Join(opts.Root, ResetHoldPath)); err != nil {
+		return keepStopped(fmt.Errorf("release the dashboard and the agent: %w", err))
+	}
+
+	report(ctx, opts, aside, moved, result)
+	if err := startServices(ctx, opts); err != nil {
+		return fmt.Errorf("the reset finished, but Tero didn't start again: %w\n\nStart it with `sudo systemctl start tero` once the problem is fixed", err)
+	}
+	return nil
+}
+
+// keepStopped explains that a failed reset leaves Tero stopped.
+func keepStopped(err error) error {
+	return fmt.Errorf("%w\n\nThe dashboard and the agent stay stopped. Fix the problem above and run `sudo tero assume-breach` again", err)
+}
+
+// stopAndQuarantine stops everything running as tero or tero-agent and moves
+// aside what either could have planted, returning the quarantine directory and
+// the paths moved there.
+func stopAndQuarantine(ctx context.Context, opts Options) (string, []string, error) {
 	// Each user's slice holds every session of that user, cron jobs
 	// included, and tero-agent's also holds its user manager (the agent,
 	// builds and apps); /run/user/<uid> goes with user-runtime-dir.
-	// Starting tero-agent's user manager brings both back for it. tero has
-	// no user manager to start.
 	for _, user := range opts.users() {
 		uid := strconv.Itoa(user.uid)
 		if _, err := opts.Run.Run(ctx, "systemctl", "stop", "user-"+uid+".slice", "user-runtime-dir@"+uid+".service"); err != nil {
-			return err
+			return "", nil, err
 		}
 	}
-	defer start(ctx, opts, "user@"+strconv.Itoa(opts.AgentUID)+".service", &err)
 
 	aside, err := quarantineDir(opts.Root)
 	if err != nil {
-		return err
+		return "", nil, err
 	}
 	// The crontabs go first, so cron can't start a job after the kill.
 	moved, err := quarantine(opts.Root, aside, crontabs(opts.users()))
 	if err != nil {
-		return fmt.Errorf("move aside the crontabs: %w", err)
+		return "", nil, fmt.Errorf("move aside the crontabs: %w", err)
 	}
 	// Anything left running as either user (a process started outside its
 	// slice) could keep acting as the dashboard or the agent once the reset
@@ -181,41 +218,134 @@ func Run(ctx context.Context, opts Options) (err error) {
 	// checked and moved.
 	for _, user := range opts.users() {
 		if err := stopProcesses(ctx, opts, user); err != nil {
-			return err
+			return "", nil, err
 		}
 	}
 	units, err := quarantine(opts.Root, aside, plantPaths(opts.Root, opts.users()))
 	if err != nil {
-		return fmt.Errorf("move aside planted units: %w", err)
+		return "", nil, fmt.Errorf("move aside planted units: %w", err)
 	}
-	moved = append(moved, units...)
-
-	result, err := reset(ctx, opts)
-	if err != nil {
-		return err
+	if err := removeTemporaryFiles(opts); err != nil {
+		return "", nil, fmt.Errorf("delete temporary files: %w", err)
 	}
 
-	report(ctx, opts, aside, moved, result)
+	return aside, append(moved, units...), nil
+}
+
+// temporaryDirs are shared directories where tero and tero-agent can leave
+// files a later run would use, such as the mise binary the build planner runs
+// from /tmp/railpack. Ubuntu empties them only at boot.
+var temporaryDirs = []string{"/tmp", "/var/tmp", "/dev/shm"}
+
+// removeTemporaryFiles deletes every entry in temporaryDirs that belongs to
+// tero or tero-agent. Nothing runs as either user by now, so nothing changes
+// between the check and the removal, and RemoveAll never follows a link.
+func removeTemporaryFiles(opts Options) error {
+	uids := map[uint32]bool{}
+	for _, user := range opts.users() {
+		uids[uint32(user.uid)] = true
+	}
+
+	for _, dir := range temporaryDirs {
+		entries, err := os.ReadDir(filepath.Join(opts.Root, dir))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+
+		for _, entry := range entries {
+			path := filepath.Join(opts.Root, dir, entry.Name())
+			info, err := os.Lstat(path)
+			if err != nil {
+				return err
+			}
+			stat, hasOwner := info.Sys().(*syscall.Stat_t)
+			if !hasOwner || !uids[stat.Uid] {
+				continue
+			}
+			if err := os.RemoveAll(path); err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 
-func start(ctx context.Context, opts Options, unit string, err *error) {
-	_, startErr := opts.Run.Run(context.WithoutCancel(ctx), "systemctl", "start", unit)
-	*err = errors.Join(*err, startErr)
+// ResetHoldPath, while it exists, keeps the agent and the dashboard from
+// starting: both units have ConditionPathExists=! on it. It sits in a
+// directory neither service can write, and survives a reboot, so a reset that
+// stopped halfway never lets either serve before it has run to the end.
+const ResetHoldPath = "/etc/tero/reset-in-progress"
+
+// holdServices writes ResetHoldPath before anything is stopped.
+func holdServices(opts Options) error {
+	holdPath := filepath.Join(opts.Root, ResetHoldPath)
+	if err := os.MkdirAll(filepath.Dir(holdPath), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(holdPath, nil, 0o644); err != nil {
+		return fmt.Errorf("hold the dashboard and the agent back: %w", err)
+	}
+
+	return nil
 }
 
-// clearBuildCache removes BuildKit's cache volume and image, which
-// something running as tero-agent could have poisoned for later builds.
-// Apps' own images stay, so they keep serving; the report says to redeploy.
-func clearBuildCache(ctx context.Context, opts Options, err *error) {
-	asAgent := []string{"--machine=tero-agent@.host", "--user", "--wait", "--quiet", "podman"}
-	for _, args := range [][]string{
-		{"volume", "rm", "--force", build.CacheVolume},
-		{"rmi", "--force", build.BuildKitImage},
-	} {
-		_, runErr := opts.Run.Run(context.WithoutCancel(ctx), "systemd-run", append(asAgent, args...)...)
-		*err = errors.Join(*err, runErr)
+// emptyAgentStore starts tero-agent's user manager, with the agent still held
+// back, since Podman needs it, and empties the agent's store.
+func emptyAgentStore(ctx context.Context, opts Options) error {
+	userManager := "user@" + strconv.Itoa(opts.AgentUID) + ".service"
+	if _, err := opts.Run.Run(ctx, "systemctl", "start", userManager); err != nil {
+		return err
 	}
+	if err := resetAgentStorage(ctx, opts); err != nil {
+		return fmt.Errorf("delete the apps' images and the build cache: %w", err)
+	}
+
+	return nil
+}
+
+// startServices starts the agent, then the dashboard, so the agent is back
+// when the dashboard queues deploys. tero has no user manager to start.
+func startServices(ctx context.Context, opts Options) error {
+	if _, err := opts.Run.Run(ctx, "systemctl", "--user", agentManager, "start", agentService); err != nil {
+		return err
+	}
+	_, err := opts.Run.Run(ctx, "systemctl", "start", dashboardService)
+	return err
+}
+
+const (
+	agentManager = "--machine=tero-agent@.host"
+	agentService = "tero-agent.service"
+)
+
+// resetAgentStorage empties tero-agent's Podman store: app images and
+// containers, BuildKit's image and its cache volume. Something running as
+// tero-agent could have changed any of them, to serve its own code as an app
+// or to poison later builds.
+func resetAgentStorage(ctx context.Context, opts Options) error {
+	_, err := opts.Run.Run(ctx, "systemd-run", agentManager, "--user", "--wait", "--quiet", "podman", "system", "reset", "--force")
+	return err
+}
+
+// failLiveReleases marks every live release failed in the shared database,
+// since its image goes with the agent's store: the agent then doesn't try to
+// start it, and the dashboard asks for a redeploy.
+func failLiveReleases(ctx context.Context, opts Options) error {
+	db, err := store.Open(ctx, filepath.Join(opts.Root, store.Path))
+	if err != nil {
+		return fmt.Errorf("open the apps' database: %w", err)
+	}
+	defer db.Close()
+
+	if _, err := deploys.FailLiveReleases(ctx, db, time.Now()); err != nil {
+		return fmt.Errorf("mark the apps' releases failed: %w", err)
+	}
+
+	return nil
 }
 
 func crontabs(users []serviceUser) []string {
@@ -284,6 +414,10 @@ func reset(ctx context.Context, opts Options) (resetResult, error) {
 		return resetResult{}, fmt.Errorf("delete the GitHub connection: %w", err)
 	}
 
+	if err := failLiveReleases(ctx, opts); err != nil {
+		return resetResult{}, err
+	}
+
 	variables, err := client.VariablesSummary(ctx)
 	if err != nil {
 		return resetResult{}, fmt.Errorf("list the apps' variables: %w", err)
@@ -319,7 +453,7 @@ func report(ctx context.Context, opts Options, aside string, moved []string, res
 			result.gitHubApp.Slug, githubapp.SettingsPage(result.gitHubApp))
 	}
 	fmt.Fprintln(out, "  - Check the SSH keys in ~/.ssh/authorized_keys of every user on this server")
-	fmt.Fprintln(out, "  - Redeploy every app, so its image is built again from source")
+	fmt.Fprintln(out, "  - Redeploy every app from the dashboard: its image was deleted, so it is built again from source")
 	reportVariables(out, result.variables)
 
 	for _, path := range moved {

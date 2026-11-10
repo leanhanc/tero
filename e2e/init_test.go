@@ -94,9 +94,10 @@ func TestSlice1(t *testing.T) {
 	t.Run("key-service: Rotation / Apps keep serving during rotation", testRotateKey)
 	t.Run("key-service: Rotation re-seals values", testVariablesAfterRotation)
 	t.Run("key-service: Key can't be opened / dashboard-access: Master key lost", testKeyCantBeOpened)
-	t.Run("breach-response: Not confirmed / Scripted run / Confirmed run", testAssumeBreach)
 	t.Run("server-init: Lynis score in end-to-end tests", testLynis)
 	t.Run("server-init: Service survives reboot", testReboot)
+	// Last: the reset deletes every app's image, so apps stay down.
+	t.Run("breach-response: Not confirmed / Scripted run / Confirmed run", testAssumeBreach)
 }
 
 func testInitWithoutRoot(t *testing.T) {
@@ -290,8 +291,16 @@ func testNoLogin(t *testing.T) {
 
 // server-init: Shared directory / Other users kept out
 func testSharedState(t *testing.T) {
-	if got := must(t, "stat -c '%a %U %G' /var/lib/tero-shared"); got != "2770 root tero-shared" {
-		t.Errorf("/var/lib/tero-shared is %q, want 2770 root tero-shared", got)
+	// Audit finding TERO-05: neither service may write where root's init
+	// changes ownership and modes.
+	for directory, want := range map[string]string{
+		"/var/lib/tero-shared":             "750 root tero-shared",
+		"/var/lib/tero-shared/db":          "2770 root tero-shared",
+		"/var/lib/tero-shared/deploy-logs": "2750 tero-agent tero-shared",
+	} {
+		if got := must(t, "sudo stat -c '%a %U %G' "+directory); got != want {
+			t.Errorf("%s is %q, want %s", directory, got, want)
+		}
 	}
 	for _, group := range []string{"tero-shared", "tero-keys-callers"} {
 		members := strings.Split(must(t, "getent group "+group+" | cut -d: -f4"), ",")
@@ -300,7 +309,7 @@ func testSharedState(t *testing.T) {
 			t.Errorf("%s members = %v, want tero and tero-agent", group, members)
 		}
 	}
-	if got := run(t, "sudo -u nobody cat /var/lib/tero-shared/tero.db"); got.exitCode == 0 {
+	if got := run(t, "sudo -u nobody cat /var/lib/tero-shared/db/tero.db"); got.exitCode == 0 {
 		t.Error("another user can read the shared database")
 	}
 	if got := run(t, "sudo -u nobody "+keysStatus); got.exitCode == 0 {

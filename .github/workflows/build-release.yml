@@ -1,7 +1,7 @@
-# Builds and publishes a release with GoReleaser, then signs SLSA provenance
-# for every file in checksums.txt through Sigstore and attaches it to the
-# release as tero.intoto.jsonl. Verify a downloaded binary
-# with:
+# Builds a draft release with GoReleaser, signs SLSA provenance for every
+# file in checksums.txt through Sigstore, attaches it to the release as
+# tero.intoto.jsonl, and only then publishes the release, so no published
+# release is ever without its provenance. Verify a downloaded binary with:
 #
 #   gh attestation verify tero-linux-amd64 --repo leanhanc/tero \
 #     --signer-workflow leanhanc/tero/.github/workflows/build-release.yml
@@ -60,3 +60,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
+
+      - name: Publish the release
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

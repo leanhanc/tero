@@ -87,11 +87,20 @@ func (phase DeployPhase) includes(scope VariableScope) bool {
 	return scope == ScopeRuntime || scope == ScopeBoth
 }
 
-// AppSource is what an app builds from.
+// AppSource is what an app builds from. RepositoryID is GitHub's id for the
+// repository: the agent looks it up for every deploy, and the key service pins
+// it at the first release after an approval. The dashboard never sets it.
 type AppSource struct {
 	Repository    string `json:"repository"`
 	Branch        string `json:"branch"`
 	RootDirectory string `json:"rootDirectory"`
+	RepositoryID  int64  `json:"repositoryId,omitempty"`
+}
+
+// SameLocation reports whether two sources name the same repository URL,
+// branch and folder, whichever repository GitHub has at that URL.
+func (source AppSource) SameLocation(other AppSource) bool {
+	return source.Repository == other.Repository && source.Branch == other.Branch && source.RootDirectory == other.RootDirectory
 }
 
 func (source AppSource) isValid() bool {
@@ -117,6 +126,10 @@ type Variable struct {
 type AppVariables struct {
 	Variables []Variable `json:"variables"`
 	Source    AppSource  `json:"source"`
+	// IsRepositoryReplaced is set once a release was refused because GitHub
+	// has another repository at the approved URL, until the admin approves
+	// again.
+	IsRepositoryReplaced bool `json:"isRepositoryReplaced"`
 }
 
 // VariableChange is one change in a save: removing the variable, or setting
@@ -231,11 +244,12 @@ func (s *Service) ListVariables(ctx context.Context, token, app string) (AppVari
 		result.Variables = append(result.Variables, shown)
 	}
 
-	source, _, err := loadSource(ctx, s.db, app)
+	approved, err := loadApproval(ctx, s.db, app)
 	if err != nil {
 		return AppVariables{}, err
 	}
-	result.Source = source
+	result.Source = approved.source
+	result.IsRepositoryReplaced = approved.replacedBy != 0
 
 	return result, nil
 }
@@ -322,6 +336,14 @@ func (s *Service) keepSource(ctx context.Context, tx *sql.Tx, app string, source
 		return nil, insertSourceIfMissing(ctx, tx, app, source, s.now().Unix())
 	}
 
+	// The same location keeps the repository id already pinned for it.
+	approved, err := loadApproval(ctx, tx, app)
+	if err != nil {
+		return nil, err
+	}
+	if approved.exists && approved.source.SameLocation(source) {
+		return []Event{{Type: EventSourceApproved, Subject: app}}, nil
+	}
 	if err := upsertSource(ctx, tx, app, source, s.now().Unix()); err != nil {
 		return nil, err
 	}
@@ -476,10 +498,9 @@ func checkAppLimits(stored map[string]storedVariable) error {
 }
 
 // ReleaseVariables returns an app's values for one phase of a deploy, only
-// when the source matches the approved one exactly. GitHub's repository id
-// isn't compared: a row can pair an approved id with another repository's
-// URL, and the URL is what gets cloned. Every released sealed value is
-// recorded.
+// when the source matches the approved one exactly, GitHub's repository id
+// included. The first release after an approval pins the id the agent found
+// at the approved URL. Every released sealed value is recorded.
 func (s *Service) ReleaseVariables(ctx context.Context, release ReleaseRequest) ([]ReleasedVariable, error) {
 	isValidPhase := release.Phase == PhaseBuild || release.Phase == PhaseRun
 	if !appNamePattern.MatchString(release.App) || !isValidPhase || release.DeployID <= 0 {
@@ -495,14 +516,8 @@ func (s *Service) ReleaseVariables(ctx context.Context, release ReleaseRequest) 
 		return released, nil
 	}
 
-	approved, hasApproved, err := loadSource(ctx, s.db, release.App)
-	if err != nil {
+	if err := s.checkReleaseSource(ctx, release); err != nil {
 		return nil, err
-	}
-	if !hasApproved || approved != release.Source {
-		event := Event{At: s.now(), Type: EventVariablesRefused, Source: SourceKeys, Subject: release.App,
-			Detail: "deploy " + strconv.FormatInt(release.DeployID, 10)}
-		return nil, errors.Join(ErrSourceNotApproved, s.record(ctx, event))
 	}
 
 	detail := fmt.Sprintf("%s:%d", release.Phase, release.DeployID)
@@ -568,8 +583,48 @@ func (s *Service) VariableReads(ctx context.Context, token, app, name string) ([
 	return reads, rows.Err()
 }
 
+// checkReleaseSource refuses a release whose source isn't the approved one,
+// pinning GitHub's repository id first when the approval has none yet. A
+// release for the approved URL with another id records it, so the dashboard
+// asks for a new approval.
+func (s *Service) checkReleaseSource(ctx context.Context, release ReleaseRequest) error {
+	approved, err := loadApproval(ctx, s.db, release.App)
+	if err != nil {
+		return err
+	}
+
+	hasRepositoryID := release.Source.RepositoryID > 0
+	isSameLocation := approved.exists && approved.source.SameLocation(release.Source)
+	isUnpinned := isSameLocation && approved.source.RepositoryID == 0
+	if isUnpinned && hasRepositoryID {
+		if err := pinRepository(ctx, s.db, release.App, release.Source.RepositoryID); err != nil {
+			return err
+		}
+		approved.source.RepositoryID = release.Source.RepositoryID
+	}
+
+	isApproved := isSameLocation && hasRepositoryID && approved.source.RepositoryID == release.Source.RepositoryID
+	if isApproved {
+		return nil
+	}
+
+	// Only a build looks the repository up afresh. A run releases for the id
+	// its image was built from, which an approval may have moved on from.
+	isReplaced := isSameLocation && hasRepositoryID && release.Phase == PhaseBuild
+	if isReplaced {
+		if err := markReplaced(ctx, s.db, release.App, release.Source.RepositoryID); err != nil {
+			return err
+		}
+	}
+	event := Event{At: s.now(), Type: EventVariablesRefused, Source: SourceKeys, Subject: release.App,
+		Detail: "deploy " + strconv.FormatInt(release.DeployID, 10)}
+	return errors.Join(ErrSourceNotApproved, s.record(ctx, event))
+}
+
 // ApproveSource makes source the one an app's values are released for, on a
-// confirmed session.
+// confirmed session. Approving the approved location again approves the
+// repository the page showed as replacing it; a new location's repository id
+// is pinned by its next release.
 func (s *Service) ApproveSource(ctx context.Context, token, ip, app string, source AppSource) error {
 	if _, err := s.confirmedSession(ctx, token); err != nil {
 		return err
@@ -588,11 +643,26 @@ func (s *Service) ApproveSource(ctx context.Context, token, ip, app string, sour
 		return ErrRefused
 	}
 
-	if err := upsertSource(ctx, s.db, app, source, s.now().Unix()); err != nil {
+	if err := s.approve(ctx, app, source); err != nil {
 		return err
 	}
 
 	return s.record(ctx, Event{At: s.now(), Type: EventSourceApproved, Source: SourceKeys, IP: ip, Subject: app})
+}
+
+func (s *Service) approve(ctx context.Context, app string, source AppSource) error {
+	approved, err := loadApproval(ctx, s.db, app)
+	if err != nil {
+		return err
+	}
+	if !approved.exists || !approved.source.SameLocation(source) {
+		return upsertSource(ctx, s.db, app, source, s.now().Unix())
+	}
+
+	_, err = s.db.ExecContext(ctx, `
+		UPDATE app_sources SET repository_id = CASE WHEN replaced_by != 0 THEN replaced_by ELSE repository_id END,
+			replaced_by = 0, approved_at = ? WHERE app = ?`, s.now().Unix(), app)
+	return err
 }
 
 // VariablesSummary lists every app with variables, for root: names and
@@ -730,22 +800,40 @@ func loadVariables(ctx context.Context, db variableReader, app string) (map[stri
 	return variables, rows.Err()
 }
 
-func loadSource(ctx context.Context, db variableReader, app string) (AppSource, bool, error) {
-	var source AppSource
-	err := db.QueryRowContext(ctx, "SELECT repository, branch, root_directory FROM app_sources WHERE app = ?", app).
-		Scan(&source.Repository, &source.Branch, &source.RootDirectory)
-	if errors.Is(err, sql.ErrNoRows) {
-		return AppSource{}, false, nil
-	}
+// approval is an app's approved source as stored.
+type approval struct {
+	source     AppSource
+	replacedBy int64
+	exists     bool
+}
 
-	return source, err == nil, err
+func loadApproval(ctx context.Context, db variableReader, app string) (approval, error) {
+	var loaded approval
+	err := db.QueryRowContext(ctx, "SELECT repository, branch, root_directory, repository_id, replaced_by FROM app_sources WHERE app = ?", app).
+		Scan(&loaded.source.Repository, &loaded.source.Branch, &loaded.source.RootDirectory, &loaded.source.RepositoryID, &loaded.replacedBy)
+	if errors.Is(err, sql.ErrNoRows) {
+		return approval{}, nil
+	}
+	loaded.exists = err == nil
+
+	return loaded, err
+}
+
+func pinRepository(ctx context.Context, db eventWriter, app string, repositoryID int64) error {
+	_, err := db.ExecContext(ctx, "UPDATE app_sources SET repository_id = ? WHERE app = ? AND repository_id = 0", repositoryID, app)
+	return err
+}
+
+func markReplaced(ctx context.Context, db eventWriter, app string, repositoryID int64) error {
+	_, err := db.ExecContext(ctx, "UPDATE app_sources SET replaced_by = ? WHERE app = ?", repositoryID, app)
+	return err
 }
 
 func upsertSource(ctx context.Context, db eventWriter, app string, source AppSource, now int64) error {
 	_, err := db.ExecContext(ctx, `
 		INSERT INTO app_sources (app, repository, branch, root_directory, approved_at) VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT (app) DO UPDATE SET repository = excluded.repository, branch = excluded.branch,
-			root_directory = excluded.root_directory, approved_at = excluded.approved_at`,
+			root_directory = excluded.root_directory, repository_id = 0, replaced_by = 0, approved_at = excluded.approved_at`,
 		app, source.Repository, source.Branch, source.RootDirectory, now)
 	return err
 }

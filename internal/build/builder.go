@@ -57,7 +57,7 @@ func Build(ctx context.Context, req Request) (string, error) {
 	defer cancel()
 
 	fmt.Fprintln(req.Log, "==> Planning the build with Railpack")
-	buildPlan, err := planBuild(req.SourceDir, req.Variables, req.Log)
+	buildPlan, err := planBuild(ctx, req.SourceDir, req.Variables, req.Log)
 	if err != nil {
 		return "", err
 	}
