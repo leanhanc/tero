@@ -12,7 +12,7 @@ require (
 	github.com/railwayapp/railpack v0.42.0
 	github.com/tonistiigi/fsutil v0.0.0-20261103091533-a72de9dcf763
 	golang.org/x/crypto v0.58.0
-	golang.org/x/sys v0.49.0
+	golang.org/x/sys v0.50.0
 	modernc.org/sqlite v1.60.1
 	rsc.io/qr v0.2.0
 )
