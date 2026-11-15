@@ -85,6 +85,9 @@ type app struct {
 	RunTogether   bool
 	// GitHubRepositoryID is set when the GitHub App covers the repository.
 	GitHubRepositoryID int64
+	// PinnedRepositoryID is GitHub's id for the repository the first deploy
+	// fetched, or 0 before it.
+	PinnedRepositoryID int64
 	HasVariables       bool
 	// Source is the row as stored, compared exactly with the approved source
 	// before anything is fetched.
@@ -108,11 +111,15 @@ func (p Pipeline) Run(ctx context.Context, deploy deploys.Deploy) error {
 		fmt.Fprintf(log, "\n%s\n", internalErrorNote)
 		return err
 	}
+	repositoryID, err := p.repositoryID(ctx, deployApp)
+	if err == nil {
+		err = p.pinRepository(ctx, deployApp, repositoryID)
+	}
+	if err != nil {
+		return p.recordFailure(ctx, deploy.ID, deploys.Building, err, log)
+	}
 	if deployApp.HasVariables {
-		deployApp.Source.RepositoryID, err = p.repositoryID(ctx, deployApp)
-		if err != nil {
-			return p.recordFailure(ctx, deploy.ID, deploys.Building, err, log)
-		}
+		deployApp.Source.RepositoryID = repositoryID
 	}
 
 	live, hasLive, err := deploys.LiveRelease(ctx, p.DB, deployApp.ID)
@@ -437,10 +444,29 @@ func (p Pipeline) fetch(ctx context.Context, deployApp app, checkoutDir string) 
 // GitHub App connected it with are two repositories.
 var errRepositoryMismatch = build.Failure{Reason: "This app's repository address now leads to another repository than the one GitHub connected it with. Check the repository on GitHub, then create the app again"}
 
+// errRepositoryReplaced means the app's repository address leads to another
+// repository than the one its first deploy fetched.
+var errRepositoryReplaced = build.Failure{Reason: "This app's repository address now leads to another repository than the one Tero first deployed, as happens when a repository is deleted or renamed and someone else takes its name. Nothing was deployed. Check the repository on GitHub, then create the app again"}
+
+// pinRepository records GitHub's id for the app's repository on its first
+// deploy and refuses any later deploy from a repository with another id.
+func (p Pipeline) pinRepository(ctx context.Context, deployApp app, repositoryID int64) error {
+	if deployApp.PinnedRepositoryID != 0 {
+		if deployApp.PinnedRepositoryID != repositoryID {
+			return errRepositoryReplaced
+		}
+		return nil
+	}
+
+	_, err := p.DB.ExecContext(ctx,
+		"UPDATE apps SET pinned_repository_id = ? WHERE id = ? AND pinned_repository_id = 0", repositoryID, deployApp.ID)
+	return err
+}
+
 // repositoryID looks up GitHub's id for the repository at the app's URL, which
-// the key service compares with the one pinned when the source was approved:
-// a repository that took over the name after a deletion or a rename has
-// another id. A repository the GitHub App covers is looked up with a token for
+// pinRepository compares with the one the first deploy fetched, and the key
+// service with the one pinned when an app's source was approved: a repository
+// that took over the name after a deletion or a rename has another id. A repository the GitHub App covers is looked up with a token for
 // its own id alone, and must be the repository at the URL that is cloned.
 func (p Pipeline) repositoryID(ctx context.Context, deployApp app) (int64, error) {
 	if p.GitHub == nil {
@@ -476,7 +502,7 @@ func (p Pipeline) lookUpRepositoryID(ctx context.Context, deployApp app, token s
 		return 0, build.Failure{Reason: source.ErrRepositoryNotFound.Error()}
 	}
 	if err != nil {
-		return 0, build.Failure{Reason: "Tero couldn't look the repository up on GitHub, which an app with variables needs. Try again in a few minutes: " + err.Error()}
+		return 0, build.Failure{Reason: "Tero couldn't look the repository up on GitHub, which it does before every deploy. Try again in a few minutes: " + err.Error()}
 	}
 
 	return repositoryID, nil
@@ -514,8 +540,8 @@ func (p Pipeline) loadApp(ctx context.Context, appID int64) (app, error) {
 	var loaded app
 	var repositoryURL string
 	err := p.DB.QueryRowContext(ctx,
-		"SELECT id, name, repository, branch, root_directory, run_together, github_repository_id, has_variables FROM apps WHERE id = ?", appID).
-		Scan(&loaded.ID, &loaded.Name, &repositoryURL, &loaded.Branch, &loaded.RootDirectory, &loaded.RunTogether, &loaded.GitHubRepositoryID, &loaded.HasVariables)
+		"SELECT id, name, repository, branch, root_directory, run_together, github_repository_id, pinned_repository_id, has_variables FROM apps WHERE id = ?", appID).
+		Scan(&loaded.ID, &loaded.Name, &repositoryURL, &loaded.Branch, &loaded.RootDirectory, &loaded.RunTogether, &loaded.GitHubRepositoryID, &loaded.PinnedRepositoryID, &loaded.HasVariables)
 	if err != nil {
 		return app{}, fmt.Errorf("load app %d: %w", appID, err)
 	}

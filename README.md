@@ -63,7 +63,7 @@ Every release binary has a signed [SLSA](https://slsa.dev) Build Level 3 provena
 gh attestation verify tero-linux-amd64 --repo leanhanc/tero --signer-workflow leanhanc/tero/.github/workflows/build-release.yml
 ```
 
-Verification succeeds only for the exact bytes the release workflow built, and fails for a binary that was changed afterwards. The install script checks checksums, not attestations, so it doesn't need the GitHub CLI on the server.
+Verification succeeds only for the exact bytes the release workflow built, and fails for a binary that was changed afterwards. The install script always checks the binary against the release's checksums, which only catches a broken download, since they come from the same place. When the GitHub CLI is installed and signed in on the server, it also runs the check above and installs nothing if it fails. Without the GitHub CLI, run the check yourself.
 
 ## Development
 

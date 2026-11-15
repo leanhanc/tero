@@ -546,6 +546,11 @@ func TestAssumeBreachFailsLiveReleases(t *testing.T) {
 	if !slices.Contains(server.commands, "systemd-run --machine=tero-agent@.host --user --wait --quiet podman system reset --force") {
 		t.Errorf("the agent's store wasn't emptied: %v", server.commands)
 	}
+	// Audit finding (2026-11-10): only apps with variables had their source
+	// listed to check, though a compromised dashboard can change any app's.
+	if !strings.Contains(out.String(), "api, from https://github.com/o/r (branch main)") {
+		t.Errorf("the report doesn't list the app's source:\n%s", out.String())
+	}
 }
 
 // Review finding: a mise binary tero-agent planted in /tmp/railpack outlived
@@ -577,5 +582,27 @@ func TestTemporaryFilesOfTerosUsersGo(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "tmp", "railpack")); !os.IsNotExist(err) {
 		t.Errorf("the agent's directory in /tmp survived: %v", err)
+	}
+}
+
+// Audit finding (2026-11-10): a key planted in tero-agent's authorized_keys
+// survived the reset and let its processes back in through SSH forwarding.
+func TestPlantedSSHKeyIsMovedAside(t *testing.T) {
+	server := newFakeServer(t)
+	server.setUp(t)
+	keysPath := filepath.Join(server.root, agentHome, ".ssh", "authorized_keys")
+	os.MkdirAll(filepath.Dir(keysPath), 0o700)
+	os.WriteFile(keysPath, []byte("ssh-ed25519 AAAA planted"), 0o600)
+	var out bytes.Buffer
+
+	if err := Run(context.Background(), server.options(&out, "yes\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Lstat(keysPath); !os.IsNotExist(err) {
+		t.Error("the planted key was left in place")
+	}
+	if !strings.Contains(out.String(), agentHome+"/.ssh") {
+		t.Errorf("output doesn't name the moved keys:\n%s", out.String())
 	}
 }

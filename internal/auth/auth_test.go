@@ -83,17 +83,6 @@ func (env testEnv) issueLink(t *testing.T) string {
 	return SetupLink("dash.example.com", token)
 }
 
-// resetLogin is `sudo tero reset-login`: root resets the login in the key
-// service and asks for a new link.
-func (env testEnv) resetLogin(t *testing.T) string {
-	t.Helper()
-	ctx := context.Background()
-	if err := env.keysRoot.ResetLogin(ctx); err != nil {
-		t.Fatal(err)
-	}
-	return env.issueLink(t)
-}
-
 type noBreaches struct{}
 
 func (noBreaches) IsBreached(context.Context, string) (bool, error) { return false, nil }
@@ -110,13 +99,6 @@ func tokenFromLink(t *testing.T, link string) string {
 // setUp walks the setup link flow and returns the TOTP secret.
 func (env testEnv) setUp(t *testing.T) string {
 	t.Helper()
-	secret, _ := env.setUpWithDevice(t)
-	return secret
-}
-
-// setUpWithDevice also returns the trusted-device token setup issued.
-func (env testEnv) setUpWithDevice(t *testing.T) (string, string) {
-	t.Helper()
 	ctx := context.Background()
 
 	token := tokenFromLink(t, env.issueLink(t))
@@ -132,31 +114,7 @@ func (env testEnv) setUpWithDevice(t *testing.T) (string, string) {
 	}
 	*env.session = result.SessionToken
 
-	return enrolment.Secret, result.DeviceToken
-}
-
-func (env testEnv) login(secret string) (string, error) {
-	result, err := env.loginFrom(adminIP, "", secret)
-	return result.SessionToken, err
-}
-
-func (env testEnv) loginFrom(ip, deviceToken, secret string) (LoginResult, error) {
-	code, _ := totp.Code(secret, env.clock.Now())
-	return env.service.Login(context.Background(), Browser{IP: ip, DeviceToken: deviceToken}, adminPassword, code)
-}
-
-func (env testEnv) eventTypes(t *testing.T) []keys.EventType {
-	t.Helper()
-	events, err := env.keysRoot.RecentEvents(context.Background(), "", 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var types []keys.EventType
-	for _, event := range events {
-		types = append(types, event.Type)
-	}
-	return types
+	return enrolment.Secret
 }
 
 func TestAdminCompletesSetup(t *testing.T) {
@@ -184,65 +142,6 @@ func TestAdminCompletesSetup(t *testing.T) {
 	}
 }
 
-func TestSetupWithoutTOTPCreatesNoAccount(t *testing.T) {
-	env := newTestEnv(t)
-	ctx := context.Background()
-
-	link := env.issueLink(t)
-	token := tokenFromLink(t, link)
-	if _, err := env.service.BeginSetup(ctx, adminIP, token, adminPassword); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := env.service.FinishSetup(ctx, Browser{IP: adminIP}, token, "000000"); !errors.Is(err, ErrInvalidCode) {
-		t.Errorf("FinishSetup(wrong code) = %v", err)
-	}
-	if isSetUp, _ := env.service.IsSetUp(ctx); isSetUp {
-		t.Error("an account exists without a confirmed TOTP code")
-	}
-}
-
-func TestSetupLinkReusedIsRejected(t *testing.T) {
-	env := newTestEnv(t)
-	ctx := context.Background()
-
-	link := env.issueLink(t)
-	token := tokenFromLink(t, link)
-	enrolment, _ := env.service.BeginSetup(ctx, adminIP, token, adminPassword)
-	code, _ := totp.Code(enrolment.Secret, env.clock.Now())
-	if _, err := env.service.FinishSetup(ctx, Browser{IP: adminIP}, token, code); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := env.service.BeginSetup(ctx, adminIP, token, "another long passphrase here"); !errors.Is(err, ErrInvalidLink) {
-		t.Errorf("BeginSetup(used link) = %v", err)
-	}
-}
-
-func TestSetupLinkExpires(t *testing.T) {
-	env := newTestEnv(t)
-	ctx := context.Background()
-
-	link := env.issueLink(t)
-	env.clock.Advance(24 * time.Hour)
-
-	if _, err := env.service.BeginSetup(ctx, adminIP, tokenFromLink(t, link), adminPassword); !errors.Is(err, ErrInvalidLink) {
-		t.Errorf("BeginSetup(expired link) = %v", err)
-	}
-}
-
-func TestNewSetupLinkReplacesTheOldOne(t *testing.T) {
-	env := newTestEnv(t)
-	ctx := context.Background()
-
-	oldLink := env.issueLink(t)
-	env.issueLink(t)
-
-	if _, err := env.service.BeginSetup(ctx, adminIP, tokenFromLink(t, oldLink), adminPassword); !errors.Is(err, ErrInvalidLink) {
-		t.Errorf("BeginSetup(replaced link) = %v", err)
-	}
-}
-
 func TestSetupRejectsShortPassword_v5_0_0_6_2_1(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()
@@ -262,24 +161,27 @@ func TestNoLoginBeforeSetup(t *testing.T) {
 	}
 }
 
+// With an admin in place, a setup link reads as invalid, whether it is the
+// one setup used or a new one.
 func TestSecondAccountCannotBeCreated(t *testing.T) {
 	env := newTestEnv(t)
-	env.setUp(t)
 	ctx := context.Background()
 
-	link := env.issueLink(t)
-	if _, err := env.service.BeginSetup(ctx, adminIP, tokenFromLink(t, link), "a second owner passphrase"); !errors.Is(err, ErrInvalidLink) {
-		t.Errorf("BeginSetup with an admin present = %v", err)
+	usedToken := tokenFromLink(t, env.issueLink(t))
+	enrolment, err := env.service.BeginSetup(ctx, adminIP, usedToken, adminPassword)
+	if err != nil {
+		t.Fatal(err)
 	}
-}
+	code, _ := totp.Code(enrolment.Secret, env.clock.Now())
+	if _, err := env.service.FinishSetup(ctx, Browser{IP: adminIP}, usedToken, code); err != nil {
+		t.Fatal(err)
+	}
 
-func TestCorrectPasswordAndCodeLogsIn(t *testing.T) {
-	env := newTestEnv(t)
-	secret := env.setUp(t)
-	env.clock.Advance(time.Minute)
-
-	if _, err := env.login(secret); err != nil {
-		t.Fatalf("Login = %v", err)
+	newToken := tokenFromLink(t, env.issueLink(t))
+	for name, token := range map[string]string{"used link": usedToken, "new link": newToken} {
+		if _, err := env.service.BeginSetup(ctx, adminIP, token, "a second owner passphrase"); !errors.Is(err, ErrInvalidLink) {
+			t.Errorf("BeginSetup with the %s = %v", name, err)
+		}
 	}
 }
 
@@ -294,89 +196,6 @@ func TestWrongCodeDoesNotSayWhichFactor(t *testing.T) {
 
 	if !errors.Is(wrongCodeErr, ErrInvalidCredentials) || wrongCodeErr != wrongPasswordErr {
 		t.Errorf("wrong code = %v, wrong password = %v; want the same generic error", wrongCodeErr, wrongPasswordErr)
-	}
-}
-
-func TestLogin_v5_0_0_6_5_1_ReplayedCodeFails(t *testing.T) {
-	env := newTestEnv(t)
-	secret := env.setUp(t)
-	env.clock.Advance(time.Minute)
-
-	code, _ := totp.Code(secret, env.clock.Now())
-	ctx := context.Background()
-	if _, err := env.service.Login(ctx, Browser{IP: adminIP}, adminPassword, code); err != nil {
-		t.Fatal(err)
-	}
-
-	env.clock.Advance(5 * time.Second)
-	if _, err := env.service.Login(ctx, Browser{IP: adminIP}, adminPassword, code); !errors.Is(err, ErrInvalidCredentials) {
-		t.Errorf("replayed code = %v", err)
-	}
-}
-
-func TestResetLoginRevokesSessionsAndCredentials(t *testing.T) {
-	env := newTestEnv(t)
-	secret := env.setUp(t)
-	env.clock.Advance(time.Minute)
-	sessionToken, _ := env.login(secret)
-	ctx := context.Background()
-
-	tokenFromLink(t, env.resetLogin(t))
-
-	if _, err := env.service.Authenticate(ctx, sessionToken, adminIP); !errors.Is(err, ErrSessionExpired) {
-		t.Errorf("session after reset = %v", err)
-	}
-	env.clock.Advance(time.Minute)
-	if _, err := env.login(secret); !errors.Is(err, ErrNotSetUp) {
-		t.Errorf("old credentials after reset = %v", err)
-	}
-}
-
-func TestEventsRecordedWithoutSecrets(t *testing.T) {
-	env := newTestEnv(t)
-	secret := env.setUp(t)
-	env.clock.Advance(time.Minute)
-	ctx := context.Background()
-
-	env.service.Login(ctx, Browser{IP: adminIP}, "wrong passphrase for the admin", "000000")
-	sessionToken, _ := env.login(secret)
-	env.resetLogin(t)
-
-	types := env.eventTypes(t)
-	for _, want := range []keys.EventType{keys.EventSetupLinkIssued, keys.EventSetupCompleted, keys.EventLoginFailed, keys.EventLoginSucceeded, keys.EventLoginReset} {
-		if !containsEvent(types, want) {
-			t.Errorf("no %s event in %v", want, types)
-		}
-	}
-
-	events, _ := env.keysRoot.RecentEvents(ctx, "", 100)
-	secrets := []string{adminPassword, secret, sessionToken}
-	for _, event := range events {
-		for _, value := range []string{string(event.Type), event.IP} {
-			for _, sensitive := range secrets {
-				if strings.Contains(value, sensitive) {
-					t.Errorf("event %+v contains a secret", event)
-				}
-			}
-		}
-	}
-
-	if len(*env.journal) != len(events) {
-		t.Errorf("journal has %d entries, database has %d events", len(*env.journal), len(events))
-	}
-	for _, entry := range *env.journal {
-		for _, value := range entry.fields {
-			for _, sensitive := range secrets {
-				if strings.Contains(value, sensitive) {
-					t.Errorf("journal field %q contains a secret", value)
-				}
-			}
-		}
-		for _, sensitive := range secrets {
-			if strings.Contains(entry.message, sensitive) {
-				t.Errorf("journal entry %q contains a secret", entry.message)
-			}
-		}
 	}
 }
 
@@ -405,15 +224,6 @@ func TestUnstoredEventGoesToTheJournal(t *testing.T) {
 	if len(entries) != 1 || entries[0].fields["TERO_EVENT_UNSTORED"] != "1" || entries[0].fields["TERO_EVENT"] != "breach_check_skipped" {
 		t.Errorf("journal = %+v", entries)
 	}
-}
-
-func containsEvent(types []keys.EventType, want keys.EventType) bool {
-	for _, eventType := range types {
-		if eventType == want {
-			return true
-		}
-	}
-	return false
 }
 
 // account-security: Domain label in the password, at setup

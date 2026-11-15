@@ -339,7 +339,7 @@ func (s *Service) LoginPasskey(ctx context.Context, browser Browser, challengeID
 
 	throttles := []throttleKey{ipKey(browser.IP)}
 	err = s.checkThrottled(ctx, throttles, browser.IP, func(ctx context.Context) error {
-		return s.checkPasskey(ctx, browser.IP, challengeID, answer)
+		return s.checkPasskey(ctx, browser.IP, isTrustedDevice, challengeID, answer)
 	})
 	if err != nil {
 		return LoginResult{}, err
@@ -352,8 +352,10 @@ func (s *Service) LoginPasskey(ctx context.Context, browser Browser, challengeID
 // admin's passkeys, and stores the passkey's new counter and last use. A
 // challenge that is gone, expired or of another kind says nothing about the
 // passkey, so it isn't charged: otherwise a flood of challenges that pushes
-// out the admin's would lock out the admin's IP.
-func (s *Service) checkPasskey(ctx context.Context, ip, challengeID string, answer json.RawMessage) error {
+// out the admin's would lock out the admin's IP. Answers from trusted browsers
+// have a per-minute budget of their own, so junk answers from strangers
+// can't keep the admin's browser from logging in.
+func (s *Service) checkPasskey(ctx context.Context, ip string, isTrustedDevice bool, challengeID string, answer json.RawMessage) error {
 	account, err := s.loadAdmin(ctx)
 	if err != nil {
 		return err
@@ -362,7 +364,7 @@ func (s *Service) checkPasskey(ctx context.Context, ip, challengeID string, answ
 	if !isUsable {
 		return ErrInvalidPasskey
 	}
-	if !s.limits.allowPasskeyCheck(s.now()) {
+	if !s.limits.allowPasskeyCheck(s.now(), isTrustedDevice) {
 		return ErrHashingIsBusy
 	}
 

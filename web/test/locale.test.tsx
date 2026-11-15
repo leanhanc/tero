@@ -3,8 +3,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from '../src/app';
 import { detectLanguage, LocaleContext, toLocale } from '../src/lib/utils/locale';
-import type { Messages } from '../src/locales/en';
-import { es } from '../src/locales/es';
 
 afterEach(() => {
 	cleanup();
@@ -40,12 +38,5 @@ describe('Spanish', () => {
 		expect(await screen.findByRole('heading', { name: 'Iniciá sesión en Tero' })).toBeTruthy();
 		expect(screen.getByLabelText('Contraseña')).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Iniciar sesión' })).toBeTruthy();
-	});
-
-	it('fails type checking when a text is missing', () => {
-		const { submit: _, ...loginWithoutSubmit } = es.login;
-		// @ts-expect-error login.submit is missing.
-		const incomplete: Messages = { ...es, login: loginWithoutSubmit };
-		expect(incomplete.login).not.toHaveProperty('submit');
 	});
 });

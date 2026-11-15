@@ -281,46 +281,49 @@ func (s *Service) SignAppToken(ctx context.Context) (AppToken, error) {
 
 // VerifyWebhook reports whether signature, GitHub's X-Hub-Signature-256
 // header, is the HMAC-SHA256 of body with the App's webhook secret. Without
-// a connected App nothing is valid. A failure is recorded with the sender's
-// IP.
-func (s *Service) VerifyWebhook(ctx context.Context, body []byte, signature, ip string) (bool, error) {
+// a connected App nothing is valid and nothing is recorded. Anyone on the
+// internet can send a webhook, so failures are only counted, and recorded as
+// one event a minute; the dashboard writes each one, with its sender, to the
+// journal. ip is kept in the protocol for that reason but not stored here.
+func (s *Service) VerifyWebhook(ctx context.Context, body []byte, signature, _ string) (bool, error) {
 	if len(body) > MaxWebhookBody {
 		return false, ErrRefused
 	}
 
-	isValid, err := s.checkWebhookSignature(ctx, body, signature)
-	if err != nil || isValid {
+	isValid, hasApp, err := s.checkWebhookSignature(ctx, body, signature)
+	if err != nil || isValid || !hasApp {
 		return isValid, err
 	}
 
-	return false, s.recordOwn(ctx, EventWebhookSignatureFailed, ip)
+	s.limits.countWebhookFailure()
+	return false, nil
 }
 
-func (s *Service) checkWebhookSignature(ctx context.Context, body []byte, signature string) (bool, error) {
+func (s *Service) checkWebhookSignature(ctx context.Context, body []byte, signature string) (isValid, hasApp bool, err error) {
 	var value sealed
-	err := s.db.QueryRowContext(ctx, "SELECT key_version, webhook_secret FROM github_app WHERE id = 1").
+	err = s.db.QueryRowContext(ctx, "SELECT key_version, webhook_secret FROM github_app WHERE id = 1").
 		Scan(&value.version, &value.ciphertext)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
+		return false, false, nil
 	}
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 
 	secret, err := s.openSealed(gitHubSecretPurpose, value)
 	if err != nil {
-		return false, err
+		return false, true, err
 	}
 
 	given, hasPrefix := strings.CutPrefix(signature, "sha256=")
 	givenMAC, decodeErr := hex.DecodeString(given)
 	if !hasPrefix || decodeErr != nil {
-		return false, nil
+		return false, true, nil
 	}
 
 	mac := hmac.New(sha256.New, secret)
 	mac.Write(body)
-	return hmac.Equal(givenMAC, mac.Sum(nil)), nil
+	return hmac.Equal(givenMAC, mac.Sum(nil)), true, nil
 }
 
 func (s *Service) openSealed(purpose string, value sealed) ([]byte, error) {

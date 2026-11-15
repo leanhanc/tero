@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,8 +53,11 @@ func newTestEnv(t *testing.T, keys map[int][]byte) testEnv {
 	service, err := NewService(db, keys, Options{
 		Domain: testDomain,
 		Now:    clock.Now,
-		Journal: func(_ int, _ string, fields map[string]string) error {
-			*entries = append(*entries, fields)
+		Journal: func(_ int, message string, fields map[string]string) error {
+			// MESSAGE is journald's own name for the entry's text.
+			entry := maps.Clone(fields)
+			entry["MESSAGE"] = message
+			*entries = append(*entries, entry)
 			return nil
 		},
 	})
@@ -262,6 +266,19 @@ func TestSetupNeedsAnIssuedUnexpiredLink(t *testing.T) {
 	}
 }
 
+func TestNewSetupLinkReplacesTheOldOne(t *testing.T) {
+	env := newTestEnv(t, map[int][]byte{1: testKey(1)})
+	ctx := context.Background()
+
+	oldToken, _ := env.root.IssueSetupLink(ctx)
+	if _, err := env.root.IssueSetupLink(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.dashboard.BeginSetup(ctx, adminIP, oldToken, adminPassword); !errors.Is(err, ErrInvalidLink) {
+		t.Errorf("replaced token: err = %v", err)
+	}
+}
+
 func TestSetupWithoutCodeDoesNotComplete(t *testing.T) {
 	env := newTestEnv(t, map[int][]byte{1: testKey(1)})
 	ctx := context.Background()
@@ -449,10 +466,27 @@ func TestCallersCantAppendOtherEvents(t *testing.T) {
 func TestEventsGoToTheJournalWithoutSecrets(t *testing.T) {
 	env := newTestEnv(t, map[int][]byte{1: testKey(1)})
 	secret := env.setUp(t)
+	env.clock.Advance(time.Minute)
+	env.login(secret, "not the admin's passphrase")
+	if err := env.login(secret, adminPassword); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.root.ResetLogin(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 
+	types := env.eventTypes(t)
+	for _, want := range []EventType{EventSetupLinkIssued, EventSetupCompleted, EventLoginFailed, EventLoginSucceeded, EventLoginReset} {
+		if countOf(types, want) == 0 {
+			t.Errorf("no %s event in %v", want, types)
+		}
+	}
+	if len(*env.journal) != len(types) {
+		t.Errorf("journal has %d entries, database has %d events", len(*env.journal), len(types))
+	}
 	for _, fields := range *env.journal {
 		for _, value := range fields {
-			if strings.Contains(value, secret) || strings.Contains(value, adminPassword) {
+			if strings.Contains(value, secret) || strings.Contains(value, adminPassword) || strings.Contains(value, *env.session) {
 				t.Fatalf("journal entry holds a secret: %v", fields)
 			}
 		}

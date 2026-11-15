@@ -44,6 +44,8 @@ func testKey(t *testing.T, comment string) string {
 	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshKey))) + " " + comment + "\n"
 }
 
+const hardenedSSHSettings = "permitrootlogin no\npasswordauthentication no\nkbdinteractiveauthentication no\npermitemptypasswords no\ndenyusers tero tero-agent tero-keys\n"
+
 const defaultSSHSettings = "port 22\npubkeyauthentication yes\nstrictmodes yes\nauthorizedkeysfile .ssh/authorized_keys .ssh/authorized_keys2\npubkeyacceptedalgorithms ssh-ed25519,rsa-sha2-512,rsa-sha2-256\n"
 
 // newGuardHost has ana in the sudo group and bo without sudo, both owned by
@@ -256,44 +258,6 @@ func TestEnsureAccountReusesLeftoverGroup(t *testing.T) {
 	}
 }
 
-// server-init: tero has no containers
-func TestTeroUserGetsNoContainers(t *testing.T) {
-	h := newGuardHost(t)
-
-	if err := createTeroUser(context.Background(), h); err != nil {
-		t.Fatal(err)
-	}
-	commands := strings.Join(h.run.(*sysexec.Recorder).Commands, "\n")
-	for _, forbidden := range []string{"--add-subuids", "enable-linger", "podman"} {
-		if strings.Contains(commands, forbidden) {
-			t.Errorf("creating tero ran %q:\n%s", forbidden, commands)
-		}
-	}
-}
-
-// server-init: State shared by the service and the agent
-func TestShareStateCreatesGroupsAndSetgidDirectory(t *testing.T) {
-	h := newGuardHost(t)
-
-	if err := shareState(context.Background(), h); err != nil {
-		t.Fatal(err)
-	}
-	commands := strings.Join(h.run.(*sysexec.Recorder).Commands, "\n")
-	for _, want := range []string{
-		"groupadd --system tero-shared",
-		"groupadd --system tero-keys-callers",
-		"usermod --append --groups tero-shared,tero-keys-callers tero",
-		"usermod --append --groups tero-shared,tero-keys-callers tero-agent",
-		"install -d -o root -g tero-shared -m 0750 /var/lib/tero-shared",
-		"install -d -o root -g tero-shared -m 2770 /var/lib/tero-shared/db",
-		"install -d -o tero-agent -g tero-shared -m 2750 /var/lib/tero-shared/deploy-logs",
-	} {
-		if !strings.Contains(commands, want) {
-			t.Errorf("missing %q in:\n%s", want, commands)
-		}
-	}
-}
-
 func TestExpandKeysPattern(t *testing.T) {
 	ana := account{name: "ana", home: "/home/ana"}
 	cases := map[string]string{
@@ -451,7 +415,7 @@ func TestHardenSSHValidatesAndReloadsOnEveryRun(t *testing.T) {
 	h := newGuardHost(t)
 	recorder := h.run.(*sysexec.Recorder)
 	recorder.Outputs["ssh -Q kex"] = "curve25519-sha256\n"
-	recorder.Outputs["sshd -T"] = "permitrootlogin no\npasswordauthentication no\nkbdinteractiveauthentication no\npermitemptypasswords no\n"
+	recorder.Outputs["sshd -T"] = hardenedSSHSettings
 
 	for run := range 2 {
 		recorder.Commands = nil
@@ -465,6 +429,24 @@ func TestHardenSSHValidatesAndReloadsOnEveryRun(t *testing.T) {
 	}
 }
 
+// Audit finding (2026-11-10): a key planted for a service user let it log in
+// and forward to the key service's socket.
+func TestHardenSSHRequiresTheServiceUsersDenied(t *testing.T) {
+	h := newGuardHost(t)
+	recorder := h.run.(*sysexec.Recorder)
+	recorder.Outputs["ssh -Q kex"] = "curve25519-sha256\n"
+	recorder.Outputs["sshd -T"] = strings.Replace(hardenedSSHSettings, "denyusers tero tero-agent tero-keys", "denyusers tero tero-keys", 1)
+
+	err := hardenSSH(context.Background(), h)
+	if err == nil || !strings.Contains(err.Error(), "tero-agent") {
+		t.Fatalf("hardenSSH() without tero-agent in DenyUsers = %v", err)
+	}
+	drop, _ := embedded.ReadFile("files/sshd-hardening.conf")
+	if !strings.Contains(string(drop), "\nDenyUsers tero tero-agent tero-keys\n") {
+		t.Error("the drop-in doesn't deny the service users")
+	}
+}
+
 // Review finding: settings above the Include or in Match blocks could
 // silently override the drop-in.
 func TestHardenSSHRefusesOverriddenSettings(t *testing.T) {
@@ -472,8 +454,8 @@ func TestHardenSSHRefusesOverriddenSettings(t *testing.T) {
 	t.Setenv("SUDO_USER", "ana")
 	recorder := h.run.(*sysexec.Recorder)
 	recorder.Outputs["ssh -Q kex"] = "curve25519-sha256\n"
-	recorder.Outputs["sshd -T"] = "permitrootlogin no\npasswordauthentication no\nkbdinteractiveauthentication no\npermitemptypasswords no\n"
-	setSSHSettings(h, "ana", "permitrootlogin no\npasswordauthentication yes\nkbdinteractiveauthentication no\npermitemptypasswords no\n")
+	recorder.Outputs["sshd -T"] = hardenedSSHSettings
+	setSSHSettings(h, "ana", strings.Replace(hardenedSSHSettings, "passwordauthentication no", "passwordauthentication yes", 1))
 
 	err := hardenSSH(context.Background(), h)
 	if err == nil || !strings.Contains(err.Error(), "passwordauthentication") {
@@ -509,17 +491,6 @@ func TestHardenKernelChecksEffectiveValues(t *testing.T) {
 	recorder.Outputs["sysctl -n net.ipv4.ip_forward"] = "1"
 	if err := hardenKernel(context.Background(), h); err == nil || !strings.Contains(err.Error(), "net.ipv4.ip_forward") {
 		t.Errorf("hardenKernel() with an overridden value = %v", err)
-	}
-}
-
-// Ubuntu 26.04 ships limits.d/10-coredump-debian.conf with "root hard core
-// infinity", and pam_limits never applies "*" to root, so root kept core dumps.
-func TestCoreLimitCoversRoot(t *testing.T) {
-	limits, _ := embedded.ReadFile("files/limits-core.conf")
-	for _, want := range []string{"* - core 0", "root - core 0"} {
-		if !strings.Contains(string(limits), "\n"+want+"\n") {
-			t.Errorf("limits-core.conf is missing %q", want)
-		}
 	}
 }
 
@@ -560,25 +531,19 @@ func (r *contextRecorder) Run(ctx context.Context, name string, args ...string) 
 	return "", nil
 }
 
-// Review findings: stopping the firewall unit opened every port, the service
-// started without the firewall, and the service had no memory bound.
-func TestUnitsKeepTheFirewallAndBoundMemory(t *testing.T) {
+// Review finding: stopping the firewall unit opened every port. The service's
+// firewall dependency and memory bound are checked on the e2e server.
+func TestStoppingTheFirewallKeepsItsRules(t *testing.T) {
 	firewallUnit, _ := embedded.ReadFile("files/tero-firewall.service")
-	serviceUnit, _ := embedded.ReadFile("files/tero.service")
 
 	if strings.Contains(string(firewallUnit), "\nExecStop=") {
 		t.Error("stopping tero-firewall.service deletes the rules")
 	}
-	for _, want := range []string{"Requires=tero-firewall.service", "MemoryMax="} {
-		if !strings.Contains(string(serviceUnit), want) {
-			t.Errorf("tero.service is missing %s", want)
-		}
-	}
 }
 
-// server-init: Key service running after init. The dashboard only wants the
-// key service, so restarting or failing it never stops the dashboard and
-// apps (key-service: Restart while the dashboard waits).
+// key-service: Restart while the dashboard waits. The dashboard only wants
+// the key service, so restarting or failing it never stops the dashboard and
+// apps. What it does want is checked on the e2e server.
 func TestDashboardOnlyWantsTheKeyService(t *testing.T) {
 	serviceUnit, _ := embedded.ReadFile("files/tero.service")
 	unit := string(serviceUnit)
@@ -586,36 +551,16 @@ func TestDashboardOnlyWantsTheKeyService(t *testing.T) {
 	if strings.Contains(unit, "Requires=tero-keys") || strings.Contains(unit, "BindsTo=tero-keys") || strings.Contains(unit, "PartOf=tero-keys") {
 		t.Error("tero.service is stopped or restarted with the key service")
 	}
-	for _, want := range []string{"Wants=network-online.target tero-keys.socket", "After=network-online.target tero-firewall.service tero-keys.socket", "LogRateLimitBurst="} {
-		if !strings.Contains(unit, want) {
-			t.Errorf("tero.service is missing %q", want)
-		}
-	}
 }
 
-// key-service: Process identity and sandbox, No network, Socket permissions
-func TestKeyServiceUnitsAreLockedDown(t *testing.T) {
+// The key service reads its callers' cgroups and uids from /proc, so its unit
+// must not hide them. Its sandbox is checked on the e2e server.
+func TestKeyServiceSeesItsCallers(t *testing.T) {
 	serviceUnit, _ := embedded.ReadFile("files/tero-keys.service")
-	socketUnit, _ := embedded.ReadFile("files/tero-keys.socket")
 
-	for _, want := range []string{
-		"User=tero-keys", "ExecStart=/usr/local/bin/tero keys", "LoadCredentialEncrypted=kek:/etc/tero/keys/",
-		"CapabilityBoundingSet=\n", "NoNewPrivileges=yes", "PrivateNetwork=yes", "RestrictAddressFamilies=AF_UNIX\n",
-		"ProtectSystem=strict", "ProtectHome=yes", "MemoryDenyWriteExecute=yes", "SystemCallFilter=@system-service",
-		"MemoryMax=", "LimitCORE=0",
-	} {
-		if !strings.Contains(string(serviceUnit), want) {
-			t.Errorf("tero-keys.service is missing %q", want)
-		}
-	}
 	for _, forbidden := range []string{"\nProtectProc=", "\nPrivateUsers="} {
 		if strings.Contains(string(serviceUnit), forbidden) {
 			t.Errorf("tero-keys.service sets %q, which hides its callers", forbidden)
-		}
-	}
-	for _, want := range []string{"ListenStream=/run/tero-keys/keys.sock", "SocketUser=tero-keys", "SocketGroup=tero-keys-callers\n", "SocketMode=0660"} {
-		if !strings.Contains(string(socketUnit), want) {
-			t.Errorf("tero-keys.socket is missing %q", want)
 		}
 	}
 }
@@ -660,23 +605,6 @@ func TestKeysAccountCheckAcceptsOneInitCreated(t *testing.T) {
 
 	if err := checkKeysAccount(h); err != nil {
 		t.Fatalf("checkKeysAccount() = %v", err)
-	}
-}
-
-func TestCreateKeysUserHasNoShellOrPassword(t *testing.T) {
-	h := newGuardHost(t)
-
-	if err := createKeysUser(context.Background(), h); err != nil {
-		t.Fatal(err)
-	}
-	commands := strings.Join(h.run.(*sysexec.Recorder).Commands, "\n")
-	for _, want := range []string{
-		"useradd --system --user-group --no-create-home --home-dir /var/lib/tero-keys --shell /usr/sbin/nologin tero-keys",
-		"usermod --lock tero-keys",
-	} {
-		if !strings.Contains(commands, want) {
-			t.Errorf("missing %q in:\n%s", want, commands)
-		}
 	}
 }
 

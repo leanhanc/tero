@@ -137,7 +137,8 @@ type JournalWriter func(priority int, message string, fields map[string]string) 
 const (
 	// appendLimit is how many events a caller may append per minute.
 	appendLimit = 60
-	// maxEvents bounds the table; the oldest go first, except keptEvents.
+	// maxEvents bounds the table: past it, the oldest events anyone can cause
+	// from the internet go first (see Prune).
 	maxEvents = 100_000
 	// loginCheckLimit is how many password and code checks the dashboard
 	// may have made per minute, whoever they are for. It bounds how fast a
@@ -148,7 +149,8 @@ const (
 	loginCheckLimit = 30
 	// passkeyCheckLimit is the same bound for passkey answers, counted
 	// apart so a flood of junk passkeys from the internet can't use up the
-	// password checks.
+	// password checks. Answers from trusted browsers have a budget of this
+	// size of their own, so the flood can't use up the admin's either.
 	passkeyCheckLimit = 30
 	// eventRetention is how long events are kept.
 	eventRetention = 365 * 24 * time.Hour
@@ -274,8 +276,12 @@ type limits struct {
 	appends       map[Caller]int
 	checks        int
 	passkeyChecks int
-	dropped       int
-	refused       int
+	// trustedPasskeyChecks counts passkey answers from trusted browsers.
+	trustedPasskeyChecks int
+	dropped              int
+	refused              int
+	// webhookFailures counts webhooks whose signature didn't match.
+	webhookFailures int
 	// checksRefused counts login checks over loginCheckLimit.
 	checksRefused int
 }
@@ -287,6 +293,7 @@ func (l *limits) roll(now time.Time) {
 		l.appends = map[Caller]int{}
 		l.checks = 0
 		l.passkeyChecks = 0
+		l.trustedPasskeyChecks = 0
 	}
 }
 
@@ -318,13 +325,17 @@ func (l *limits) allowCheck(now time.Time) bool {
 	return true
 }
 
-func (l *limits) allowPasskeyCheck(now time.Time) bool {
+func (l *limits) allowPasskeyCheck(now time.Time, isTrustedDevice bool) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	l.roll(now)
-	l.passkeyChecks++
-	if l.passkeyChecks > passkeyCheckLimit {
+	checks := &l.passkeyChecks
+	if isTrustedDevice {
+		checks = &l.trustedPasskeyChecks
+	}
+	*checks++
+	if *checks > passkeyCheckLimit {
 		l.checksRefused++
 		return false
 	}
@@ -338,21 +349,28 @@ func (l *limits) countRefused() {
 	l.refused++
 }
 
-// take returns and resets the dropped, refused and refused-check counts.
-func (l *limits) take() (dropped, refused, checksRefused int) {
+func (l *limits) countWebhookFailure() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.webhookFailures++
+}
+
+// take returns and resets the dropped, refused, refused-check and webhook
+// failure counts.
+func (l *limits) take() (dropped, refused, checksRefused, webhookFailures int) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	dropped, refused, checksRefused = l.dropped, l.refused, l.checksRefused
-	l.dropped, l.refused, l.checksRefused = 0, 0, 0
-	return dropped, refused, checksRefused
+	dropped, refused, checksRefused, webhookFailures = l.dropped, l.refused, l.checksRefused, l.webhookFailures
+	l.dropped, l.refused, l.checksRefused, l.webhookFailures = 0, 0, 0, 0
+	return dropped, refused, checksRefused, webhookFailures
 }
 
-// FlushCounts records the dropped events, refused connections and refused
-// login checks counted since the last flush as one event each. The server
-// calls it every minute.
+// FlushCounts records the dropped events, refused connections, refused
+// login checks and refused webhooks counted since the last flush as one event
+// each. The server calls it every minute.
 func (s *Service) FlushCounts(ctx context.Context) error {
-	dropped, refused, checksRefused := s.limits.take()
+	dropped, refused, checksRefused, webhookFailures := s.limits.take()
 	for _, count := range []struct {
 		eventType EventType
 		count     int
@@ -360,6 +378,7 @@ func (s *Service) FlushCounts(ctx context.Context) error {
 		{EventEventsDropped, dropped},
 		{EventCallersRefused, refused},
 		{EventRateLimited, checksRefused},
+		{EventWebhookSignatureFailed, webhookFailures},
 	} {
 		if count.count == 0 {
 			continue

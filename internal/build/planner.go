@@ -4,17 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
-	"syscall"
+	"time"
 
 	"github.com/railwayapp/railpack/core"
 	"github.com/railwayapp/railpack/core/app"
-	"github.com/railwayapp/railpack/core/mise"
 	"github.com/railwayapp/railpack/core/plan"
 )
 
@@ -47,9 +45,14 @@ type planResponse struct {
 // Railpack lists variables in the plan by name only, as secrets, and reads
 // RAILPACK_* ones as its own settings.
 func planBuild(ctx context.Context, sourceDir string, variables map[string]string, log io.Writer) (*plan.BuildPlan, error) {
-	if err := ensureMiseDirectory(); err != nil {
+	pristine, err := ensurePristineMise(ctx)
+	if err != nil {
 		return nil, err
 	}
+	if err := preparePlanDirectory(pristine); err != nil {
+		return nil, err
+	}
+	defer removePlanDirectory()
 
 	response, err := runPlanCommand(ctx, planRequest{SourceDir: sourceDir, Variables: variables})
 	if err != nil {
@@ -83,16 +86,23 @@ func runPlanCommand(ctx context.Context, request planRequest) (planResponse, err
 		return planResponse{}, err
 	}
 
+	// The planner runs in a systemd scope of its own, killed once it is
+	// done, so nothing it started outlives the plan to tamper with the next
+	// one. env -i keeps the agent's own environment from the planner, which
+	// can only write inside the mise directory.
+	scope := fmt.Sprintf("tero-plan-%d.scope", time.Now().UnixNano())
 	var stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, executable, PlanCommand)
+	cmd := exec.CommandContext(ctx, "systemd-run", "--user", "--scope", "--quiet", "--collect", "--unit="+scope,
+		"/usr/bin/env", "-i", "PATH=/usr/bin:/bin", "HOME="+miseRoot(), "TMPDIR="+miseRoot(), executable, PlanCommand)
 	cmd.Stdin = bytes.NewReader(encodedRequest)
 	cmd.Stderr = &stderr
-	// Nothing of the agent's own environment reaches the child. Railpack
-	// downloads mise through a temporary directory, and the child can only
-	// write inside the mise directory.
-	cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + miseRoot(), "TMPDIR=" + miseRoot()}
+	cmd.Env = []string{"PATH=/usr/bin:/bin", "XDG_RUNTIME_DIR=" + os.Getenv("XDG_RUNTIME_DIR")}
+	cmd.WaitDelay = 10 * time.Second
 
 	output, err := cmd.Output()
+	if stopErr := stopPlanScope(scope); stopErr != nil {
+		return planResponse{}, stopErr
+	}
 	if err != nil {
 		errorOutput := stderr.Bytes()
 		errorOutput = errorOutput[max(0, len(errorOutput)-maxPlannerErrorBytes):]
@@ -159,31 +169,24 @@ func describePlanFailure(messages []string) error {
 	return Failure{Reason: reason}
 }
 
-// ensureMiseDirectory makes sure the fixed, host-wide directory Railpack
-// downloads mise into belongs to the agent. Railpack runs the binary it
-// finds there, so a directory planted by another user must never be used.
-func ensureMiseDirectory() error {
-	parent := miseRoot()
+// stopPlanScope kills whatever is left in the planner's scope and checks
+// that the scope is gone. A scope with nothing left in it is already gone,
+// so a failed kill only matters if the scope is still there.
+func stopPlanScope(scope string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-	info, err := os.Lstat(parent)
-	if errors.Is(err, os.ErrNotExist) {
-		return os.Mkdir(parent, 0o700)
+	_ = exec.CommandContext(ctx, "systemctl", "--user", "kill", "--signal=SIGKILL", scope).Run()
+	for {
+		output, err := exec.CommandContext(ctx, "systemctl", "--user", "show", "--property=ActiveState", "--value", scope).Output()
+		state := strings.TrimSpace(string(output))
+		if err == nil && state != "active" && state != "deactivating" {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("stop the build planner's scope %s: it is still %s", scope, state)
+		case <-time.After(200 * time.Millisecond):
+		}
 	}
-	if err != nil {
-		return err
-	}
-
-	stat, hasOwner := info.Sys().(*syscall.Stat_t)
-	isOwnDirectory := info.IsDir() && info.Mode()&os.ModeSymlink == 0 && hasOwner && int(stat.Uid) == os.Getuid()
-	if !isOwnDirectory {
-		return fmt.Errorf("%s exists but doesn't belong to the agent's user; remove it and redeploy", parent)
-	}
-
-	return os.Chmod(parent, 0o700)
-}
-
-// miseRoot is the directory Railpack keeps mise in, and the only one the
-// planner may write to.
-func miseRoot() string {
-	return strings.TrimSuffix(mise.InstallDir, "/mise")
 }

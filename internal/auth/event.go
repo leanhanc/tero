@@ -45,6 +45,8 @@ const (
 	RefusedCrossSite     RefusalReason = "cross_site"
 	RefusedNotJSON       RefusalReason = "not_json"
 	RefusedMalformedBody RefusalReason = "malformed_body"
+	// RefusedBadSignature is a GitHub webhook whose signature didn't match.
+	RefusedBadSignature RefusalReason = "bad_signature"
 )
 
 // maxLoggedPathLength bounds the path in a refusal entry, so a huge request

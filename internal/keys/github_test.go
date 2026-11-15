@@ -297,6 +297,12 @@ func TestVerifyWebhook(t *testing.T) {
 			t.Errorf("signature %q was valid", signature)
 		}
 	}
+	if slices.Contains(env.eventTypes(t), EventWebhookSignatureFailed) {
+		t.Error("a refused webhook was recorded on its own, before the minute's count")
+	}
+	if err := env.service.FlushCounts(ctx); err != nil {
+		t.Fatal(err)
+	}
 	if !slices.Contains(env.eventTypes(t), EventWebhookSignatureFailed) {
 		t.Error("webhook_signature_failed wasn't recorded")
 	}

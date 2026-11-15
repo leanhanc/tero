@@ -217,6 +217,7 @@ func (h *Handler) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	if !isValid {
 		h.badSignatures.count(ip, time.Now())
+		h.auth.RecordRefusal(ip, r.URL.Path, auth.RefusedBadSignature)
 		writeError(w, http.StatusUnauthorized, errBadSignature)
 		return
 	}

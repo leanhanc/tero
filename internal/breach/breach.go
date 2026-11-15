@@ -49,11 +49,14 @@ const (
 )
 
 // plantDirs are the directories under a user's home where something running
-// as that user could put what its user manager or Podman would run or load
-// later: units, environment.d, user.conf, Podman's containers.conf (runtime,
-// conmon, hooks), registries and policies. Tero never puts anything there:
-// the agent's unit is in /etc/systemd/user.
+// as that user could put what its user manager, Podman or the SSH server
+// would run or load later: units, environment.d, user.conf, Podman's
+// containers.conf (runtime, conmon, hooks), registries and policies, and SSH
+// keys, which would let the user's processes back in through port and socket
+// forwarding. Tero never puts anything there: the agent's unit is in
+// /etc/systemd/user, and init denies both users SSH login.
 var plantDirs = []string{
+	".ssh",
 	".config",
 	".local/share/systemd/user",
 	".local/share/containers/systemd",
@@ -331,21 +334,70 @@ func resetAgentStorage(ctx context.Context, opts Options) error {
 	return err
 }
 
+// appSource is an app's source as the shared database holds it.
+type appSource struct {
+	name, repository, branch, rootDirectory string
+}
+
 // failLiveReleases marks every live release failed in the shared database,
 // since its image goes with the agent's store: the agent then doesn't try to
-// start it, and the dashboard asks for a redeploy.
-func failLiveReleases(ctx context.Context, opts Options) error {
+// start it, and the dashboard asks for a redeploy. It returns every app's
+// source as the database holds it, which a compromised dashboard could have
+// changed, for the admin to check before redeploying.
+func failLiveReleases(ctx context.Context, opts Options) ([]appSource, error) {
 	db, err := store.Open(ctx, filepath.Join(opts.Root, store.Path))
 	if err != nil {
-		return fmt.Errorf("open the apps' database: %w", err)
+		return nil, fmt.Errorf("open the apps' database: %w", err)
 	}
 	defer db.Close()
 
 	if _, err := deploys.FailLiveReleases(ctx, db, time.Now()); err != nil {
-		return fmt.Errorf("mark the apps' releases failed: %w", err)
+		return nil, fmt.Errorf("mark the apps' releases failed: %w", err)
 	}
 
-	return nil
+	rows, err := db.QueryContext(ctx, "SELECT name, repository, branch, root_directory FROM apps ORDER BY name")
+	if err != nil {
+		return nil, fmt.Errorf("list the apps: %w", err)
+	}
+	defer rows.Close()
+
+	var sources []appSource
+	for rows.Next() {
+		var source appSource
+		if err := rows.Scan(&source.name, &source.repository, &source.branch, &source.rootDirectory); err != nil {
+			return nil, err
+		}
+		sources = append(sources, source)
+	}
+
+	return sources, rows.Err()
+}
+
+// reportSources lists every app's source to check before redeploying it.
+// Values come from a database a compromised dashboard could write, so control
+// characters are replaced before they reach the terminal.
+func reportSources(out io.Writer, sources []appSource) {
+	if len(sources) == 0 {
+		return
+	}
+
+	fmt.Fprintln(out, "  - Before redeploying, check that each app still deploys from your repository:")
+	for _, source := range sources {
+		location := "branch " + printable(source.branch)
+		if source.rootDirectory != "" {
+			location += ", folder " + printable(source.rootDirectory)
+		}
+		fmt.Fprintf(out, "      %s, from %s (%s)\n", printable(source.name), printable(source.repository), location)
+	}
+}
+
+func printable(value string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) {
+			return '?'
+		}
+		return r
+	}, value)
 }
 
 func crontabs(users []serviceUser) []string {
@@ -389,6 +441,7 @@ type resetResult struct {
 	link      string
 	gitHubApp keys.GitHubApp
 	variables []keys.AppVariablesSummary
+	sources   []appSource
 }
 
 // reset replaces everything the dashboard and the agent could have read or
@@ -414,7 +467,8 @@ func reset(ctx context.Context, opts Options) (resetResult, error) {
 		return resetResult{}, fmt.Errorf("delete the GitHub connection: %w", err)
 	}
 
-	if err := failLiveReleases(ctx, opts); err != nil {
+	sources, err := failLiveReleases(ctx, opts)
+	if err != nil {
 		return resetResult{}, err
 	}
 
@@ -439,7 +493,7 @@ func reset(ctx context.Context, opts Options) (resetResult, error) {
 		return resetResult{}, err
 	}
 
-	return resetResult{link: auth.SetupLink(opts.Domain, token), gitHubApp: gitHubApp, variables: variables}, nil
+	return resetResult{link: auth.SetupLink(opts.Domain, token), gitHubApp: gitHubApp, variables: variables, sources: sources}, nil
 }
 
 func report(ctx context.Context, opts Options, aside string, moved []string, result resetResult) {
@@ -454,6 +508,7 @@ func report(ctx context.Context, opts Options, aside string, moved []string, res
 	}
 	fmt.Fprintln(out, "  - Check the SSH keys in ~/.ssh/authorized_keys of every user on this server")
 	fmt.Fprintln(out, "  - Redeploy every app from the dashboard: its image was deleted, so it is built again from source")
+	reportSources(out, result.sources)
 	reportVariables(out, result.variables)
 
 	for _, path := range moved {

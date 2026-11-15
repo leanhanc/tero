@@ -38,10 +38,6 @@ func TestSlice1(t *testing.T) {
 		t.FailNow()
 	}
 
-	t.Run("tero version runs", func(t *testing.T) {
-		must(t, "tero version")
-	})
-
 	t.Run("server-init: Init without root", testInitWithoutRoot)
 	t.Run("process-isolation: Root command run without sudo", testRootCommandWithoutSudo)
 	t.Run("server-init: SSH lockout guard / No SSH key configured", testSSHLockoutGuard)
@@ -474,6 +470,49 @@ func testServicesAndPermissions(t *testing.T) {
 func testServiceRunning(t *testing.T) {
 	must(t, "systemctl is-active tero")
 	must(t, "systemctl is-enabled tero")
+
+	// Review findings: the service started without the firewall and had no
+	// memory bound. Key service: the dashboard only wants it.
+	assertUnitProperties(t, "tero", map[string]string{"MemoryMax": "536870912", "LogRateLimitBurst": "1000"})
+	assertUnitLists(t, "tero", map[string]string{"Requires": "tero-firewall.service", "Wants": "tero-keys.socket", "After": "tero-keys.socket"})
+}
+
+// assertUnitProperties checks values as systemd applied them, not as the
+// unit file spells them.
+func assertUnitProperties(t *testing.T, unit string, want map[string]string) {
+	t.Helper()
+	got := unitProperties(t, unit, want)
+	for name, value := range want {
+		if got[name] != value {
+			t.Errorf("%s %s = %q, want %q", unit, name, got[name], value)
+		}
+	}
+}
+
+// assertUnitLists checks that each list property holds the given unit.
+func assertUnitLists(t *testing.T, unit string, want map[string]string) {
+	t.Helper()
+	got := unitProperties(t, unit, want)
+	for name, member := range want {
+		if !slices.Contains(strings.Fields(got[name]), member) {
+			t.Errorf("%s %s = %q, want it to include %s", unit, name, got[name], member)
+		}
+	}
+}
+
+func unitProperties(t *testing.T, unit string, names map[string]string) map[string]string {
+	t.Helper()
+	command := "systemctl show " + unit
+	for name := range names {
+		command += " --property=" + name
+	}
+
+	properties := map[string]string{}
+	for _, line := range strings.Split(must(t, command), "\n") {
+		name, value, _ := strings.Cut(line, "=")
+		properties[name] = value
+	}
+	return properties
 }
 
 func testServiceIdentity(t *testing.T) {

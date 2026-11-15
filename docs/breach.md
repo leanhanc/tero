@@ -5,10 +5,11 @@ Run `sudo tero assume-breach` on the server when you think someone got into the 
 ## What it does
 
 - Stops the dashboard, the agent, every app and every other process running as Tero's users.
-- Moves aside units, cron jobs and Podman settings those users could have planted, and lists them so you can check them. They are kept in `/var/lib/tero-breach`, readable by root only. Their files in `/tmp`, `/var/tmp` and `/dev/shm` are deleted.
+- Moves aside units, cron jobs, Podman settings and SSH keys those users could have planted, and lists them so you can check them. They are kept in `/var/lib/tero-breach`, readable by root only. Their files in `/tmp`, `/var/tmp` and `/dev/shm` are deleted.
 - Ends every dashboard session, forgets every trusted browser, and resets the password, the authenticator and the passkeys. The last line it prints is a new setup link.
 - Deletes the dashboard's and the apps' certificates and keys, so new ones are issued.
 - Replaces the master key. Your app variables are kept, and listed so you can rotate them.
+- Lists every app's repository, branch and folder, since someone in the dashboard could have pointed an app at their own repository.
 - Deletes the GitHub connection. Delete the App on GitHub too, then connect again from Settings.
 - **Deletes every app's image and container, and the build cache.** Someone running as the agent could have changed any of them, so nothing built before the breach runs again.
 
@@ -19,7 +20,8 @@ Once the reset is done, each app's last deploy shows as failed, and its address 
 1. Open the setup link and set up your login again.
 2. Connect GitHub again, if your apps deploy from repositories the GitHub App covers.
 3. Rotate each listed variable at its provider and replace it in the dashboard.
-4. Redeploy each app. Tero builds it again from its repository.
+4. Check that each listed app still deploys from your repository.
+5. Redeploy each app. Tero builds it again from its repository.
 
 ## If it stops halfway
 

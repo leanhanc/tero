@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"testing"
 
 	"github.com/leanhanc/tero/internal/build"
 	"github.com/leanhanc/tero/internal/containers"
 	"github.com/leanhanc/tero/internal/github"
 	"github.com/leanhanc/tero/internal/source"
+	"github.com/leanhanc/tero/internal/store"
 )
 
 // e2e finding: a container start that hung left the deploy on "starting"
@@ -74,5 +76,41 @@ func TestRepositoryIDComesFromGitHub(t *testing.T) {
 	var failure build.Failure
 	if _, err := pipeline.repositoryID(ctx, missing); !errors.As(err, &failure) {
 		t.Errorf("deleted repository: err = %v", err)
+	}
+}
+
+// Audit finding (2026-11-10): only apps with variables were pinned to a
+// repository id, so a repository that took over another app's name after a
+// deletion or a rename was deployed.
+func TestPinRepositoryRefusesAnotherRepository(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "tero.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	result, err := db.ExecContext(ctx,
+		"INSERT INTO apps (name, repository, branch, created_at) VALUES ('shop', 'https://github.com/acme/shop', 'main', 0)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	appID, _ := result.LastInsertId()
+	pipeline := Pipeline{DB: db}
+
+	if err := pipeline.pinRepository(ctx, app{ID: appID}, 11); err != nil {
+		t.Fatalf("first deploy: %v", err)
+	}
+	loaded, err := pipeline.loadApp(ctx, appID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.PinnedRepositoryID != 11 {
+		t.Fatalf("pinned id = %d, want 11", loaded.PinnedRepositoryID)
+	}
+	if err := pipeline.pinRepository(ctx, loaded, 11); err != nil {
+		t.Errorf("same repository: %v", err)
+	}
+	if err := pipeline.pinRepository(ctx, loaded, 99); !errors.Is(err, errRepositoryReplaced) {
+		t.Errorf("another repository: err = %v", err)
 	}
 }

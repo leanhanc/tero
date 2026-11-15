@@ -26,3 +26,9 @@ Each layer of Tero is held to a published standard, and each mapping lists what 
 ## Verifying releases
 
 Every release binary has SLSA Build Level 3 provenance and an SBOM. See [Verify a release](README.md#verify-a-release).
+
+## What admins should know
+
+- **The default address depends on nip.io.** Without a domain of your own, the dashboard lives at `<server-ip>.nip.io` and each app at `<app>.<server-ip>.nip.io`. Whoever runs nip.io's DNS could point those names elsewhere and get certificates for them, and every site under nip.io counts as the same site as your dashboard for the browser. Tero's checks of where a request comes from still hold, but a domain of your own removes the dependency.
+- **An app is tied to the repository it first deployed.** Tero records GitHub's id for that repository. If the address later leads to another repository, as when one is deleted or renamed and someone else takes its name, deploys fail without fetching it. Create the app again to deploy from the new repository.
+- **Apps share the server's resources within limits.** Each app can use at most half of the server's memory and 1024 processes, so one app can't take the others down.

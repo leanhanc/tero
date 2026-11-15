@@ -28,8 +28,7 @@ Tasks not met yet, in the order they matter most:
 |---|---|
 | PW.1.1 | No written threat model. ADR 0001 lists the attack surfaces and each slice's design lists its risks, but nothing ties them into one model. |
 | RV.1.3, RV.2.1 | `SECURITY.md` says how to report, but not how fast reports are answered and fixed, or how they are triaged. |
-| PW.4.4 | Dependabot opens update pull requests, but nothing fails a build on a known vulnerability. `govulncheck` and `bun audit` in CI are on the roadmap (slice 1). |
-| PO.4.2, PW.8.2 | Unit and end-to-end tests run on the maintainer's machines and on EC2 by hand. No CI runs them. |
+| PO.4.2, PW.8.2 | End-to-end tests run on the maintainer's machines and on EC2 by hand. CI runs only the unit tests. |
 | RV.3 | No record of root-cause analysis for fixed vulnerabilities. |
 
 ## Prepare the Organization (PO)
@@ -44,7 +43,7 @@ Tasks not met yet, in the order they matter most:
 | PO.3.2 | Follow recommended security practices for the toolchain | Met | Every GitHub Action is pinned by commit SHA and updated by Dependabot; workflows default to `permissions: {}` and grant each job only what it needs; checkouts use `persist-credentials: false`; releases build without dependency caches |
 | PO.3.3 | Tools produce evidence of their work | Met | SBOMs, `checksums.txt` and signed provenance on every release; CodeQL and Scorecard results in the repository's code scanning alerts |
 | PO.4.1 | Criteria for security checks | Met | Each requirement is a spec scenario with an end-to-end test on a fresh server, plus a minimum Lynis score; the status columns of the three mapping documents |
-| PO.4.2 | Gather the information the criteria need | Partly | `make test` and `make e2e` (Lima VMs, or `scripts/ec2-test.sh` on a cloud server) produce it, run by hand. Cloud CI is on the roadmap (slice 1) |
+| PO.4.2 | Gather the information the criteria need | Partly | `make test` runs in CI on every push to main, every pull request and every release (`.github/workflows/check.yml`). `make e2e` (Lima VMs, or `scripts/ec2-test.sh` on a cloud server) runs by hand |
 | PO.5.1 | Separate and protect the development environments | Partly | Releases build only in GitHub Actions, in a reusable workflow isolated from its caller. End-to-end tests run in throwaway VMs and servers. A GitHub ruleset blocks deleting or force-pushing `main` |
 | PO.5.2 | Secure the developers' endpoints | Not yet | Not documented |
 
@@ -67,14 +66,14 @@ Tasks not met yet, in the order they matter most:
 | PW.2.1 | Review the design against the security requirements | Met | Each slice's design cites the requirements it meets, and gets a correctness and security review from a reviewer who didn't write it |
 | PW.4.1 | Acquire well-secured third-party components | Met | Dependencies are widely used projects; the BuildKit image is pinned by digest |
 | PW.4.2 | Create well-secured components in-house when needed | N/A | Tero builds no shared components for others |
-| PW.4.4 | Check that components stay secure | Partly | Dependabot weekly for Go modules, the dashboard's packages and GitHub Actions. No vulnerability check fails a build yet (roadmap, slice 1) |
+| PW.4.4 | Check that components stay secure | Done | Dependabot weekly for Go modules, the dashboard's packages and GitHub Actions. `govulncheck` (both architectures) and `bun audit` fail CI on every push to main, pull request and release |
 | PW.5.1 | Secure coding practices | Met | Commands run with argument lists and no shell, from system directories; every SQL query uses placeholders; request bodies decode into fixed structs with unknown fields refused ([asvs-l2.md](asvs-l2.md) rows 1.2.4, 1.2.5, 2.1.1) |
 | PW.6.1 | Compiler and build tools that improve security | Met | Go toolchain version from `go.mod`; static binaries with `CGO_ENABLED=0` |
 | PW.6.2 | Compiler and build settings that improve security | Met | `-trimpath`, stripped binaries, reproducible timestamps ([.goreleaser.yaml](../../.goreleaser.yaml)) |
 | PW.7.1 | Decide which code gets reviewed or analyzed | Met | All of it: CodeQL covers the Go service and the dashboard's TypeScript |
 | PW.7.2 | Review and analyze the code | Met | CodeQL on every push to `main`, every pull request and weekly; a review of each slice by someone who didn't write it |
 | PW.8.1 | Decide which executable testing to do | Met | Every spec scenario has an end-to-end test on a fresh server of each tested Ubuntu release |
-| PW.8.2 | Test the executable code | Partly | `make test` (Go and dashboard unit tests, `go vet`) and `make e2e`, with Lynis. They run by hand, not in CI. No fuzzing |
+| PW.8.2 | Test the executable code | Partly | `make test` (Go and dashboard unit tests, `go vet`) runs in CI on every push to main and pull request; `make e2e`, with Lynis, runs by hand. No fuzzing |
 | PW.9.1 | Secure settings by default | Met | `sudo tero init` applies the host lockdown with no options to turn it off; the dashboard always needs two factors; apps always run in rootless containers |
 | PW.9.2 | Document the secure defaults | Met | [cis-subset.md](cis-subset.md), [asvs-l2.md](asvs-l2.md), [sp800-190.md](sp800-190.md) |
 

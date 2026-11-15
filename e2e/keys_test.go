@@ -59,6 +59,15 @@ func testKeyServiceIdentity(t *testing.T) {
 		t.Errorf("socket is %q, want tero-keys:tero-keys-callers 660", got)
 	}
 
+	assertUnitProperties(t, "tero-keys", map[string]string{
+		"NoNewPrivileges": "yes", "PrivateNetwork": "yes", "RestrictAddressFamilies": "AF_UNIX",
+		"ProtectSystem": "strict", "ProtectHome": "yes", "MemoryDenyWriteExecute": "yes",
+		"MemoryMax": "268435456", "LimitCORE": "0",
+	})
+	if filter := unitProperties(t, "tero-keys", map[string]string{"SystemCallFilter": ""})["SystemCallFilter"]; filter == "" {
+		t.Error("tero-keys has no system call filter")
+	}
+
 	keysPID := must(t, "systemctl show tero-keys --property=MainPID --value")
 	if got := run(t, "sudo ss -Hlnp -A inet | grep 'pid="+keysPID+",'"); got.exitCode == 0 {
 		t.Errorf("key service listens on the network:\n%s", got.output)

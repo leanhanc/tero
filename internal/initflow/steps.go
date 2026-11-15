@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/leanhanc/tero/internal/config"
+	"github.com/leanhanc/tero/internal/keys"
 )
 
 //go:embed files
@@ -142,10 +143,18 @@ func checkEffectiveSSH(ctx context.Context, h host) error {
 				return fmt.Errorf("another SSH setting overrides Tero's: %s is %q instead of %q. Check /etc/ssh/sshd_config and its Match blocks", key, got, want)
 			}
 		}
+		for _, user := range deniedSSHUsers {
+			if !slices.Contains(settings["denyusers"], user) {
+				return fmt.Errorf("another SSH setting overrides Tero's: DenyUsers doesn't list %s. Check /etc/ssh/sshd_config and its Match blocks", user)
+			}
+		}
 	}
 
 	return nil
 }
+
+// deniedSSHUsers are Tero's service users, which never log in over SSH.
+var deniedSSHUsers = []string{teroUser, agentUser, keys.User}
 
 // preferredKex lists the SSH key exchanges Tero allows, best first. Older
 // OpenSSH releases lack some of them, such as the post-quantum mlkem768x25519

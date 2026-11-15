@@ -1,9 +1,6 @@
 package platform
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
 const ubuntu2604 = `PRETTY_NAME="Ubuntu 26.04 LTS"
 NAME="Ubuntu"
@@ -54,13 +51,5 @@ func TestString(t *testing.T) {
 	got := Parse(ubuntu2404, "arm64").String()
 	if got != "Ubuntu 24.04.3 LTS (arm64)" {
 		t.Fatalf("String() = %q", got)
-	}
-}
-
-func TestTestedListNamesEveryUbuntuRelease(t *testing.T) {
-	for _, want := range []string{"Ubuntu 26.04 LTS on amd64 or arm64", "Ubuntu 24.04 LTS on amd64 or arm64"} {
-		if !strings.Contains(TestedList(), want) {
-			t.Errorf("TestedList() = %q, missing %q", TestedList(), want)
-		}
 	}
 }

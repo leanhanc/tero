@@ -7,6 +7,12 @@
 # checks it against the release's checksums, and installs it as
 # /usr/local/bin/tero. Configuring the server is a separate step: sudo tero init.
 #
+# The checksums come from the same place as the binary, so they only catch a
+# broken download. When the GitHub CLI is installed and logged in, the binary's
+# build provenance is also checked, which proves it was built from this
+# repository by its release workflow. Otherwise see verify_docs to check it by
+# hand.
+#
 # TERO_DOWNLOAD_URL replaces the release download address, for example
 # https://github.com/leanhanc/tero/releases/download/v0.1.0 to install a
 # specific version. Downloads are HTTPS only.
@@ -31,6 +37,7 @@ main() {
 	download "$binary" "$work_dir/$binary"
 	download checksums.txt "$work_dir/checksums.txt"
 	verify_checksum "$work_dir" "$binary"
+	verify_provenance "$work_dir/$binary"
 
 	as_root install -m 0755 "$work_dir/$binary" "$install_path"
 
@@ -119,6 +126,20 @@ verify_checksum() {
 	if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
 		fail "The downloaded binary doesn't match the release checksum, so nothing was installed.
 The download may be corrupted or tampered with. Please run the install again, or verify the release by hand:
+$verify_docs"
+	fi
+}
+
+# verify_provenance checks the binary's SLSA provenance with the GitHub CLI,
+# when it is there and logged in. A release from another address, such as a
+# test release, has no provenance from this repository to check.
+verify_provenance() {
+	if [ -n "${TERO_DOWNLOAD_URL:-}" ] || ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
+		return
+	fi
+	if ! gh attestation verify "$1" --repo leanhanc/tero --signer-workflow leanhanc/tero/.github/workflows/build-release.yml >/dev/null 2>&1; then
+		fail "The downloaded binary has no valid build provenance from leanhanc/tero, so nothing was installed.
+Please verify the release by hand:
 $verify_docs"
 	fi
 }

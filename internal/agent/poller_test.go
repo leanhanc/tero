@@ -13,7 +13,6 @@ import (
 func TestPollStopsAfterThreeFailures(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
-	db.Exec("INSERT INTO apps (name, repository, branch, created_at) VALUES ('api', 'https://github.com/o/r', 'main', 1)")
 	poller := Poller{DB: db, Now: time.Now}
 
 	for range apps.MaxPollFailures {
@@ -35,7 +34,6 @@ func TestPollStopsAfterThreeFailures(t *testing.T) {
 func TestPollSkipsAppsWithADeployOnTheWay(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
-	db.Exec("INSERT INTO apps (name, repository, branch, created_at) VALUES ('api', 'https://github.com/o/r', 'main', 1)")
 	db.Exec("INSERT INTO apps (name, repository, branch, github_repository_id, created_at) VALUES ('covered', 'https://github.com/o/c', 'main', 9, 1)")
 	db.Exec("INSERT INTO apps (name, repository, branch, deploy_on_push, created_at) VALUES ('paused', 'https://github.com/o/p', 'main', 0, 1)")
 	db.Exec("INSERT INTO deploys (app_id, state, queued_at) VALUES (1, 'queued', 1)")
@@ -54,7 +52,6 @@ func TestPollSkipsAppsWithADeployOnTheWay(t *testing.T) {
 func TestKnownHead(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
-	db.Exec("INSERT INTO apps (name, repository, branch, created_at) VALUES ('api', 'https://github.com/o/r', 'main', 1)")
 
 	if isKnown, _ := isKnownHead(ctx, db, 1, "abc"); isKnown {
 		t.Error("a head is known before any deploy")

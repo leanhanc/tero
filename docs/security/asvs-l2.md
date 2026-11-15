@@ -4,7 +4,7 @@ The dashboard and its HTTP endpoints are built to Level 2 of the [OWASP Applicat
 
 Authentication and sessions also follow [NIST SP 800-63B-4](https://pages.nist.gov/800-63-4/sp800-63b.html), which ASVS chapter V6 is built on. Where the two differ, 63B-4 decides; see [NIST SP 800-63B-4](#nist-sp-800-63b-4).
 
-Specs cite requirements as `v5.0.0-<id>`, for example `v5.0.0-6.5.1`. A test that checks a requirement cited by a spec has the ID in its name: `TestLogin_v5_0_0_6_5_1_ReplayedCodeFails` in Go, or `(v5.0.0-6.5.1)` in an end-to-end subtest name.
+Specs cite requirements as `v5.0.0-<id>`, for example `v5.0.0-6.5.1`. A test that checks a requirement cited by a spec has the ID in its name: `TestVerify_v5_0_0_6_5_1_RefusesReplayedCode` in Go, or `(v5.0.0-6.5.1)` in an end-to-end subtest name.
 
 The [sections before the matrix](#documentation-asvs-asks-for) are the documentation ASVS requires (rate limiting, login paths, sessions, cryptography, logging and so on). Matrix rows point to them.
 
@@ -276,7 +276,7 @@ Tero targets authentication assurance level 2 (AAL2, section 2.2): every login u
 | 2.2.1 | 1 | Positive input validation | Met | Codes must be 6 digits, passwords 8 to 1024 characters, tokens must match a stored hash. App names, repository URLs, branches and folders are checked against allow patterns | `TestVerifyRefusesMalformedCodes`, `TestPolicy_v5_0_0_6_2_1_RejectsSevenCharacters` |
 | 2.2.2 | 1 | Validation at a trusted layer | Met | All checks run in the Go API; the web app's `minlength` is only a hint | `TestSetupRejectsShortPassword_v5_0_0_6_2_1` |
 | 2.2.3 | 2 | Combinations of items are reasonable | N/A | No combined items | — |
-| 2.3.1 | 1 | Steps happen in order | Met | Finishing setup needs the pending credentials from its first step; nothing is created before | `TestSetupWithoutTOTPCreatesNoAccount` |
+| 2.3.1 | 1 | Steps happen in order | Met | Finishing setup needs the pending credentials from its first step; nothing is created before | `TestSetupWithoutCodeDoesNotComplete` |
 | 2.3.2 | 2 | Business limits enforced | Met | Throttle limits as documented | `TestLogin_v5_0_0_6_3_1_RepeatedFailuresFromOneIP`, `TestLogin_v5_0_0_6_3_1_DistributedGuessingHitsAccountLimit` |
 | 2.3.3 | 2 | Operations are transactional | Met | Account creation, link use and the first session commit together; `reset-login` is one transaction | — |
 | 2.3.4 | 2 | No double-booking | Met | The admin row has a fixed id, so racing setups can't create two accounts; attempts are counted in a write transaction | `TestSecondAccountCannotBeCreated`, `TestLogin_v5_0_0_6_3_1_ParallelFailuresCannotPassThrottle` |
@@ -292,13 +292,13 @@ Tero targets authentication assurance level 2 (AAL2, section 2.2): every login u
 | 3.3.2 | 2 | `SameSite` fits the cookie | Met | `SameSite=Strict` | `TestCookieAttributes` |
 | 3.3.3 | 2 | `__Host-` prefix | Met | `__Host-tero_session`, `__Host-tero_device` | `TestCookieAttributes` |
 | 3.3.4 | 2 | `HttpOnly` for tokens | Met | Both cookies are `HttpOnly`; tokens never appear in a response body | `TestCookieAttributes` |
-| 3.4.1 | 1 | HSTS for a year, including subdomains at L2 | Met | `max-age=31536000; includeSubDomains` | `TestBuildCaddyConfig_v5_0_0_3_4_1_HSTSCoversSubdomainsForAYear` |
+| 3.4.1 | 1 | HSTS for a year, including subdomains at L2 | Met | `max-age=31536000; includeSubDomains` | `TestBuildCaddyConfig_v5_0_0_3_4_1_ServesOnlyTheDashboardDomainWithHSTS` |
 | 3.4.2 | 1 | Fixed CORS origin | Met | No `Access-Control-Allow-Origin` is sent | — |
 | 3.4.3 | 2 | Content-Security-Policy | Met | `default-src 'self'`, no inline scripts or styles, `object-src 'none'`, `base-uri 'none'`; `form-action` allows `https://github.com` only for posting the GitHub App's manifest | `TestBuildCaddyConfigSetsStrictCSP`, e2e `web app served under the strict CSP` |
 | 3.4.4 | 2 | `X-Content-Type-Options: nosniff` | Met | Set on every dashboard response | — |
 | 3.4.5 | 2 | Referrer policy | Met | `Referrer-Policy: no-referrer` | — |
 | 3.4.6 | 2 | CSP `frame-ancestors` | Met | `frame-ancestors 'none'` | `TestBuildCaddyConfigSetsStrictCSP` |
-| 3.5.1 | 1 | Cross-origin requests validated | Met | Requests with another `Origin` or `Sec-Fetch-Site: cross-site` are refused, the API takes only JSON, and cookies are `SameSite=Strict` | `TestCrossSiteRequestsRefused`, `TestFormPostsRefused` |
+| 3.5.1 | 1 | Cross-origin requests validated | Met | Requests with another `Origin` or `Sec-Fetch-Site: cross-site` are refused, the API takes only JSON, and cookies are `SameSite=Strict` | `TestRefusedRequests_v5_0_0_16_3_3_BypassAttemptsAreJournaled` |
 | 3.5.2 | 1 | No bypass of CORS preflight | N/A | Tero doesn't rely on preflight; see 3.5.1 | — |
 | 3.5.3 | 1 | Unsafe methods for sensitive actions | Met | Every state change is a `POST`; `GET` only reads | — |
 | 3.5.4 | 2 | Separate apps on separate hostnames | Met | The dashboard has its own hostname. Slice 2 gives every app its own hostname too | `TestBuildCaddyConfigServesOnlyTheDashboardDomain` |
@@ -358,13 +358,13 @@ Tero accepts no file uploads and serves no user-supplied files.
 | 6.2.12 | 2 | Breached passwords refused | Met | Bundled list plus Have I Been Pwned; 63B-4 3.1.1.2 | `TestPolicy_v5_0_0_6_2_12_RejectsPasswordFromBreachAPI`, `TestPwnedPasswords_v5_0_0_6_2_12_SendsOnlyHashPrefix`, e2e `Breached password (v5.0.0-6.2.12)` |
 | 6.3.1 | 1 | Brute-force controls in place | Met | [Brute-force protection](#brute-force-protection); 63B-4 3.2.2, which Tero doesn't fully meet; see [NIST SP 800-63B-4](#nist-sp-800-63b-4) | `TestLogin_v5_0_0_6_3_1_*`, e2e `Repeated failures from one IP (v5.0.0-6.3.1)` |
 | 6.3.2 | 1 | No default accounts | Met | No account exists until setup | `TestNoLoginBeforeSetup` |
-| 6.3.3 | 2 | Multi-factor authentication | Met | Password and TOTP, or a passkey with user verification, on every login; setup can't finish without TOTP; AAL2 in 63B-4 2.2 | `TestSetupWithoutTOTPCreatesNoAccount`, `TestWrongCodeDoesNotSayWhichFactor`, `TestPasskeyNeedsUserVerification` |
-| 6.3.4 | 2 | No undocumented login paths | Met | Three paths, all documented and recorded | `TestEventsRecordedWithoutSecrets`, e2e `Events recorded / No secrets in events (v5.0.0-6.3.4, v5.0.0-6.3.5, v5.0.0-6.3.7)` |
-| 6.4.1 | 1 | Activation codes random, short-lived, single use | Met | Setup links: 256 bits, 24 hours, single use | `TestSetupLinkReusedIsRejected`, `TestSetupLinkExpires`, `TestNewSetupLinkReplacesTheOldOne` |
+| 6.3.3 | 2 | Multi-factor authentication | Met | Password and TOTP, or a passkey with user verification, on every login; setup can't finish without TOTP; AAL2 in 63B-4 2.2 | `TestSetupWithoutCodeDoesNotComplete`, `TestWrongCodeDoesNotSayWhichFactor`, `TestPasskeyNeedsUserVerification` |
+| 6.3.4 | 2 | No undocumented login paths | Met | Three paths, all documented and recorded | `TestEventsGoToTheJournalWithoutSecrets`, e2e `Events recorded / No secrets in events (v5.0.0-6.3.4, v5.0.0-6.3.5, v5.0.0-6.3.7)` |
+| 6.4.1 | 1 | Activation codes random, short-lived, single use | Met | Setup links: 256 bits, 24 hours, single use | `TestSecondAccountCannotBeCreated`, `TestSetupNeedsAnIssuedUnexpiredLink`, `TestNewSetupLinkReplacesTheOldOne` |
 | 6.4.2 | 1 | No hints or security questions | Met | None | — |
-| 6.4.3 | 2 | Password reset doesn't bypass MFA | Met | The only reset needs root and makes the admin enrol TOTP again; 63B-4 4.2 lists other recovery methods; see [NIST SP 800-63B-4](#nist-sp-800-63b-4) | `TestResetLoginRevokesSessionsAndCredentials` |
-| 6.4.4 | 2 | Lost factor needs the same proof as enrolment | Met | Same path as first setup: a link printed on the server; 63B-4 4.2 lists other recovery methods; see [NIST SP 800-63B-4](#nist-sp-800-63b-4) | `TestResetLoginRevokesSessionsAndCredentials` |
-| 6.5.1 | 2 | TOTP codes usable once | Met | The last accepted time step is stored and only later steps are accepted; 63B-4 3.1.4.2 | `TestLogin_v5_0_0_6_5_1_ReplayedCodeFails`, `TestVerify_v5_0_0_6_5_1_RefusesReplayedCode`, e2e `Replayed code (v5.0.0-6.5.1)` |
+| 6.4.3 | 2 | Password reset doesn't bypass MFA | Met | The only reset needs root and makes the admin enrol TOTP again; 63B-4 4.2 lists other recovery methods; see [NIST SP 800-63B-4](#nist-sp-800-63b-4) | `TestResetLoginClearsCredentialsAndLock`, `TestResetLoginEndsSessionsAndForgetsDevices` |
+| 6.4.4 | 2 | Lost factor needs the same proof as enrolment | Met | Same path as first setup: a link printed on the server; 63B-4 4.2 lists other recovery methods; see [NIST SP 800-63B-4](#nist-sp-800-63b-4) | `TestResetLoginClearsCredentialsAndLock`, `TestResetLoginEndsSessionsAndForgetsDevices` |
+| 6.5.1 | 2 | TOTP codes usable once | Met | The last accepted time step is stored and only later steps are accepted; 63B-4 3.1.4.2 | `TestCodeWorksOnce`, `TestVerify_v5_0_0_6_5_1_RefusesReplayedCode`, e2e `Replayed code (v5.0.0-6.5.1)` |
 | 6.5.2 | 2 | Weak lookup secrets hashed | N/A | No recovery codes | — |
 | 6.5.3 | 2 | TOTP seeds from a CSPRNG | Met | 160 bits from `crypto/rand` | — |
 | 6.5.4 | 2 | Lookup and out-of-band codes have 20 bits | N/A | Neither exists | — |
@@ -391,7 +391,7 @@ Tero accepts no file uploads and serves no user-supplied files.
 | 7.3.1 | 2 | Inactivity timeout | Met | 30 minutes; 63B-4 2.2.3 allows 1 hour | `TestSessionIdleTimeout` |
 | 7.3.2 | 2 | Absolute lifetime | Met | 12 hours; 63B-4 2.2.3 allows 24 hours | `TestSessionAbsoluteTimeout` |
 | 7.4.1 | 1 | Ended sessions can't be used | Met | Logout and expiry delete the session on the server; 63B-4 5.1 | `TestLogout_v5_0_0_7_4_1_EndsTheSession`, `TestSessionIdleTimeout` |
-| 7.4.2 | 1 | Sessions end when the account is disabled | Met | `reset-login` deletes every session | `TestResetLoginRevokesSessionsAndCredentials` |
+| 7.4.2 | 1 | Sessions end when the account is disabled | Met | `reset-login` deletes every session | `TestResetLoginClearsCredentialsAndLock`, `TestResetLoginEndsSessionsAndForgetsDevices` |
 | 7.4.3 | 2 | Option to end sessions after a factor change | Met | Password change and adding or removing a passkey offer "End every other session", checked by default; `reset-login` ends every session | `TestChangePassword_v5_0_0_6_2_3_EndsOtherSessions`, `TestPasskeyRemovalCanEndOtherSessions_v5_0_0_7_4_3`, web `removes a passkey and ends other sessions by default (v5.0.0-7.4.3)` |
 | 7.4.4 | 2 | Visible logout | Met | Log out button on every signed-in page | — |
 | 7.4.5 | 2 | Admin can end sessions | Met | The one admin ends any other session, or all of them, from the settings page | `TestEndAllOtherSessions_v5_0_0_7_4_5`, `TestListAndEndOneSession_v5_0_0_7_5_2` |
@@ -500,7 +500,7 @@ Tero isn't an OAuth client, resource server, authorization server or OpenID prov
 | ID | L | Requirement | Status | How | Test |
 |---|---|---|---|---|---|
 | 13.1.1 | 2 | Communication needs documented | Met | [Connections](#connections) | — |
-| 13.2.1 | 2 | Backend components authenticated | Met | `tero-keys` listens on a Unix socket only `tero`, `tero-agent` and root can open. It identifies each caller by the uid the kernel records, and the dashboard also by its exact systemd unit, never by anything the caller sends. GitHub webhooks are authenticated by their HMAC-SHA256 signature, checked in `tero-keys` | `TestIdentifyAcrossUsers`, `TestOnlyTheDashboardsExactCgroupCounts`, `TestCallersLimitedToTheirVerbs`, `TestForgedWebhooksAreRefusedAndThrottled` |
+| 13.2.1 | 2 | Backend components authenticated | Met | `tero-keys` listens on a Unix socket only `tero`, `tero-agent` and root can open. It identifies each caller by the uid the kernel records, and the dashboard also by its exact systemd unit, never by anything the caller sends. GitHub webhooks are authenticated by their HMAC-SHA256 signature, checked in `tero-keys` | e2e `Other process running as tero / process-isolation: Other tero processes refused`, `TestOnlyTheDashboardsExactCgroupCounts`, `TestCallersLimitedToTheirVerbs`, `TestForgedWebhooksAreRefusedAndThrottled` |
 | 13.2.2 | 2 | Least privilege for components | Met | The service runs as `tero` with only `CAP_NET_BIND_SERVICE` and runs no container; containers and GitHub credentials belong to `tero-agent`, which listens on nothing; the shared database is mode 0660, group `tero-shared` | e2e `Service process identity`, e2e `tero can't run containers`, `TestOpenCreatesSharedDatabaseWithSchema` |
 | 13.2.3 | 2 | No default credentials | Met | None exist | — |
 | 13.2.4 | 2 | Outbound allowlist | Gap | The firewall filters inbound only | — |
@@ -522,7 +522,7 @@ Tero isn't an OAuth client, resource server, authorization server or OpenID prov
 | 14.2.1 | 1 | No sensitive data in URLs | Met | The setup token is in the fragment; everything else is in bodies and cookies | web `labels the password field for password managers and sends the token from the fragment (v5.0.0-6.2.7)` |
 | 14.2.2 | 2 | No caching in server components | Met | No caches in front; API responses are `no-store` | `TestAPIResponsesAreNotCached` |
 | 14.2.3 | 2 | No data to untrusted parties | Met | The CSP allows only the dashboard's origin; the breach API gets only a 5-character hash prefix | `TestPwnedPasswords_v5_0_0_6_2_12_SendsOnlyHashPrefix` |
-| 14.2.4 | 2 | Documented controls implemented | Met | As in [Sensitive data](#sensitive-data) | `TestEventsRecordedWithoutSecrets` |
+| 14.2.4 | 2 | Documented controls implemented | Met | As in [Sensitive data](#sensitive-data) | `TestEventsGoToTheJournalWithoutSecrets` |
 | 14.3.1 | 1 | Client data cleared when the session ends | Met | Logout sends `Clear-Site-Data: "cache", "storage"` (cookies stay, so the trusted-device cookie survives), and the signed-in page checks the state again once an idle session has ended | `TestLogout_v5_0_0_14_3_1_ClearsSiteDataButKeepsCookies`, web `goes back to the login form once an idle session has ended (v5.0.0-14.3.1)` |
 | 14.3.2 | 2 | Anti-caching headers | Met | `Cache-Control: no-store` on the API | `TestAPIResponsesAreNotCached` |
 | 14.3.3 | 2 | No sensitive data in browser storage | Met | Only the two `HttpOnly` cookies | — |
@@ -550,12 +550,12 @@ Tero isn't an OAuth client, resource server, authorization server or OpenID prov
 | ID | L | Requirement | Status | How | Test |
 |---|---|---|---|---|---|
 | 16.1.1 | 2 | Logging inventory | Met | [Logging](#logging) | — |
-| 16.2.1 | 2 | When, where, who, what | Met | Time, type and source IP; there is one admin | `TestEventsRecordedWithoutSecrets` |
+| 16.2.1 | 2 | When, where, who, what | Met | Time, type and source IP; there is one admin | `TestEventsGoToTheJournalWithoutSecrets` |
 | 16.2.2 | 2 | Synchronized clocks, UTC | Met | Stored as Unix time and returned in UTC; Ubuntu syncs the clock with systemd-timesyncd | — |
 | 16.2.3 | 2 | Logs only go to documented places | Met | [Logging](#logging) | — |
 | 16.2.4 | 2 | Readable log format | Met | Structured journal fields | — |
-| 16.2.5 | 2 | Sensitive data kept out of logs | Met | No passwords, codes, secrets or tokens; events name variables, never their values, and deploy logs mask known values | `TestEventsRecordedWithoutSecrets`, `TestVariableEvents`, `TestMaskerHidesValues`, e2e `build-pipeline: Build prints a value` |
-| 16.3.1 | 2 | All authentication logged | Met | Every login path records its events | `TestEventsRecordedWithoutSecrets`, `TestRateLimitTriggerIsRecorded` |
+| 16.2.5 | 2 | Sensitive data kept out of logs | Met | No passwords, codes, secrets or tokens; events name variables, never their values, and deploy logs mask known values | `TestEventsGoToTheJournalWithoutSecrets`, `TestVariableEvents`, `TestMaskerHidesValues`, e2e `build-pipeline: Build prints a value` |
+| 16.3.1 | 2 | All authentication logged | Met | Every login path records its events | `TestEventsGoToTheJournalWithoutSecrets`, `TestRateLimitTriggerIsRecorded` |
 | 16.3.2 | 2 | Failed authorization logged | Met | Requests refused for a missing or expired session are written to the journal | `TestRefusedRequests_v5_0_0_16_3_2_MissingSessionIsJournaled` |
 | 16.3.3 | 2 | Bypass attempts logged | Met | Rate limiting is recorded as an event; cross-site requests, non-JSON requests and malformed bodies are written to the journal | `TestRefusedRequests_v5_0_0_16_3_3_BypassAttemptsAreJournaled` |
 | 16.3.4 | 2 | Unexpected errors logged | Met | Logged to the journal; Caddy logs TLS errors | — |
@@ -586,7 +586,7 @@ ADR 0001 adopts a few Level 3 requirements because they are cheap.
 
 | ID | Requirement | Status | How | Test |
 |---|---|---|---|---|
-| 6.3.5 | Tell the user about suspicious logins | Later | Failed logins, rate limits and resets are recorded in the database and the journal, but the dashboard doesn't show them until it has more to show; v1 has no email | `TestEventsRecordedWithoutSecrets`, e2e `Events recorded / No secrets in events (v5.0.0-6.3.4, v5.0.0-6.3.5, v5.0.0-6.3.7)` |
+| 6.3.5 | Tell the user about suspicious logins | Later | Failed logins, rate limits and resets are recorded in the database and the journal, but the dashboard doesn't show them until it has more to show; v1 has no email | `TestEventsGoToTheJournalWithoutSecrets`, e2e `Events recorded / No secrets in events (v5.0.0-6.3.4, v5.0.0-6.3.5, v5.0.0-6.3.7)` |
 | 6.3.7 | Tell the user after a credential change | Later | Resets, password changes and passkey changes are recorded, but not shown at the next login until the dashboard lists events again; 63B-4 4.6 requires a notice when a passkey is added | e2e `Recovery visible after the fact` checks the event is recorded |
 | 6.3.3 | A phishing-resistant factor | Met | Passkeys bound to the dashboard domain, verified by `tero-keys`; one logs in alone; 63B-4 2.2.2 requires one at AAL2, and 3.1.7.4 allows syncable passkeys | `TestPasskeyAddAndLogin_v5_0_0_6_3_3`, `TestPasskeyForAnotherSiteIsRefused`, e2e `Add a passkey / dashboard-access: Log in with a passkey (v5.0.0-6.3.3)` |
 | 13.3.3 | Keys in an isolated module | Met on servers with a TPM2 | The key is sealed with `systemd-creds` to the TPM2 when there is one and is only ever in the memory of `tero-keys`. Without a TPM2, the seal uses a host key that root can read; `assume-breach` says so | — |

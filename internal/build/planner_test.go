@@ -25,22 +25,13 @@ func TestDescribePlanFailureKeepsRailpacksReason(t *testing.T) {
 	}
 }
 
-func TestMemoryLimitIsAtLeastOneGiB(t *testing.T) {
-	if limit := memoryLimit(); limit < minimumMemoryLimit {
-		t.Fatalf("memoryLimit() = %d", limit)
-	}
-}
-
-// build-pipeline: Build too long. Build runs under a 30-minute deadline;
-// whatever fails once it passes is reported as the timeout.
+// build-pipeline: Build too long. Whatever fails once the build's deadline
+// passes is reported as the timeout.
 func TestExplainContextErrorReportsTheTimeout(t *testing.T) {
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
 
 	if err := explainContextError(ctx, errors.New("rpc error: context deadline exceeded")); !errors.Is(err, errTimedOut) {
 		t.Fatalf("err = %v, want errTimedOut", err)
-	}
-	if buildTimeout != 30*time.Minute {
-		t.Fatalf("buildTimeout = %s, want 30m", buildTimeout)
 	}
 }

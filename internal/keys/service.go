@@ -547,13 +547,13 @@ func (s *Service) Prune(ctx context.Context) error {
 		{"DELETE FROM code_failures WHERE at <= ?", []any{now.Add(-codeFailureWindow).Unix()}},
 		{"DELETE FROM github_connections WHERE expires_at <= ?", []any{now.Unix()}},
 		{"DELETE FROM security_events WHERE at < ?", []any{now.Add(-eventRetention).Unix()}},
-		// A flood of one kind of event must not push out the record of a
-		// reset, a rotation or a successful login.
+		// Past maxEvents only the kinds anyone on the internet, or a caller
+		// appending its own events, can cause go, oldest first: a flood of them
+		// must not push out any other record.
 		{`DELETE FROM security_events WHERE id <= (SELECT max(id) FROM security_events) - ?
-			AND type NOT IN ('login_succeeded', 'passkey_login_succeeded', 'setup_completed', 'login_reset', 'key_rotated',
-				'breach_reset', 'totp_locked', 'password_changed', 'passkey_added', 'passkey_removed',
-				'github_connected', 'github_disconnected', 'source_approved', 'variable_sealed', 'variable_replaced',
-				'variables_release_refused')`,
+			AND type IN ('login_failed', 'totp_failed', 'setup_code_failed', 'confirm_failed', 'confirm_totp_failed',
+				'passkey_login_failed', 'webhook_signature_failed', 'rate_limited', 'events_dropped', 'callers_refused',
+				'breach_check_skipped', 'github_installation_changed')`,
 			[]any{maxEvents}},
 	}
 

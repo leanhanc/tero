@@ -188,33 +188,6 @@ func TestEventsNeedSession(t *testing.T) {
 	}
 }
 
-func TestCrossSiteRequestsRefused(t *testing.T) {
-	d := newTestDashboard(t)
-
-	request := httptest.NewRequest(http.MethodPost, "https://dash.example.com/api/login", strings.NewReader(`{"password":"x","code":"1"}`))
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Origin", "https://evil.example")
-	recorder := httptest.NewRecorder()
-	d.handler.ServeHTTP(recorder, request)
-
-	if recorder.Code != http.StatusForbidden {
-		t.Errorf("cross-origin login = %d", recorder.Code)
-	}
-}
-
-func TestFormPostsRefused(t *testing.T) {
-	d := newTestDashboard(t)
-
-	request := httptest.NewRequest(http.MethodPost, "https://dash.example.com/api/login", strings.NewReader("password=x&code=1"))
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	recorder := httptest.NewRecorder()
-	d.handler.ServeHTTP(recorder, request)
-
-	if recorder.Code != http.StatusForbidden {
-		t.Errorf("form post = %d", recorder.Code)
-	}
-}
-
 func TestLoginBeforeSetupPointsToSetupLink(t *testing.T) {
 	d := newTestDashboard(t)
 
@@ -351,14 +324,19 @@ func TestRefusedRequests_v5_0_0_16_3_3_BypassAttemptsAreJournaled(t *testing.T) 
 	crossSite := httptest.NewRequest(http.MethodPost, "https://dash.example.com/api/login", strings.NewReader(`{}`))
 	crossSite.Header.Set("Content-Type", "application/json")
 	crossSite.Header.Set("Origin", "https://evil.example")
-	d.handler.ServeHTTP(httptest.NewRecorder(), crossSite)
+	crossSiteResponse := httptest.NewRecorder()
+	d.handler.ServeHTTP(crossSiteResponse, crossSite)
 
 	formPost := httptest.NewRequest(http.MethodPost, "https://dash.example.com/api/login", strings.NewReader("password=x"))
 	formPost.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	d.handler.ServeHTTP(httptest.NewRecorder(), formPost)
+	formPostResponse := httptest.NewRecorder()
+	d.handler.ServeHTTP(formPostResponse, formPost)
 
 	d.post("/api/login", map[string]any{"password": "x", "code": "1", "admin": true})
 
+	if crossSiteResponse.Code != http.StatusForbidden || formPostResponse.Code != http.StatusForbidden {
+		t.Errorf("cross-origin login = %d, form post = %d; want 403 for both", crossSiteResponse.Code, formPostResponse.Code)
+	}
 	for _, want := range []string{"cross_site", "not_json", "malformed_body"} {
 		if !slices.Contains(*d.refusals, want) {
 			t.Errorf("refusals = %v, want %s", *d.refusals, want)

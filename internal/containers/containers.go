@@ -97,6 +97,7 @@ func Start(ctx context.Context, appName string, deployID int64, image string, va
 		"--env", "PORT=" + strconv.Itoa(containerPort),
 		"--publish", fmt.Sprintf("127.0.0.1:%d:%d", hostPort, containerPort),
 	}
+	args = append(args, limitArgs()...)
 	args = append(args, entryArgs...)
 	args = append(args, image)
 	args = append(args, command...)

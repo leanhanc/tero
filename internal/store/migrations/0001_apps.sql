@@ -15,6 +15,10 @@ CREATE TABLE apps (
 	-- GitHub's id for the repository, 0 until the App's installation covers
 	-- it. Pushes are matched by it, so a rename keeps working.
 	github_repository_id INTEGER NOT NULL DEFAULT 0,
+	-- GitHub's id for the repository the first deploy fetched, 0 before it.
+	-- A repository that later takes over the URL, after a deletion or a
+	-- rename, has another id, and the agent refuses to deploy it.
+	pinned_repository_id INTEGER NOT NULL DEFAULT 0,
 	-- Failed polls in a row; polling stops at 3 and poll_error says why.
 	poll_failures  INTEGER NOT NULL DEFAULT 0,
 	poll_error     TEXT    NOT NULL DEFAULT '',

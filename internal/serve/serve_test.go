@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestBuildCaddyConfigServesOnlyTheDashboardDomain(t *testing.T) {
+func TestBuildCaddyConfig_v5_0_0_3_4_1_ServesOnlyTheDashboardDomainWithHSTS(t *testing.T) {
 	cfg, err := buildCaddyConfig(caddySettings{Domain: "dash.example.com", Issuer: map[string]any{"module": "acme"}}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -22,7 +22,7 @@ func TestBuildCaddyConfigServesOnlyTheDashboardDomain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, expected := range []string{`"dash.example.com"`, `":443"`, `Strict-Transport-Security`} {
+	for _, expected := range []string{`"dash.example.com"`, `":443"`, `Strict-Transport-Security`, `max-age=31536000; includeSubDomains`} {
 		if !strings.Contains(string(apps), expected) {
 			t.Errorf("config is missing %s", expected)
 		}
@@ -43,18 +43,6 @@ func TestBuildCaddyConfigSetsStrictCSP(t *testing.T) {
 		if !strings.Contains(string(apps), expected) {
 			t.Errorf("config is missing %s", expected)
 		}
-	}
-}
-
-func TestBuildCaddyConfig_v5_0_0_3_4_1_HSTSCoversSubdomainsForAYear(t *testing.T) {
-	cfg, err := buildCaddyConfig(caddySettings{Domain: "dash.example.com", Issuer: map[string]any{"module": "acme"}}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	apps, _ := json.Marshal(cfg.AppsRaw)
-	if !strings.Contains(string(apps), "max-age=31536000; includeSubDomains") {
-		t.Error("HSTS is missing a one-year max-age with includeSubDomains")
 	}
 }
 
