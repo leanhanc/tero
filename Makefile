@@ -29,10 +29,10 @@ test:
 	go test ./...
 	cd web && bun run test
 
-# Recreates the test VM and runs the end-to-end suite against it. Output also
-# goes to .tero-e2e.log so a run can be followed with tail -f.
+# Runs the end-to-end suite on throwaway EC2 servers, every architecture and
+# Ubuntu release. Logs go to .tero-e2e/<run id>/.
 e2e:
-	set -o pipefail; scripts/vm-test.sh 2>&1 | tee .tero-e2e.log
+	scripts/ec2-e2e.sh
 
 # A local VM to try the dashboard at https://tero.localhost. dev-vm starts
 # fresh and prints the setup link; dev-vm-update ships a new build into it.

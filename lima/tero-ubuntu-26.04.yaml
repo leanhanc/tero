@@ -1,6 +1,6 @@
-# Plain Ubuntu 26.04 server for Tero's end-to-end tests. Nothing Tero needs is
+# Plain Ubuntu 26.04 server for Tero's local dev VM. Nothing Tero needs is
 # preinstalled: `tero init` has to do it all.
-#   scripts/vm-test.sh creates, uses and recreates this VM.
+#   scripts/dev-vm.sh creates the VM from this template.
 minimumLimaVersion: 2.0.0
 base: template:ubuntu-26.04
 

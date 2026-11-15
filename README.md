@@ -67,18 +67,18 @@ Verification succeeds only for the exact bytes the release workflow built, and f
 
 ## Development
 
-You need Go and [Bun](https://bun.sh) (to build the dashboard) and, for the local VMs, [Lima](https://lima-vm.io) 2.0 or later.
+You need Go and [Bun](https://bun.sh) (to build the dashboard) and, for the local dev VM, [Lima](https://lima-vm.io) 2.0 or later. End-to-end tests need the [AWS CLI](https://aws.amazon.com/cli/).
 
 ```bash
 bun run dev   # start a local Tero VM and ship the current build into it
 make build    # Linux binaries for amd64 and arm64 in bin/
 make test     # Go and dashboard unit tests
-make e2e      # end-to-end tests in fresh Ubuntu VMs
+make e2e      # end-to-end tests on throwaway EC2 servers
 ```
 
 `bun run dev` creates the `tero-dev` VM the first time, and after that starts it and installs the current build. The dashboard opens at https://tero.localhost and deployed apps at `https://<app>.localhost`. Certificates come from the VM's test certificate authority, so the browser warns once. `make dev-vm` recreates the VM from scratch.
 
-`make e2e` creates a fresh VM for each supported Ubuntu release on the host's architecture, installs Tero with `install.sh` from a fake release served inside the VM, runs `sudo tero init` and checks every scenario, deploys included. It takes a few minutes per release. Follow it with `tail -f .tero-e2e.log`. To test a single release, run `scripts/vm-test.sh 24.04`. To run the suite on a fresh cloud server instead, run `scripts/ec2-test.sh ubuntu@<ip> <private key>`.
+`make e2e` runs the end-to-end suite on throwaway EC2 servers, one for each architecture (amd64 and arm64) and supported Ubuntu release, in parallel. Each server starts from Canonical's current image with NitroTPM turned on, installs Tero with `install.sh` from a fake release served on the server, runs `sudo tero init` and checks every scenario, deploys included. Then the server is terminated. It needs the AWS CLI signed in to the `tero` profile (`aws login --profile tero`), or another profile in `AWS_PROFILE`. Logs go to `.tero-e2e/<run id>/`, one per server. To test one architecture or one server, run `scripts/ec2-e2e.sh arm64` or `scripts/ec2-e2e.sh amd64 24.04`. Everything a run creates is tagged `tero-e2e` and removed when the run ends, even when it fails or is interrupted. `scripts/ec2-e2e.sh cleanup` removes anything a run left behind. To run the suite on a server you already have, run `scripts/ec2-test.sh ubuntu@<ip> <private key>`.
 
 Releases are published by pushing a version tag (`git tag v0.1.0 && git push origin v0.1.0`): [.github/workflows/release.yml](.github/workflows/release.yml) builds them with GoReleaser. To build the release files locally without publishing, run `goreleaser release --snapshot --clean`.
 
