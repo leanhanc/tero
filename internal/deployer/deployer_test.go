@@ -10,6 +10,7 @@ import (
 	"github.com/leanhanc/tero/internal/build"
 	"github.com/leanhanc/tero/internal/containers"
 	"github.com/leanhanc/tero/internal/github"
+	"github.com/leanhanc/tero/internal/githubapp"
 	"github.com/leanhanc/tero/internal/source"
 	"github.com/leanhanc/tero/internal/store"
 )
@@ -112,5 +113,26 @@ func TestPinRepositoryRefusesAnotherRepository(t *testing.T) {
 	}
 	if err := pipeline.pinRepository(ctx, loaded, 99); !errors.Is(err, errRepositoryReplaced) {
 		t.Errorf("another repository: err = %v", err)
+	}
+}
+
+type uninstalledTokens struct{}
+
+func (uninstalledTokens) RepositoryToken(context.Context, int64) (source.Token, func(), error) {
+	return "", nil, githubapp.ErrNotInstalled
+}
+
+// e2e finding: once the App was uninstalled or suspended on GitHub, a
+// private repository's deploy failed with "internal error" instead of saying
+// to install the App again, since the repository lookup before the fetch
+// returned the error as it was.
+func TestUninstalledAppIsTheAdminsToAct(t *testing.T) {
+	pipeline := Pipeline{GitHub: &fakeRepositoryIDs{}, Tokens: uninstalledTokens{}}
+	covered := app{Repository: source.Repository{Owner: "acme", Name: "shop"}, GitHubRepositoryID: 11}
+
+	_, err := pipeline.repositoryID(context.Background(), covered)
+	reason, isActionable := actionableReason(err)
+	if !isActionable || reason != githubapp.ErrNotInstalled.Error() {
+		t.Fatalf("actionableReason = %q, %v, want the message to install the App", reason, isActionable)
 	}
 }

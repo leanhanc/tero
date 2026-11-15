@@ -94,6 +94,7 @@ func TestSlice1(t *testing.T) {
 	t.Run("server-init: Service survives reboot", testReboot)
 	// Last: the reset deletes every app's image, so apps stay down.
 	t.Run("breach-response: Not confirmed / Scripted run / Confirmed run", testAssumeBreach)
+	t.Run("breach-response: GitHub connection deleted / What to do elsewhere", testGitHubAfterBreach)
 }
 
 func testInitWithoutRoot(t *testing.T) {

@@ -476,12 +476,12 @@ func (p Pipeline) repositoryID(ctx context.Context, deployApp app) (int64, error
 		return p.lookUpRepositoryID(ctx, deployApp, "")
 	}
 	if p.Tokens == nil {
-		return 0, githubapp.ErrNotInstalled
+		return 0, asFailure(githubapp.ErrNotInstalled)
 	}
 
 	token, revoke, err := p.Tokens.RepositoryToken(ctx, deployApp.GitHubRepositoryID)
 	if err != nil {
-		return 0, err
+		return 0, asFailure(err)
 	}
 	defer revoke()
 

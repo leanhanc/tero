@@ -203,6 +203,7 @@ func testAssumeBreach(t *testing.T) {
 	versionsBefore := must(t, "sudo ls /etc/tero/keys")
 	certificatesBefore := must(t, caddyCertificates)
 	got := must(t, "sudo tero assume-breach --yes")
+	breachOutput = got
 
 	if !strings.HasPrefix(lastLine(got), "https://") {
 		t.Errorf("the last line of assume-breach is not a link: %q", lastLine(got))
