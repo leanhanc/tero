@@ -11,12 +11,11 @@ Change: [add-security-baseline-slice-1](changes/add-security-baseline-slice-1/)
 - [x] `sudo tero init` with the host lockdown and the `tero` service user
 - [x] First dashboard access: one-time link, password and TOTP, `sudo tero reset-login`
 - [x] ASVS L2 mapping document
-- [ ] Signed releases with SBOMs and provenance, and `install.sh`
-- [ ] End-to-end CI on real cloud servers with a Lynis minimum
+- [x] Firewall rule that rejects connections from `tero` and `tero-agent`, and so from every build and app, to the cloud metadata addresses of AWS, Google Cloud, Azure, Oracle Cloud, Alibaba Cloud, Akamai and Scaleway (169.254.0.0/16, 168.63.129.16, 100.100.100.200, fe80::/10 and the providers' IPv6 metadata addresses), so they can't read the metadata service and its instance credentials
+- [x] Signed releases with SBOMs and provenance, and `install.sh`
 - [ ] Vulnerability checks in CI: `govulncheck ./...` for Go and `bun audit` for the dashboard, failing the build on a reachable vulnerability
 - [ ] Check that ports 80 and 443 are reachable from the internet, since AWS, Google Cloud, Azure and Oracle Cloud block them by default and certificates can't be issued until they're open
 - [ ] When they're closed, explain it clearly and give step-by-step help for the leading providers (security groups, firewall rules, network security groups, security lists). Design with Cele when it shows (during `sudo tero init`, on first dashboard load, or in onboarding) and the wording
-- [ ] Firewall output rule that drops traffic from the `tero` user to the cloud metadata addresses (169.254.0.0/16 and AWS's IPv6 fd00:ec2::254), so builds and apps can't read the cloud metadata service and its instance credentials
 
 ## Slice 2: First deploy of a JS backend
 
@@ -31,9 +30,15 @@ Change: [add-first-deploy-slice-2](changes/add-first-deploy-slice-2/)
 - [x] Default HTTPS address on `<app>.<public-ip>.nip.io`
 - [x] Deploy states (queued, building, starting, live, failed) and a streamed build log
 - [x] Manual redeploy of the branch's latest commit
-- [ ] End-to-end run on cloud servers, once slice 1's cloud CI exists
 
 Drafts: [apps](drafts/apps/spec.md), [build-pipeline](drafts/build-pipeline/spec.md), [deployments](drafts/deployments/spec.md), [domains](drafts/domains/spec.md)
+
+## End-to-end CI on cloud servers
+
+Change: [add-cloud-e2e-ci](changes/add-cloud-e2e-ci/)
+
+- [ ] End-to-end CI on real cloud servers with a Lynis minimum (from slice 1)
+- [ ] Slice 2's end-to-end run on the cloud servers (from slice 2)
 
 ## Slice 3: Key service and breach response
 

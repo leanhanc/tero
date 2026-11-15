@@ -1,4 +1,4 @@
-Implements all of slice 2: the new capabilities `apps`, `build-pipeline`, `deployments` and `domains`, and this change's deltas to `process-isolation` and `server-init`. Each task names the spec scenarios it makes pass, written as `capability: Scenario`. Parts 1 to 4 are tested in fresh Lima VMs (Ubuntu 24.04 and 26.04, arm64) on the Mac, with certificates from Pebble as in slice 1. Task 5.2 runs on the cloud servers from slice 1's part 4, which is still open.
+Implements all of slice 2: the new capabilities `apps`, `build-pipeline`, `deployments` and `domains`, and this change's deltas to `process-isolation` and `server-init`. Each task names the spec scenarios it makes pass, written as `capability: Scenario`. Parts 1 to 4 are tested in fresh Lima VMs (Ubuntu 24.04 and 26.04, arm64) on the Mac, with certificates from Pebble as in slice 1.
 
 ## 1. Prove the build path on both releases
 
@@ -40,5 +40,5 @@ Implements all of slice 2: the new capabilities `apps`, `build-pipeline`, `deplo
 ## 5. End to end and housekeeping
 
 - [x] 5.1 Add e2e tests that deploy every fixture through the dashboard API in both VMs (local source) and from GitHub in CI, check each answers on its address with the expected runtime, and check the failing fixtures fail at the expected step with the expected message
-- [ ] 5.2 Once slice 1's part 4 exists, run the slice 2 suite on the cloud servers (amd64 and arm64) with real Let's Encrypt certificates on nip.io, and check the Lynis score has not dropped
+- 5.2 moved to [add-cloud-e2e-ci](../add-cloud-e2e-ci/tasks.md).
 - [x] 5.3 Move `openspec/config.yaml`'s context to slice 2, trim the four drafts to what later slices still own, and tick slice 2 in `openspec/roadmap.md`
