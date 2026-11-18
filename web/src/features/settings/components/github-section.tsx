@@ -1,5 +1,6 @@
 import { type SubmitEvent, useCallback, useEffect, useState } from 'react';
 
+import { ExternalLinkIcon, GitHubIcon, LockIcon, RedeployIcon } from '../../../components/icons';
 import { TextField } from '../../../components/text-field';
 import {
 	beginGitHubConnection,
@@ -25,8 +26,10 @@ export function GitHubSection({ confirmation }: { confirmation: Confirmation }) 
 	const [loaded, reload] = useGitHub(messages.errors);
 
 	return (
-		<section aria-labelledby="github-heading">
-			<h2 id="github-heading">{messages.settings.github.heading}</h2>
+		<section className="card" aria-labelledby="github-heading">
+			<h2 className="h2" id="github-heading">
+				{messages.settings.github.heading}
+			</h2>
 			<GitHubContent loaded={loaded} confirmation={confirmation} onChange={reload} />
 		</section>
 	);
@@ -42,11 +45,15 @@ function GitHubContent({ loaded, confirmation, onChange }: GitHubContentProps) {
 	const messages = useMessages();
 
 	if (loaded === null) {
-		return <p>{messages.common.loading}</p>;
+		return <p className="muted">{messages.common.loading}</p>;
 	}
 
 	if ('error' in loaded) {
-		return <p role="alert">{loaded.error}</p>;
+		return (
+			<p className="t-error" role="alert">
+				{loaded.error}
+			</p>
+		);
 	}
 
 	if (!loaded.status.app.isConnected) {
@@ -76,26 +83,18 @@ function ConnectForm({ confirmation }: { confirmation: Confirmation }) {
 	};
 
 	return (
-		<form onSubmit={connect}>
-			<p>{messages.intro}</p>
-			<fieldset>
+		<form className="stack" onSubmit={connect}>
+			<p className="muted">{messages.intro}</p>
+			<fieldset className="fs">
 				<legend>{messages.ownerLegend}</legend>
-				<input
-					id="github-owner-personal"
-					type="radio"
-					name="github-owner"
-					checked={!isOrganization}
-					onChange={() => setIsOrganization(false)}
-				/>
-				<label htmlFor="github-owner-personal">{messages.personal}</label>
-				<input
-					id="github-owner-organization"
-					type="radio"
-					name="github-owner"
-					checked={isOrganization}
-					onChange={() => setIsOrganization(true)}
-				/>
-				<label htmlFor="github-owner-organization">{messages.organization}</label>
+				<label className="t-check">
+					<input type="radio" name="github-owner" checked={!isOrganization} onChange={() => setIsOrganization(false)} />
+					<b>{messages.personal}</b>
+				</label>
+				<label className="t-check">
+					<input type="radio" name="github-owner" checked={isOrganization} onChange={() => setIsOrganization(true)} />
+					<b>{messages.organization}</b>
+				</label>
 			</fieldset>
 			{isOrganization && (
 				<TextField
@@ -108,10 +107,17 @@ function ConnectForm({ confirmation }: { confirmation: Confirmation }) {
 					error=""
 				/>
 			)}
-			{error && <p role="alert">{error}</p>}
-			<button type="submit" disabled={confirmation.isAwaiting}>
-				{messages.connect}
-			</button>
+			{error && (
+				<p className="t-error" role="alert">
+					{error}
+				</p>
+			)}
+			<div className="row">
+				<button className="t-btn primary" type="submit" disabled={confirmation.isAwaiting}>
+					<GitHubIcon />
+					{messages.connect}
+				</button>
+			</div>
 		</form>
 	);
 }
@@ -154,26 +160,44 @@ function ConnectedApp({ status, confirmation, onChange }: ConnectedAppProps) {
 
 	return (
 		<>
-			<p>{messages.connectedAs(status.app.slug ?? '', status.app.owner ?? '')}</p>
+			<div className="t-note ok">
+				<span className="t-state ok" aria-hidden="true" />
+				<div>
+					<p>{messages.connectedAs(status.app.slug ?? '', status.app.owner ?? '')}</p>
+				</div>
+			</div>
 			<Installation status={status} />
-			<p>
-				<a href={status.installUrl} rel="noreferrer">
+			<div className="row">
+				<a className="t-btn secondary" href={status.installUrl} rel="noreferrer">
+					<ExternalLinkIcon />
 					{messages.chooseRepositories}
 				</a>
-			</p>
-			<button type="button" onClick={refresh} disabled={isRefreshing}>
-				{isRefreshing ? messages.refreshing : messages.refresh}
-			</button>
-			<button type="button" onClick={disconnect} disabled={confirmation.isAwaiting}>
-				{messages.disconnect}
-			</button>
-			<p>
-				{messages.deleteHint}{' '}
-				<a href={status.settingsUrl} rel="noreferrer">
-					{messages.appOnGitHub}
-				</a>
-			</p>
-			{error && <p role="alert">{error}</p>}
+				<button className="t-btn quiet" type="button" onClick={refresh} disabled={isRefreshing}>
+					<RedeployIcon />
+					{isRefreshing ? messages.refreshing : messages.refresh}
+				</button>
+			</div>
+			{error && (
+				<p className="t-error" role="alert">
+					{error}
+				</p>
+			)}
+			<section className="card danger" aria-labelledby="github-disconnect-heading">
+				<h3 className="h3" id="github-disconnect-heading">
+					{messages.disconnectHeading}
+				</h3>
+				<p className="muted">
+					{messages.deleteHint}{' '}
+					<a className="t-link" href={status.settingsUrl} rel="noreferrer">
+						{messages.appOnGitHub}
+					</a>
+				</p>
+				<div className="row">
+					<button className="t-btn danger" type="button" onClick={disconnect} disabled={confirmation.isAwaiting}>
+						{messages.disconnect}
+					</button>
+				</div>
+			</section>
 		</>
 	);
 }
@@ -183,24 +207,35 @@ function Installation({ status }: { status: GitHubStatus }) {
 	const { installation, repositories } = status;
 
 	if (installation === null) {
-		return <p>{messages.notInstalled}</p>;
+		return <p className="muted">{messages.notInstalled}</p>;
 	}
 
 	if (installation.isSuspended) {
-		return <p role="alert">{messages.suspended(installation.account)}</p>;
+		return (
+			<p className="t-error" role="alert">
+				{messages.suspended(installation.account)}
+			</p>
+		);
 	}
 
 	return (
 		<>
 			<p>{messages.installedOn(installation.account)}</p>
 			{repositories.length === 0 ? (
-				<p>{messages.noRepositories}</p>
+				<p className="muted">{messages.noRepositories}</p>
 			) : (
-				<ul aria-label={messages.repositoriesLabel}>
+				<ul className="t-rows plain" aria-label={messages.repositoriesLabel}>
 					{repositories.map((repository) => (
-						<li key={repository.id}>
-							{repository.owner}/{repository.name}
-							{repository.isPrivate && ` (${messages.private})`}
+						<li key={repository.id} className="t-row">
+							<span className="name mono-s">
+								{repository.owner}/{repository.name}
+								{repository.isPrivate && (
+									<span className="t-chip">
+										<LockIcon />
+										{messages.private}
+									</span>
+								)}
+							</span>
 						</li>
 					))}
 				</ul>

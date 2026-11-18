@@ -29,24 +29,33 @@ export function EnvFilePaste({ drafts, onPaste }: EnvFilePasteProps) {
 	};
 
 	return (
-		<section aria-labelledby="env-paste-heading">
-			<h3 id="env-paste-heading">{messages.heading}</h3>
-			<label htmlFor="env-paste">{messages.label}</label>
-			<textarea
-				id="env-paste"
-				autoComplete="off"
-				spellCheck={false}
-				rows={6}
-				value={text}
-				onChange={(event) => setText(event.target.value)}
-				aria-describedby="env-paste-hint"
-			/>
-			<p id="env-paste-hint">{messages.hint}</p>
-			<button type="button" onClick={addToForm} disabled={text.trim() === ''}>
-				{messages.submit}
-			</button>
+		<section className="card" aria-labelledby="env-paste-heading">
+			<h3 className="h3" id="env-paste-heading">
+				{messages.heading}
+			</h3>
+			<div className="t-field">
+				<label htmlFor="env-paste">{messages.label}</label>
+				<textarea
+					className="t-input code"
+					id="env-paste"
+					autoComplete="off"
+					spellCheck={false}
+					rows={6}
+					value={text}
+					onChange={(event) => setText(event.target.value)}
+					aria-describedby="env-paste-hint"
+				/>
+				<span className="t-help" id="env-paste-hint">
+					{messages.hint}
+				</span>
+			</div>
+			<div className="row">
+				<button className="t-btn secondary" type="button" onClick={addToForm} disabled={text.trim() === ''}>
+					{messages.submit}
+				</button>
+			</div>
 			{report.map((line) => (
-				<p key={line} role="alert">
+				<p key={line} className="t-error" role="alert">
 					{line}
 				</p>
 			))}

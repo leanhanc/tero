@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 
+import { AuthCard } from '../../components/auth-card';
+import { FingerprintIcon } from '../../components/icons';
 import { errorMessage, getAccount, isConfirmationRequired } from '../../lib/utils/api';
 import { useMessages } from '../../lib/utils/locale';
 import { dismissPasskeyOffer, isCancelled, registerPasskey } from '../../lib/utils/passkeys';
@@ -23,7 +25,11 @@ export function PasskeyOfferPage({ onDone }: { onDone: () => void }) {
 	}, [onDone]);
 
 	if (!isReady) {
-		return <p>{messages.common.loading}</p>;
+		return (
+			<AuthCard>
+				<p className="muted">{messages.common.loading}</p>
+			</AuthCard>
+		);
 	}
 
 	const add = async () => {
@@ -45,17 +51,24 @@ export function PasskeyOfferPage({ onDone }: { onDone: () => void }) {
 	};
 
 	return (
-		<main>
-			<h1>{messages.passkeyOffer.heading}</h1>
-			<p>{messages.passkeyOffer.intro}</p>
-			{error && <p role="alert">{error}</p>}
-			<button type="button" onClick={add} disabled={isAdding}>
+		<AuthCard>
+			<h1 className="ah">{messages.passkeyOffer.heading}</h1>
+			<p className="muted">{messages.passkeyOffer.intro}</p>
+			<div className="finger">
+				<FingerprintIcon />
+			</div>
+			{error && (
+				<p className="t-error" role="alert">
+					{error}
+				</p>
+			)}
+			<button className="t-btn primary wide" type="button" onClick={add} disabled={isAdding}>
 				{messages.settings.passkeys.add}
 			</button>
-			<button type="button" onClick={skip}>
+			<button className="t-btn quiet wide" type="button" onClick={skip}>
 				{messages.passkeyOffer.notNow}
 			</button>
-		</main>
+		</AuthCard>
 	);
 }
 

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { DesktopIcon } from '../../../components/icons';
 import { endOtherSessions, endSession, errorMessage, type SessionInfo } from '../../../lib/utils/api';
 import { describeUserAgent } from '../../../lib/utils/browser-label';
 import { useFormatTime, useMessages } from '../../../lib/utils/locale';
@@ -30,36 +31,32 @@ export function SessionList({ sessions, confirmation }: SessionListProps) {
 	};
 
 	return (
-		<section aria-labelledby="sessions-heading">
-			<h2 id="sessions-heading">{messages.settings.sessions.heading}</h2>
-			<table>
-				<caption>{messages.settings.sessions.caption}</caption>
-				<thead>
-					<tr>
-						<th scope="col">{messages.settings.sessions.browserColumn}</th>
-						<th scope="col">{messages.settings.sessions.methodColumn}</th>
-						<th scope="col">{messages.settings.sessions.startedColumn}</th>
-						<th scope="col">{messages.settings.sessions.lastUsedColumn}</th>
-						<th scope="col">{messages.settings.sessions.ipColumn}</th>
-						<th scope="col">{messages.settings.sessions.actionsColumn}</th>
-					</tr>
-				</thead>
-				<tbody>
-					{sessions.map((session) => (
-						<SessionRow
-							key={session.id}
-							session={session}
-							isDisabled={confirmation.isAwaiting}
-							onEnd={() => run(() => endSession(session.id))}
-						/>
-					))}
-				</tbody>
-			</table>
-			{error && <p role="alert">{error}</p>}
+		<section className="stack" aria-labelledby="sessions-heading">
+			<h2 className="h2" id="sessions-heading">
+				{messages.settings.sessions.heading}
+			</h2>
+			<p className="muted">{messages.settings.sessions.caption}</p>
+			<ul className="t-rows plain" aria-label={messages.settings.sessions.caption}>
+				{sessions.map((session) => (
+					<SessionRow
+						key={session.id}
+						session={session}
+						isDisabled={confirmation.isAwaiting}
+						onEnd={() => run(() => endSession(session.id))}
+					/>
+				))}
+			</ul>
+			{error && (
+				<p className="t-error" role="alert">
+					{error}
+				</p>
+			)}
 			{hasOtherSessions && (
-				<button type="button" onClick={() => run(endOtherSessions)} disabled={confirmation.isAwaiting}>
-					{messages.settings.sessions.endOthers}
-				</button>
+				<div className="row">
+					<button className="t-btn secondary" type="button" onClick={() => run(endOtherSessions)} disabled={confirmation.isAwaiting}>
+						{messages.settings.sessions.endOthers}
+					</button>
+				</div>
 			)}
 		</section>
 	);
@@ -79,18 +76,17 @@ function SessionRow({ session, isDisabled, onEnd }: SessionRowProps) {
 	const ip = hasMovedIP ? messages.settings.sessions.ipChanged(session.loginIP, session.lastIP) : session.loginIP;
 
 	return (
-		<tr>
-			<th scope="row">
+		<li className="t-row">
+			<span className="name">
+				<DesktopIcon />
 				{browser}
-				{session.isCurrent && <> ({messages.settings.sessions.current})</>}
-			</th>
-			<td>{messages.settings.sessions.methods[session.method]}</td>
-			<td>{formatTime(new Date(session.createdAt))}</td>
-			<td>{formatTime(new Date(session.lastSeenAt))}</td>
-			<td>{ip}</td>
-			<td>
-				{!session.isCurrent && (
+			</span>
+			{session.isCurrent ? (
+				<span className="t-chip">{messages.settings.sessions.current}</span>
+			) : (
+				<div className="acts">
 					<button
+						className="t-btn secondary sm"
 						type="button"
 						onClick={onEnd}
 						disabled={isDisabled}
@@ -98,9 +94,14 @@ function SessionRow({ session, isDisabled, onEnd }: SessionRowProps) {
 					>
 						{messages.settings.sessions.end}
 					</button>
-				)}
-			</td>
-		</tr>
+				</div>
+			)}
+			<span className="meta">
+				{messages.settings.sessions.methods[session.method]} · {messages.settings.sessions.startedColumn}{' '}
+				{formatTime(new Date(session.createdAt))} · {messages.settings.sessions.lastUsedColumn} {formatTime(new Date(session.lastSeenAt))} ·{' '}
+				<span className="mono-s">{ip}</span>
+			</span>
+		</li>
 	);
 }
 

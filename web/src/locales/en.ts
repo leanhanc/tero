@@ -7,15 +7,18 @@ import type { DeployState, LoginMethod } from '../lib/utils/api';
  */
 export const en = {
 	common: {
+		codeHint: 'The code your authenticator app shows right now.',
 		loading: 'Loading…',
 		saving: 'Saving…',
+		showPassword: 'Show the password',
+		hidePassword: 'Hide the password',
 	},
 	errors: {
 		generic: 'Something went wrong. Try again.',
 		unreachable: 'The server could not be reached. Check your connection and try again.',
 	},
 	header: {
-		home: 'Tero',
+		apps: 'Apps',
 		settings: 'Settings',
 		logOut: 'Log out',
 	},
@@ -25,6 +28,7 @@ export const en = {
 			'nip.io is a free public DNS service. It answers a name with an IP address in it, such as shop.203.0.113.10.nip.io, with that IP, so your app gets a working HTTPS address before you set up a domain of your own. Visitors connect straight to your server; no traffic goes through nip.io.',
 	},
 	setup: {
+		step: (step: number, total: number) => `Step ${step} of ${total}`,
 		heading: 'Set up your dashboard login',
 		missingToken: 'This page needs the setup link printed on the server. Run sudo tero reset-login there for a new one.',
 		password: {
@@ -35,22 +39,30 @@ export const en = {
 		},
 		authenticator: {
 			heading: 'Add Tero to your authenticator app',
-			scanInstructions: 'Scan this QR code with an authenticator app, such as 1Password, Bitwarden or Google Authenticator.',
+			scanInstructions: 'Scan this code with any app that makes 6-digit codes.',
+			appHint:
+				'If you use a password manager, you probably have one already. 1Password, Bitwarden, Apple Passwords, Google Authenticator and many more work.',
 			qrCodeAlt: 'QR code that adds Tero to an authenticator app',
-			manualKey: "Can't scan it? Enter this key in the app instead:",
-			codeLabel: '6-digit code from the app',
+			manualKey: "Can't scan it?",
+			manualKeyIntro: 'Enter this key in the app instead:',
+			codeLabel: '6-digit code',
 			submit: 'Finish setup',
 		},
 	},
 	login: {
-		heading: 'Log in to Tero',
+		heading: 'Log in',
 		passwordLabel: 'Password',
-		codeLabel: '6-digit code from your authenticator app',
+		codeLabel: '6-digit code',
 		submit: 'Log in',
 		passkey: {
-			submit: 'Log in with a passkey',
-			orPassword: 'Or log in with your password and a code:',
+			submit: 'Use a passkey',
+			orPassword: 'or with your password',
 			failed: "The passkey couldn't be used. Try again, or log in with your password and a code.",
+		},
+		help: {
+			summary: 'Trouble logging in?',
+			beforeCommand: 'If the password or the authenticator app is lost, a new login can be created by running',
+			afterCommand: 'on the server.',
 		},
 		notSetUp: {
 			beforeInit: "The dashboard login isn't set up yet. Open the setup link printed on the server by",
@@ -72,6 +84,11 @@ export const en = {
 		backToSettings: 'Back to Settings',
 	},
 	settings: {
+		tabs: {
+			github: 'GitHub',
+			access: 'Access',
+			sessions: 'Sessions',
+		},
 		heading: 'Settings',
 		github: {
 			heading: 'GitHub',
@@ -94,14 +111,15 @@ export const en = {
 			refresh: 'Refresh the list',
 			refreshing: 'Refreshing…',
 			disconnect: 'Disconnect',
+			disconnectHeading: 'Disconnect GitHub',
 			deleteHint: 'Disconnecting removes the App from this server. To delete it on GitHub too, open',
 			appOnGitHub: 'the App on GitHub',
 		},
 		confirm: {
-			heading: "Confirm it's you",
+			heading: 'Confirm your identity',
 			intro: "Ending sessions, changing passkeys, connecting or disconnecting GitHub, and changing an app's sealed variables need your password and a new code from your authenticator app. It lasts 5 minutes.",
 			passwordLabel: 'Password',
-			codeLabel: '6-digit code from your authenticator app',
+			codeLabel: '6-digit code',
 			submit: 'Confirm',
 			cancel: 'Cancel',
 			addPasskeyNow: "You're confirmed. Press Add a passkey to create it.",
@@ -109,7 +127,7 @@ export const en = {
 		password: {
 			heading: 'Password',
 			currentLabel: 'Current password',
-			codeLabel: '6-digit code from your authenticator app',
+			codeLabel: '6-digit code',
 			newLabel: 'New password',
 			newHint: 'At least 8 characters, without "tero", "admin" or this server\'s address.',
 			endOthers: 'End every other session',
@@ -121,10 +139,8 @@ export const en = {
 			intro: 'A passkey logs you in without your password or a code. Your password and authenticator app keep working.',
 			caption: 'Your passkeys',
 			empty: 'No passkeys yet.',
-			nameColumn: 'Name',
 			addedColumn: 'Added',
 			lastUsedColumn: 'Last used',
-			actionsColumn: 'Actions',
 			neverUsed: 'Never',
 			nameLabel: 'Passkey name',
 			defaultName: 'Passkey',
@@ -142,12 +158,8 @@ export const en = {
 		sessions: {
 			heading: 'Active sessions',
 			caption: 'Where you are logged in, newest first',
-			browserColumn: 'Browser',
-			methodColumn: 'Logged in with',
 			startedColumn: 'Started',
 			lastUsedColumn: 'Last used',
-			ipColumn: 'IP address',
-			actionsColumn: 'Actions',
 			current: 'This browser',
 			end: 'End',
 			endOthers: 'End all other sessions',
@@ -166,13 +178,23 @@ export const en = {
 		apps: {
 			label: 'Your apps',
 			deployNew: 'Deploy a new app',
-			empty: 'No apps yet. Deploy one from a public GitHub repository to get started.',
-			appColumn: 'App',
-			addressColumn: 'Address',
-			latestDeployColumn: 'Latest deploy',
+			emptyHeading: 'No apps yet',
+			emptyBody: 'Tero builds your app from a GitHub repository and gives it its own HTTPS address.',
+			addressNote: 'Every app gets an HTTPS address from nip.io before you have a domain of your own.',
+		},
+		nextStep: {
+			fixHeading: (name: string) => `Next step: fix ${name}`,
+			fixBody: "Its latest deploy failed. The log says what happened; it's usually a missing value or an error in the code.",
+			viewLog: 'See the log',
+			firstHeading: 'Next step: your first app',
+			firstBody: 'If your code is in a public repository, paste its address and you are done. For private repositories, connect GitHub in Settings first.',
+			connectGitHub: 'Connect GitHub',
 		},
 	},
 	newApp: {
+		crumb: 'New',
+		advanced: 'Advanced options',
+		cancel: 'Cancel',
 		heading: 'Deploy a new app',
 		intro: 'Tero builds the app from a GitHub repository and gives it its own HTTPS address.',
 		repository: {
@@ -201,15 +223,30 @@ export const en = {
 			hint: "Lowercase letters, digits and hyphens. It can't be changed later.",
 		},
 		rootDirectory: {
-			label: 'Folder in the repository (optional)',
+			label: 'Folder in the repository',
 			hint: 'Leave empty unless the app lives in a subfolder, such as apps/api.',
 		},
 		submit: 'Create and deploy',
 		submitting: 'Checking the repository…',
 	},
 	app: {
+		tabs: {
+			summary: 'Summary',
+			deploys: 'Deploys',
+			variables: 'Variables',
+			settings: 'Settings',
+		},
+		openApp: 'Open app',
+		copy: 'Copy',
+		copied: 'Copied',
+		copyLabel: (name: string) => `Copy the address of ${name}`,
+		latestDeploy: 'Latest deploy',
+		allDeploys: 'See all deploys',
+		settingsCards: {
+			name: 'Name',
+			deploys: 'Deploys',
+		},
 		summary: {
-			address: 'Address',
 			repository: 'Repository',
 			branch: 'Branch',
 			folder: 'Folder',
@@ -221,24 +258,20 @@ export const en = {
 		redeploy: {
 			label: 'Redeploy',
 			submit: 'Redeploy',
-			hint: "Builds and deploys the branch's latest commit.",
 			runningHint: 'A deploy is running. Redeploying queues another one after it.',
 			queued: 'Queued',
 			queuedHint: 'A deploy is queued. It builds the branch\'s latest commit when it starts.',
 		},
 		deployOnPush: {
-			sectionLabel: 'Deploy on push',
 			label: 'Deploy every new commit on the branch',
 			hint: 'When off, pushes deploy nothing and only Redeploy does.',
 		},
 		displayName: {
-			formLabel: 'App name',
-			label: 'Name',
+			label: 'App name',
 			hint: "What the dashboard calls the app. Changing it doesn't change the address.",
 			submit: 'Save name',
 		},
 		runTogether: {
-			sectionLabel: 'Deploy settings',
 			label: 'Run old and new releases together during deploys',
 			hint: "When on, the new release starts next to the old one and takes over once it answers. Turn it off for apps that can't run twice at once: the old release then stops first, so the app is briefly down. Either way, if the new release fails, the old one keeps serving.",
 		},
@@ -312,9 +345,6 @@ export const en = {
 		deploys: {
 			empty: 'No deploys yet.',
 			caption: 'Deploys, newest first',
-			startedColumn: 'Started',
-			commitColumn: 'Commit',
-			triggerColumn: 'Started by',
 			triggers: {
 				create: 'Creating the app',
 				manual: 'Redeploy',
@@ -323,8 +353,6 @@ export const en = {
 				poll: 'A new commit on the branch',
 				variables: 'Redeploying saved variables',
 			},
-			stateColumn: 'State',
-			logColumn: 'Log',
 			commitNotFetched: 'Not fetched yet',
 			showLog: 'Show log',
 		},

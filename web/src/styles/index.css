@@ -1,0 +1,8 @@
+/* The Content-Security-Policy allows only stylesheets and fonts served by
+   Tero itself, so everything here is bundled: no inline styles, no font CDN. */
+@layer tokens, base, components, page;
+
+@import './tokens.css';
+@import './base.css';
+@import './components.css';
+@import './layout.css';

@@ -26,3 +26,22 @@ export function describeFailedStep(step: string, messages: DeployStateMessages):
 export function isInProgress(state: DeployState | ''): boolean {
 	return state === 'queued' || state === 'building' || state === 'starting';
 }
+
+/** The colour and icon a deploy state gets in the design: done, on its way, failed or nothing yet. */
+export type StateTone = 'ok' | 'busy' | 'err' | 'off';
+
+export function stateTone(state: DeployState | ''): StateTone {
+	if (state === 'live') {
+		return 'ok';
+	}
+
+	if (state === 'failed') {
+		return 'err';
+	}
+
+	if (isInProgress(state)) {
+		return 'busy';
+	}
+
+	return 'off';
+}

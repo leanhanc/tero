@@ -4,7 +4,7 @@ export function NotSetUpNotice() {
 	const messages = useMessages().login.notSetUp;
 
 	return (
-		<p>
+		<p className="muted">
 			{messages.beforeInit} <code>sudo tero init</code>
 			{messages.beforeReset} <code>sudo tero reset-login</code> {messages.afterReset}
 		</p>

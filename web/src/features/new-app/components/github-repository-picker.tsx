@@ -32,8 +32,12 @@ export function GitHubRepositoryPicker({ selectedID, onPick }: GitHubRepositoryP
 	const repositories = status?.repositories ?? [];
 	if (repositories.length === 0) {
 		return (
-			<p>
-				{messages.connectHint} <InternalLink to="/settings">{messages.settingsLink}</InternalLink>.
+			<p className="cap">
+				{messages.connectHint}{' '}
+				<InternalLink to="/settings" className="t-link">
+					{messages.settingsLink}
+				</InternalLink>
+				.
 			</p>
 		);
 	}
@@ -46,9 +50,9 @@ export function GitHubRepositoryPicker({ selectedID, onPick }: GitHubRepositoryP
 	};
 
 	return (
-		<>
+		<div className="t-field">
 			<label htmlFor="github-repository">{messages.label}</label>
-			<select id="github-repository" value={selectedID ?? ''} onChange={(event) => pick(event.target.value)}>
+			<select className="t-input" id="github-repository" value={selectedID ?? ''} onChange={(event) => pick(event.target.value)}>
 				<option value="">{messages.none}</option>
 				{repositories.map((repository) => (
 					<option key={repository.id} value={repository.id}>
@@ -57,6 +61,6 @@ export function GitHubRepositoryPicker({ selectedID, onPick }: GitHubRepositoryP
 					</option>
 				))}
 			</select>
-		</>
+		</div>
 	);
 }

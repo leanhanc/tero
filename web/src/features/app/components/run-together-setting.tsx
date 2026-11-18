@@ -24,17 +24,25 @@ export function RunTogetherSetting({ appName, runTogether, onChange }: RunTogeth
 	};
 
 	return (
-		<section aria-label={messages.app.runTogether.sectionLabel}>
-			<input
-				id="run-together"
-				type="checkbox"
-				checked={runTogether}
-				onChange={(event) => toggle(event.target.checked)}
-				aria-describedby="run-together-hint"
-			/>
-			<label htmlFor="run-together">{messages.app.runTogether.label}</label>
-			<p id="run-together-hint">{messages.app.runTogether.hint}</p>
-			{error && <p role="alert">{error}</p>}
-		</section>
+		<div className="stack">
+			<label className="t-switch">
+				<input
+					id="run-together"
+					type="checkbox"
+					role="switch"
+					checked={runTogether}
+					onChange={(event) => toggle(event.target.checked)}
+					aria-labelledby="run-together-label"
+					aria-describedby="run-together-hint"
+				/>
+				<b id="run-together-label">{messages.app.runTogether.label}</b>
+				<span id="run-together-hint">{messages.app.runTogether.hint}</span>
+			</label>
+			{error && (
+				<p className="t-error" role="alert">
+					{error}
+				</p>
+			)}
+		</div>
 	);
 }

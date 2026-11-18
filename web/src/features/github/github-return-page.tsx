@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { InternalLink } from '../../components/internal-link';
-import { PageHeader } from '../../components/page-header';
+import { AppShell } from '../../components/app-shell';
 import { errorMessage, finishGitHubConnection, getGitHub, refreshGitHub } from '../../lib/utils/api';
 import { waitForGitHubRequest } from '../../lib/utils/github';
 import { useMessages } from '../../lib/utils/locale';
@@ -41,20 +41,25 @@ export function GitHubReturnPage({ path, onLogout }: { path: string; onLogout: (
 	}, [path, isConnecting, messages]);
 
 	return (
-		<>
-			<PageHeader onLogout={onLogout} />
-			<main>
-				<h1>{messages.github.heading}</h1>
-				{outcome.isFailed ? (
-					<>
-						<p role="alert">{outcome.reason || messages.github.failed}</p>
-						<InternalLink to="/settings">{messages.github.backToSettings}</InternalLink>
-					</>
-				) : (
-					<p role="status">{workingMessage}</p>
-				)}
-			</main>
-		</>
+		<AppShell section="settings" onLogout={onLogout}>
+			<h1>{messages.github.heading}</h1>
+			{outcome.isFailed ? (
+				<>
+					<p className="t-error" role="alert">
+						{outcome.reason || messages.github.failed}
+					</p>
+					<div className="row">
+						<InternalLink to="/settings" className="t-btn secondary">
+							{messages.github.backToSettings}
+						</InternalLink>
+					</div>
+				</>
+			) : (
+				<p className="muted" role="status">
+					{workingMessage}
+				</p>
+			)}
+		</AppShell>
 	);
 }
 

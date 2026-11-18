@@ -59,8 +59,8 @@ function account(isConfirmed: boolean): Account {
 	};
 }
 
-function openSettings() {
-	window.history.replaceState(null, '', '/settings');
+function openSettings(tab: 'github' | 'access' | 'sessions') {
+	window.history.replaceState(null, '', `/settings?tab=${tab}`);
 }
 
 afterEach(() => {
@@ -70,7 +70,7 @@ afterEach(() => {
 
 describe('settings page', () => {
 	it('asks to confirm when ending a session, then ends it (v5.0.0-7.5.2)', async () => {
-		openSettings();
+		openSettings('sessions');
 		const calls = mockAPI({
 			'/api/state': [signedIn],
 			'/api/account': [
@@ -82,28 +82,29 @@ describe('settings page', () => {
 		});
 		render(<App />);
 
-		const sessions = await screen.findByRole('table', { name: /Where you are logged in/ });
-		expect(within(sessions).getByText('Firefox on macOS (This browser)')).toBeTruthy();
+		const sessions = await screen.findByRole('list', { name: /Where you are logged in/ });
+		expect(within(sessions).getByText('Firefox on macOS')).toBeTruthy();
+		expect(within(sessions).getByText('This browser')).toBeTruthy();
 		expect(within(sessions).getByText('curl/8.5.0')).toBeTruthy();
 		expect(within(sessions).getByText('192.0.2.81 (logged in from 192.0.2.80)')).toBeTruthy();
-		expect(screen.queryByRole('region', { name: "Confirm it's you" })).toBeNull();
+		expect(screen.queryByRole('region', { name: 'Confirm your identity' })).toBeNull();
 
 		await userEvent.click(screen.getByRole('button', { name: 'End: curl/8.5.0' }));
 		expect(calls.some((call) => call.path === '/api/sessions/end')).toBe(false);
 
-		const confirm = screen.getByRole('region', { name: "Confirm it's you" });
+		const confirm = screen.getByRole('region', { name: 'Confirm your identity' });
 		expect(within(confirm).getByLabelText('Password')).toBe(document.activeElement);
 		await userEvent.type(within(confirm).getByLabelText('Password'), 'a long enough passphrase');
-		await userEvent.type(within(confirm).getByLabelText('6-digit code from your authenticator app'), '123456');
+		await userEvent.type(within(confirm).getByLabelText('6-digit code'), '123456');
 		await userEvent.click(within(confirm).getByRole('button', { name: 'Confirm' }));
 
-		await screen.findByRole('table', { name: /Where you are logged in/ });
+		await screen.findByRole('list', { name: /Where you are logged in/ });
 		expect(calls.find((call) => call.path === '/api/sessions/end')?.body).toEqual({ id: 'other-id', isAllOthers: false });
-		expect(screen.queryByRole('region', { name: "Confirm it's you" })).toBeNull();
+		expect(screen.queryByRole('region', { name: 'Confirm your identity' })).toBeNull();
 	});
 
 	it('changes the password and ends other sessions by default (v5.0.0-6.2.3)', async () => {
-		openSettings();
+		openSettings('access');
 		const calls = mockAPI({
 			'/api/state': [signedIn],
 			'/api/account': [
@@ -124,7 +125,7 @@ describe('settings page', () => {
 		expect(within(form).getByLabelText('End every other session')).toHaveProperty('checked', true);
 
 		await userEvent.type(within(form).getByLabelText('Current password'), 'the current passphrase');
-		await userEvent.type(within(form).getByLabelText('6-digit code from your authenticator app'), '123456');
+		await userEvent.type(within(form).getByLabelText('6-digit code'), '123456');
 		await userEvent.type(newPassword, 'my tero passphrase');
 		await userEvent.click(within(form).getByRole('button', { name: 'Change password' }));
 
@@ -137,7 +138,7 @@ describe('settings page', () => {
 			isEndingOthers: true,
 		});
 
-		await userEvent.type(within(form).getByLabelText('6-digit code from your authenticator app'), '654321');
+		await userEvent.type(within(form).getByLabelText('6-digit code'), '654321');
 		await userEvent.clear(newPassword);
 		await userEvent.type(newPassword, 'an unrelated passphrase');
 		await userEvent.click(within(form).getByRole('button', { name: 'Change password' }));
@@ -145,19 +146,19 @@ describe('settings page', () => {
 	});
 
 	it('lists passkeys with their actions whether or not the session is confirmed', async () => {
-		openSettings();
+		openSettings('access');
 		mockAPI({ '/api/state': [signedIn], '/api/account': [{ status: 200, body: account(false) }] });
 		render(<App />);
 
-		const passkeys = await screen.findByRole('table', { name: 'Your passkeys' });
+		const passkeys = await screen.findByRole('list', { name: 'Your passkeys' });
 		expect(within(passkeys).getByText('Laptop')).toBeTruthy();
-		expect(within(passkeys).getByText('Never')).toBeTruthy();
+		expect(within(passkeys).getByText(/Last used: Never/)).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Remove Laptop' })).toBeTruthy();
-		expect(screen.queryByRole('region', { name: "Confirm it's you" })).toBeNull();
+		expect(screen.queryByRole('region', { name: 'Confirm your identity' })).toBeNull();
 	});
 
 	it('removes a passkey and ends other sessions by default (v5.0.0-7.4.3)', async () => {
-		openSettings();
+		openSettings('access');
 		const calls = mockAPI({
 			'/api/state': [signedIn],
 			'/api/account': [
@@ -176,7 +177,7 @@ describe('settings page', () => {
 	});
 
 	it('asks to confirm again when the confirmation ran out, then runs the action', async () => {
-		openSettings();
+		openSettings('sessions');
 		const calls = mockAPI({
 			'/api/state': [signedIn],
 			'/api/account': [
@@ -194,10 +195,10 @@ describe('settings page', () => {
 
 		await userEvent.click(await screen.findByRole('button', { name: 'End all other sessions' }));
 
-		const confirm = await screen.findByRole('region', { name: "Confirm it's you" });
+		const confirm = await screen.findByRole('region', { name: 'Confirm your identity' });
 		expect(screen.getByRole('button', { name: 'End: curl/8.5.0' })).toHaveProperty('disabled', true);
 		await userEvent.type(within(confirm).getByLabelText('Password'), 'a long enough passphrase');
-		await userEvent.type(within(confirm).getByLabelText('6-digit code from your authenticator app'), '123456');
+		await userEvent.type(within(confirm).getByLabelText('6-digit code'), '123456');
 		await userEvent.click(within(confirm).getByRole('button', { name: 'Confirm' }));
 
 		await screen.findByRole('button', { name: 'End all other sessions' });
@@ -207,7 +208,7 @@ describe('settings page', () => {
 	});
 
 	it('shows other refusals as errors without asking to confirm', async () => {
-		openSettings();
+		openSettings('sessions');
 		mockAPI({
 			'/api/state': [signedIn],
 			'/api/account': [{ status: 200, body: account(true) }],
@@ -218,11 +219,11 @@ describe('settings page', () => {
 		await userEvent.click(await screen.findByRole('button', { name: 'End all other sessions' }));
 
 		expect((await screen.findByRole('alert')).textContent).toBe('Cross-site requests are not allowed');
-		expect(screen.queryByRole('region', { name: "Confirm it's you" })).toBeNull();
+		expect(screen.queryByRole('region', { name: 'Confirm your identity' })).toBeNull();
 	});
 
 	it('asks for a fresh click to add a passkey after confirming, as Safari needs', async () => {
-		openSettings();
+		openSettings('access');
 		vi.stubGlobal(
 			'PublicKeyCredential',
 			class {
@@ -240,9 +241,9 @@ describe('settings page', () => {
 		render(<App />);
 
 		await userEvent.click(await screen.findByRole('button', { name: 'Add a passkey' }));
-		const confirm = screen.getByRole('region', { name: "Confirm it's you" });
+		const confirm = screen.getByRole('region', { name: 'Confirm your identity' });
 		await userEvent.type(within(confirm).getByLabelText('Password'), 'a long enough passphrase');
-		await userEvent.type(within(confirm).getByLabelText('6-digit code from your authenticator app'), '123456');
+		await userEvent.type(within(confirm).getByLabelText('6-digit code'), '123456');
 		await userEvent.click(within(confirm).getByRole('button', { name: 'Confirm' }));
 
 		expect((await screen.findByRole('status')).textContent).toBe("You're confirmed. Press Add a passkey to create it.");
@@ -273,7 +274,7 @@ describe('passkey offer after login', () => {
 		render(<App />);
 
 		await userEvent.type(await screen.findByLabelText('Password'), 'a long enough passphrase');
-		await userEvent.type(screen.getByLabelText('6-digit code from your authenticator app'), '123456');
+		await userEvent.type(screen.getByLabelText('6-digit code'), '123456');
 		await userEvent.click(screen.getByRole('button', { name: 'Log in' }));
 
 		expect(await screen.findByRole('heading', { name: 'Log in faster next time' })).toBeTruthy();
@@ -305,7 +306,7 @@ describe('passkey offer is skipped', () => {
 		render(<App />);
 
 		await userEvent.type(await screen.findByLabelText('Password'), 'a long enough passphrase');
-		await userEvent.type(screen.getByLabelText('6-digit code from your authenticator app'), '123456');
+		await userEvent.type(screen.getByLabelText('6-digit code'), '123456');
 		await userEvent.click(screen.getByRole('button', { name: 'Log in' }));
 	}
 
@@ -351,7 +352,7 @@ describe('passkey login', () => {
 		});
 		render(<App />);
 
-		await userEvent.click(await screen.findByRole('button', { name: 'Log in with a passkey' }));
+		await userEvent.click(await screen.findByRole('button', { name: 'Use a passkey' }));
 
 		expect(await screen.findByRole('heading', { name: 'Apps' })).toBeTruthy();
 		expect(get).toHaveBeenCalledWith({ publicKey: { parsed: { challenge: 'abc' } } });
@@ -367,13 +368,13 @@ describe('passkey login', () => {
 		render(<App />);
 
 		expect(await screen.findByLabelText('Password')).toBeTruthy();
-		expect(screen.queryByRole('button', { name: 'Log in with a passkey' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Use a passkey' })).toBeNull();
 	});
 });
 
 describe('GitHub section', () => {
 	it('confirms first, then sends the manifest to the organization on GitHub', async () => {
-		openSettings();
+		openSettings('github');
 		const calls = mockAPI({
 			'/api/state': [signedIn],
 			'/api/account': [{ status: 200, body: account(true) }],
@@ -400,7 +401,7 @@ describe('GitHub section', () => {
 	});
 
 	it('lists the repositories the App can read', async () => {
-		openSettings();
+		openSettings('github');
 		mockAPI({
 			'/api/state': [signedIn],
 			'/api/account': [{ status: 200, body: account(true) }],
@@ -420,7 +421,8 @@ describe('GitHub section', () => {
 		render(<App />);
 
 		const list = await screen.findByRole('list', { name: 'Repositories the App can read' });
-		expect(within(list).getByText('leanhanc/api (private)')).toBeTruthy();
+		expect(within(list).getByText('leanhanc/api')).toBeTruthy();
+		expect(within(list).getByText('private')).toBeTruthy();
 		expect(screen.getByRole('link', { name: 'the App on GitHub' }).getAttribute('href')).toBe('https://github.com/settings/apps/tero-dash');
 	});
 });

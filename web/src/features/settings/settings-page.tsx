@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { ConfirmForm } from '../../components/confirm-form';
-import { PageHeader } from '../../components/page-header';
+import { AppShell } from '../../components/app-shell';
+import { type Tab, TabPanel, Tabs, useTab } from '../../components/tabs';
 import { type Account, errorMessage, getAccount, isConfirmationRequired } from '../../lib/utils/api';
 import { useMessages } from '../../lib/utils/locale';
 import { GitHubSection } from './components/github-section';
@@ -30,25 +31,27 @@ export type Confirmation = {
 
 type PendingAction = { run: () => Promise<void>; needsFreshClick: boolean };
 
+const settingsTabs = ['github', 'access', 'sessions'] as const;
+type SettingsTab = (typeof settingsTabs)[number];
+
 /** The admin's password, passkeys and sessions. */
 export function SettingsPage({ onLogout }: { onLogout: () => void }) {
 	const messages = useMessages();
 	const [loaded, reload] = useAccount(messages.errors);
 
 	return (
-		<>
-			<PageHeader onLogout={onLogout} />
-			<main>
+		<AppShell section="settings" onLogout={onLogout}>
+			<div className="ph">
 				<h1>{messages.settings.heading}</h1>
-				<PasswordForm onChange={reload} />
-				<AccountSections loaded={loaded} onChange={reload} />
-			</main>
-		</>
+			</div>
+			<AccountSections loaded={loaded} onChange={reload} />
+		</AppShell>
 	);
 }
 
 function AccountSections({ loaded, onChange }: { loaded: LoadedAccount; onChange: () => void }) {
 	const messages = useMessages();
+	const [tab, setTab] = useTab(settingsTabs);
 	const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
 	const [error, setError] = useState('');
 	const [notice, setNotice] = useState('');
@@ -76,11 +79,15 @@ function AccountSections({ loaded, onChange }: { loaded: LoadedAccount; onChange
 	);
 
 	if (loaded === null) {
-		return <p>{messages.common.loading}</p>;
+		return <p className="muted">{messages.common.loading}</p>;
 	}
 
 	if ('error' in loaded) {
-		return <p role="alert">{loaded.error}</p>;
+		return (
+			<p className="t-error" role="alert">
+				{loaded.error}
+			</p>
+		);
 	}
 
 	const runPendingAction = async () => {
@@ -105,14 +112,32 @@ function AccountSections({ loaded, onChange }: { loaded: LoadedAccount; onChange
 
 	const { account } = loaded;
 	const confirmation: Confirmation = { confirmThen, isAwaiting: pendingAction !== null };
+	const tabs: Tab<SettingsTab>[] = settingsTabs.map((id) => ({ id, label: messages.settings.tabs[id] }));
+
 	return (
 		<>
+			<Tabs label={messages.settings.heading} tabs={tabs} selected={tab} onSelect={setTab} />
 			{pendingAction && <ConfirmForm onConfirm={runPendingAction} onCancel={() => setPendingAction(null)} />}
-			{error && <p role="alert">{error}</p>}
-			{notice && <p role="status">{notice}</p>}
-			<PasskeyList passkeys={account.passkeys} confirmation={confirmation} />
-			<SessionList sessions={account.sessions} confirmation={confirmation} />
-			<GitHubSection confirmation={confirmation} />
+			{error && (
+				<p className="t-error" role="alert">
+					{error}
+				</p>
+			)}
+			{notice && (
+				<p className="t-note ok" role="status">
+					{notice}
+				</p>
+			)}
+			<TabPanel id={tab}>
+				{tab === 'github' && <GitHubSection confirmation={confirmation} />}
+				{tab === 'access' && (
+					<>
+						<PasskeyList passkeys={account.passkeys} confirmation={confirmation} />
+						<PasswordForm onChange={onChange} />
+					</>
+				)}
+				{tab === 'sessions' && <SessionList sessions={account.sessions} confirmation={confirmation} />}
+			</TabPanel>
 		</>
 	);
 }

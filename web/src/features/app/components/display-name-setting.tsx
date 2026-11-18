@@ -35,7 +35,7 @@ export function DisplayNameSetting({ appName, displayName, onChange }: DisplayNa
 	};
 
 	return (
-		<form aria-label={messages.app.displayName.formLabel} onSubmit={save}>
+		<form className="stack" onSubmit={save}>
 			<TextField
 				id="display-name"
 				label={messages.app.displayName.label}
@@ -45,9 +45,11 @@ export function DisplayNameSetting({ appName, displayName, onChange }: DisplayNa
 				onChange={setDraft}
 				error={error}
 			/>
-			<button type="submit" disabled={isSaving || isUnchanged}>
-				{isSaving ? messages.common.saving : messages.app.displayName.submit}
-			</button>
+			<div className="row">
+				<button className="t-btn secondary" type="submit" disabled={isSaving || isUnchanged}>
+					{isSaving ? messages.common.saving : messages.app.displayName.submit}
+				</button>
+			</div>
 		</form>
 	);
 }

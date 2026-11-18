@@ -1,6 +1,7 @@
 import { type SubmitEvent, useState } from 'react';
 
 import { AccountNameField } from '../../../components/account-name-field';
+import { PasswordInput } from '../../../components/password-input';
 import { ApiError, beginSetup, type Enrolment, errorMessage } from '../../../lib/utils/api';
 import { useMessages } from '../../../lib/utils/locale';
 
@@ -40,28 +41,32 @@ export function PasswordStep({ token, onEnrolment, onLinkError }: PasswordStepPr
 
 	return (
 		<form onSubmit={submit}>
-			<h2>{messages.setup.password.heading}</h2>
+			<p className="stepn">{messages.setup.step(1, 2)}</p>
+			<h1 className="ah">{messages.setup.heading}</h1>
+			<h2 className="h2">{messages.setup.password.heading}</h2>
 			<AccountNameField />
-			<label htmlFor="password">{messages.setup.password.label}</label>
-			<input
-				id="password"
-				name="password"
-				type="password"
-				autoComplete="new-password"
-				required
-				minLength={8}
-				value={password}
-				onChange={(event) => setPassword(event.target.value)}
-				aria-describedby={describedBy}
-				aria-invalid={hasError}
-			/>
-			<p id="password-hint">{messages.setup.password.hint}</p>
-			{hasError && (
-				<p id="password-error" role="alert">
-					{passwordError}
-				</p>
-			)}
-			<button type="submit" disabled={isSubmitting}>
+			<div className="t-field">
+				<label htmlFor="password">{messages.setup.password.label}</label>
+				<PasswordInput
+					id="password"
+					name="password"
+					autoComplete="new-password"
+					minLength={8}
+					value={password}
+					onChange={setPassword}
+					describedBy={describedBy}
+					isInvalid={hasError}
+				/>
+				<span className="t-help" id="password-hint">
+					{messages.setup.password.hint}
+				</span>
+				{hasError && (
+					<span className="t-error" id="password-error" role="alert">
+						{passwordError}
+					</span>
+				)}
+			</div>
+			<button className="t-btn primary wide" type="submit" disabled={isSubmitting}>
 				{messages.setup.password.submit}
 			</button>
 		</form>

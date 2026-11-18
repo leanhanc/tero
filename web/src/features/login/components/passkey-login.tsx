@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { FingerprintIcon } from '../../../components/icons';
 import { beginPasskeyLogin, errorMessage, finishPasskeyLogin } from '../../../lib/utils/api';
 import { useMessages } from '../../../lib/utils/locale';
 import { getPasskey, isCancelled, isPasskeySupported } from '../../../lib/utils/passkeys';
@@ -40,11 +41,18 @@ export function PasskeyLogin({ onLogin }: { onLogin: () => void }) {
 
 	return (
 		<>
-			<button type="button" onClick={logIn} disabled={isLoggingIn}>
+			<button className="t-btn primary wide" type="button" onClick={logIn} disabled={isLoggingIn}>
+				<FingerprintIcon />
 				{messages.login.passkey.submit}
 			</button>
-			{error && <p role="alert">{error}</p>}
-			<p>{messages.login.passkey.orPassword}</p>
+			{error && (
+				<p className="t-error" role="alert">
+					{error}
+				</p>
+			)}
+			<p className="or">
+				<span>{messages.login.passkey.orPassword}</span>
+			</p>
 		</>
 	);
 }

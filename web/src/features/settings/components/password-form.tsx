@@ -4,6 +4,7 @@ import { AccountNameField } from '../../../components/account-name-field';
 import { ApiError, changePassword, errorMessage } from '../../../lib/utils/api';
 import { useMessages } from '../../../lib/utils/locale';
 import { CodeInput } from '../../../components/code-input';
+import { PasswordInput } from '../../../components/password-input';
 
 /**
  * Changes the password with the current one and a code in the same form, so
@@ -51,57 +52,71 @@ export function PasswordForm({ onChange }: { onChange: () => void }) {
 	const newPasswordDescription = hasNewPasswordError ? 'new-password-hint new-password-error' : 'new-password-hint';
 
 	return (
-		<section aria-labelledby="password-heading">
-			<h2 id="password-heading">{messages.settings.password.heading}</h2>
-			<form onSubmit={submit} aria-describedby={formError ? 'password-form-error' : undefined}>
+		<section className="card" aria-labelledby="password-heading">
+			<h2 className="h2" id="password-heading">
+				{messages.settings.password.heading}
+			</h2>
+			<form className="stack" onSubmit={submit} aria-describedby={formError ? 'password-form-error' : undefined}>
 				<AccountNameField />
-				<label htmlFor="current-password">{messages.settings.password.currentLabel}</label>
-				<input
-					id="current-password"
-					name="current-password"
-					type="password"
-					autoComplete="current-password"
-					required
-					value={currentPassword}
-					onChange={(event) => setCurrentPassword(event.target.value)}
-				/>
-				<label htmlFor="password-code">{messages.settings.password.codeLabel}</label>
-				<CodeInput id="password-code" value={code} onChange={setCode} />
-				<label htmlFor="new-password">{messages.settings.password.newLabel}</label>
-				<input
-					id="new-password"
-					name="new-password"
-					type="password"
-					autoComplete="new-password"
-					required
-					minLength={8}
-					value={newPassword}
-					onChange={(event) => setNewPassword(event.target.value)}
-					aria-describedby={newPasswordDescription}
-					aria-invalid={hasNewPasswordError}
-				/>
-				<p id="new-password-hint">{messages.settings.password.newHint}</p>
-				{hasNewPasswordError && (
-					<p id="new-password-error" role="alert">
-						{newPasswordError}
-					</p>
-				)}
-				<input
-					id="password-end-others"
-					type="checkbox"
-					checked={isEndingOthers}
-					onChange={(event) => setIsEndingOthers(event.target.checked)}
-				/>
-				<label htmlFor="password-end-others">{messages.settings.password.endOthers}</label>
+				<div className="grid2">
+					<div className="t-field">
+						<label htmlFor="current-password">{messages.settings.password.currentLabel}</label>
+						<PasswordInput
+							id="current-password"
+							name="current-password"
+							autoComplete="current-password"
+							value={currentPassword}
+							onChange={setCurrentPassword}
+						/>
+					</div>
+					<div className="t-field">
+						<label htmlFor="password-code">{messages.settings.password.codeLabel}</label>
+						<CodeInput id="password-code" value={code} onChange={setCode} describedBy="password-code-hint" />
+						<span className="t-help" id="password-code-hint">
+							{messages.common.codeHint}
+						</span>
+					</div>
+				</div>
+				<div className="t-field">
+					<label htmlFor="new-password">{messages.settings.password.newLabel}</label>
+					<PasswordInput
+						id="new-password"
+						name="new-password"
+						autoComplete="new-password"
+						minLength={8}
+						value={newPassword}
+						onChange={setNewPassword}
+						describedBy={newPasswordDescription}
+						isInvalid={hasNewPasswordError}
+					/>
+					<span className="t-help" id="new-password-hint">
+						{messages.settings.password.newHint}
+					</span>
+					{hasNewPasswordError && (
+						<span className="t-error" id="new-password-error" role="alert">
+							{newPasswordError}
+						</span>
+					)}
+				</div>
+				<label className="t-check">
+					<input type="checkbox" checked={isEndingOthers} onChange={(event) => setIsEndingOthers(event.target.checked)} />
+					<b>{messages.settings.password.endOthers}</b>
+				</label>
 				{formError && (
-					<p id="password-form-error" role="alert">
+					<p className="t-error" id="password-form-error" role="alert">
 						{formError}
 					</p>
 				)}
-				{isChanged && <p role="status">{messages.settings.password.changed}</p>}
-				<button type="submit" disabled={isSubmitting}>
-					{messages.settings.password.submit}
-				</button>
+				{isChanged && (
+					<p className="t-note ok" role="status">
+						{messages.settings.password.changed}
+					</p>
+				)}
+				<div className="row">
+					<button className="t-btn primary" type="submit" disabled={isSubmitting}>
+						{messages.settings.password.submit}
+					</button>
+				</div>
 			</form>
 		</section>
 	);

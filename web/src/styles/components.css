@@ -1,0 +1,134 @@
+/* Tero's components, copied from the design files' components.css. */
+@layer components {
+  /* Botones: una altura (36px) y una chica (30px) para filas */
+  .t-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: var(--control-h); padding: 0 16px; border-radius: var(--radius-lg); border: 1px solid transparent; font: var(--text-button); white-space: nowrap; cursor: pointer; transition-property: background-color, border-color, color, scale; transition-duration: 100ms; transition-timing-function: ease-out; }
+  .t-btn.sm { height: var(--control-h-sm); padding: 0 12px; font-size: 0.875rem; border-radius: var(--radius-md); }
+  .t-btn.primary { background: var(--accent); color: var(--on-accent); }
+  .t-btn.secondary { background: var(--surface); color: var(--text); border-color: var(--border-strong); }
+  .t-btn.quiet { background: transparent; color: var(--accent); padding-inline: 10px; }
+  .t-btn.danger { background: var(--surface); color: var(--err); border-color: var(--err-border); }
+  @media (hover: hover) {
+    .t-btn.primary:hover { background: var(--accent-hover); }
+    .t-btn.secondary:hover { border-color: var(--border-input); }
+    .t-btn.quiet:hover { background: var(--accent-soft); }
+    .t-btn.danger:hover { background: var(--err-soft); }
+  }
+  .t-btn.primary:active { background: var(--accent-pressed); }
+  @media (prefers-reduced-motion: no-preference) { .t-btn:not(:disabled):active { scale: 0.98; } }
+  .t-btn:disabled, .t-btn[aria-disabled="true"] { cursor: not-allowed; background: var(--surface-raised); color: var(--text-disabled); border-color: var(--border); }
+  .t-btn .spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; }
+  @media (prefers-reduced-motion: no-preference) { .t-btn .spin { animation: t-spin 0.9s linear infinite; } }
+  @keyframes t-spin { to { rotate: 360deg; } }
+
+  /* Foco: siempre visible con teclado */
+  :where(.t-btn, .t-input, .t-tab, .t-check input, .t-switch input, .t-link):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  /* Campos */
+  .t-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .t-field > label { font: var(--text-label); }
+  .t-input { font: 400 max(16px, 1rem)/1.4 var(--font-body); height: 40px; padding: 0 12px; border-radius: var(--radius-md); border: 1px solid var(--border-input); background: var(--surface); color: var(--text); min-width: 0; width: 100%; }
+  .t-input.code { font-family: var(--font-mono); }
+  textarea.t-input { height: auto; min-height: 96px; padding: 10px 12px; resize: vertical; }
+  .t-input::placeholder { color: var(--text-muted); }
+  .t-input[aria-invalid="true"] { border-color: var(--err); }
+  /* Contraseña con botón para ver u ocultar */
+  .t-pass { position: relative; display: flex; min-width: 0; }
+  .t-pass .t-input { padding-right: 44px; }
+  .t-pass button { position: absolute; top: 2px; right: 2px; width: 36px; height: 36px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer; }
+  .t-pass button svg { width: 20px; height: 20px; }
+  .t-pass button .hide, .t-pass button[aria-pressed="true"] .show { display: none; }
+  .t-pass button[aria-pressed="true"] .hide { display: block; }
+  @media (hover: hover) { .t-pass button:hover { color: var(--text); background: var(--surface-raised); } }
+  .t-pass button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+  .t-help { font: var(--text-small); color: var(--text-muted); }
+  .t-error { font: var(--text-small); color: var(--err); display: flex; gap: 6px; align-items: flex-start; }
+
+  /* Casilla e interruptor */
+  .t-check, .t-switch { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; align-items: start; cursor: pointer; }
+  .t-check input { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--accent); }
+  .t-check b, .t-switch b { font: var(--text-label); line-height: 1.4; }
+  .t-check span, .t-switch span { grid-column: 2; font: var(--text-small); color: var(--text-muted); }
+  .t-switch input { appearance: none; width: 34px; height: 20px; margin: 1px 0 0; border-radius: 999px; background: var(--border-input); position: relative; cursor: pointer; transition: background-color 150ms ease-out; }
+  .t-switch input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); transition: translate 150ms ease-out; }
+  .t-switch input:checked { background: var(--accent); }
+  .t-switch input:checked::after { translate: 14px 0; }
+
+  /* Estados: ícono + color + palabra */
+  .t-state { display: inline-flex; align-items: center; gap: 7px; font: 500 0.875rem/1.3 var(--font-body); white-space: nowrap; }
+  .t-state::before { content: ""; flex: none; width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; display: grid; place-items: center; font: 700 10px/1 var(--font-body); color: var(--surface); }
+  .t-state.ok { color: var(--ok); } .t-state.ok::before { content: "✓"; background: var(--ok); }
+  .t-state.busy { color: var(--busy); } .t-state.busy::before { border: 2px solid var(--busy); border-right-color: transparent; }
+  .t-state.err { color: var(--err); } .t-state.err::before { content: "!"; background: var(--err); }
+  .t-state.off { color: var(--text-muted); } .t-state.off::before { border: 2px solid var(--text-muted); }
+
+  /* Avisos */
+  .t-note { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: var(--radius-lg); border: 1px solid var(--border); background: var(--surface); }
+  .t-note > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .t-note b { font: var(--text-label); font-weight: 700; line-height: 1.4; }
+  .t-note p { margin: 0; font: var(--text-small); color: var(--text-muted); }
+  .t-note > .t-state { margin-top: 1px; }
+  .t-note > .t-state::before { width: 18px; height: 18px; font-size: 12px; }
+  .t-note.ok { background: var(--ok-soft); border-color: var(--ok-border); }
+  .t-note.err { background: var(--err-soft); border-color: var(--err-border); }
+  .t-note.busy { background: var(--busy-soft); border-color: var(--busy-border); }
+  .t-tip { display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; border-radius: var(--radius-lg); border: 1px solid var(--accent-border); background: var(--surface); box-shadow: 0 1px 2px color-mix(in oklab, var(--accent-border) 50%, transparent), 0 6px 20px color-mix(in oklab, var(--accent-border) 55%, transparent); }
+  .t-tip .head { display: flex; gap: 10px; align-items: center; }
+  .t-tip .mark { --mark-eye: var(--accent-soft); flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent-border); color: var(--accent); display: grid; place-items: center; }
+  .t-tip .mark svg { width: 22px; height: 22px; }
+  /* Logo de Tero: círculo relleno con el color de acento, distinto de la guía */
+  .t-logo { --mark-eye: var(--accent); flex: none; width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; }
+  .t-logo svg { width: 24px; height: 24px; }
+  .t-tip b { font: var(--text-section); }
+  .t-tip p { margin: 0; color: var(--text-muted); max-width: 65ch; }
+
+  /* Íconos: 18 px, color del texto que acompañan */
+  .t-btn svg, .t-nav a svg, .t-chip svg { flex: none; }
+  .t-btn svg { width: 18px; height: 18px; margin-inline-start: -2px; }
+  .t-btn.sm svg { width: 16px; height: 16px; }
+  .t-nav a { display: flex; align-items: center; gap: 10px; }
+  .t-nav a svg { width: 18px; height: 18px; }
+
+  /* Link */
+  .t-link { color: var(--accent); font-weight: 600; text-decoration: none; border-radius: 4px; }
+  @media (hover: hover) { .t-link:hover { text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: from-font; } }
+
+  /* Dirección para copiar */
+  .t-copy { display: flex; min-width: 0; }
+  .t-copy code { flex: 1; min-width: 0; display: flex; align-items: center; height: 36px; padding: 0 12px; border: 1px solid var(--border-strong); border-right: 0; border-radius: var(--radius-md) 0 0 var(--radius-md); background: var(--surface-raised); font: var(--text-mono); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .t-copy .t-btn { border-radius: 0 var(--radius-md) var(--radius-md) 0; height: 36px; }
+
+  /* Pestañas */
+  .t-tabs { display: flex; gap: 20px; border-bottom: 1px solid var(--border); overflow-x: auto; }
+  .t-tab { font: var(--text-label); color: var(--text-muted); background: none; border: 0; padding: 8px 0 10px; border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer; white-space: nowrap; }
+  .t-tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+
+  /* Menú lateral */
+  .t-nav { display: flex; flex-direction: column; gap: 2px; padding: 8px; background: var(--bg-sidebar); border-radius: var(--radius-lg); }
+  .t-nav a { padding: 7px 10px; border-radius: var(--radius-md); color: var(--text-muted); font: var(--text-label); text-decoration: none; border: 1px solid transparent; }
+  .t-nav a[aria-current="page"] { background: var(--surface); color: var(--text); font-weight: 600; border-color: var(--border); }
+  @media (hover: hover) { .t-nav a:not([aria-current]):hover { color: var(--text); } }
+
+  /* Fila de app y fila de variable */
+  .t-rows { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
+  .t-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; padding: 14px 16px; align-items: center; }
+  .t-row + .t-row { border-top: 1px solid var(--border); }
+  .t-row .name { font: var(--text-label); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .t-row .url { font: var(--text-mono); color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .t-row .meta { grid-column: 1 / -1; font: var(--text-small); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .t-row .acts { display: flex; gap: 8px; }
+  .t-chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: var(--radius-sm); background: var(--surface-raised); border: 1px solid var(--border); font: 500 0.875rem/1 var(--font-body); color: var(--text-muted); white-space: nowrap; }
+  .t-chip svg { width: 12px; height: 12px; }
+
+  /* Estado vacío */
+  .t-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 32px 20px; border: 1px dashed var(--border-strong); border-radius: var(--radius-lg); }
+  .t-empty b { font: var(--text-section); }
+  .t-empty p { margin: 0 0 8px; color: var(--text-muted); max-width: 44ch; }
+
+  /* Flotantes: aviso breve y confirmación */
+  .t-toast { display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 16px; border-radius: var(--radius-lg); background: var(--text); color: var(--bg); box-shadow: var(--shadow-float); font: var(--text-label); }
+  .t-toast .t-btn { height: 28px; color: var(--bg); background: transparent; border-color: color-mix(in oklab, var(--bg) 35%, transparent); }
+  .t-dialog { display: flex; flex-direction: column; gap: 14px; padding: 20px; border-radius: var(--radius-xl); background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-float); max-width: 440px; }
+  .t-dialog h4 { margin: 0; font: var(--text-section); }
+  .t-dialog p { margin: 0; color: var(--text-muted); }
+  .t-dialog .acts { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; margin-top: 8px; }
+}

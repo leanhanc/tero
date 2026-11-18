@@ -19,6 +19,7 @@ export function AddressHelp({ address }: { address: string }) {
 	return (
 		<>
 			<button
+				className="help-btn"
 				type="button"
 				aria-label={messages.addressHelp.label}
 				aria-expanded={isOpen}
@@ -28,7 +29,7 @@ export function AddressHelp({ address }: { address: string }) {
 				?
 			</button>
 			{isOpen && (
-				<p id={explanationID}>{messages.addressHelp.explanation}</p>
+				<p className="cap" id={explanationID}>{messages.addressHelp.explanation}</p>
 			)}
 		</>
 	);

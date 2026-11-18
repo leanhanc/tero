@@ -1,43 +1,75 @@
-import { AddressHelp } from '../../../components/address-help';
-import type { AppDetail } from '../../../lib/utils/api';
+import { BranchIcon, CommitIcon, FolderIcon, GitHubIcon } from '../../../components/icons';
+import type { AppDetail, Deploy } from '../../../lib/utils/api';
 import { useMessages } from '../../../lib/utils/locale';
+import { BuildLog } from './build-log';
 
-export function AppSummary({ app }: { app: AppDetail }) {
-	const { app: appMessages } = useMessages();
-	const messages = appMessages.summary;
-	const liveDeploy = app.deploys.find((deploy) => deploy.state === 'live');
-	const liveCommit = liveDeploy ? `${liveDeploy.commitSha.slice(0, 12)} ${liveDeploy.commitMessage}` : messages.nothingLive;
+type AppSummaryProps = {
+	app: AppDetail;
+	latestDeploy: Deploy | undefined;
+	onShowDeploys: () => void;
+};
+
+/** Where the app comes from, what is live, and the latest deploy's log. */
+export function AppSummary({ app, latestDeploy, onShowDeploys }: AppSummaryProps) {
+	const allMessages = useMessages();
+	const messages = allMessages.app;
 
 	return (
 		<>
-			{app.pollError && <p role="alert">{messages.pollStopped(app.pollError)}</p>}
-			{app.startProblem && <p role="alert">{app.startProblem}</p>}
-			<SummaryList app={app} liveCommit={liveCommit} />
+			<SourceFacts app={app} />
+			<h2 className="h2">{messages.latestDeploy}</h2>
+			{latestDeploy ? (
+				<BuildLog
+					key={latestDeploy.id}
+					deploy={latestDeploy}
+					action={
+						<button className="t-btn quiet sm" type="button" onClick={onShowDeploys}>
+							{messages.allDeploys}
+						</button>
+					}
+				/>
+			) : (
+				<p className="muted">{messages.deploys.empty}</p>
+			)}
 		</>
 	);
 }
 
-function SummaryList({ app, liveCommit }: { app: AppDetail; liveCommit: string }) {
+function SourceFacts({ app }: { app: AppDetail }) {
 	const messages = useMessages().app.summary;
+	const liveDeploy = app.deploys.find((deploy) => deploy.state === 'live');
+	const liveCommit = liveDeploy ? `${liveDeploy.commitSha.slice(0, 12)} ${liveDeploy.commitMessage}` : messages.nothingLive;
 
 	return (
-		<dl>
-			<dt>
-				{messages.address} <AddressHelp address={app.address} />
-			</dt>
-			<dd>
-				<a href={app.address} rel="noreferrer" target="_blank">
-					{app.address}
-				</a>
-			</dd>
-			<dt>{messages.repository}</dt>
-			<dd>{app.repository}</dd>
-			<dt>{messages.branch}</dt>
-			<dd>{app.branch}</dd>
-			<dt>{messages.folder}</dt>
-			<dd>{app.rootDirectory || messages.repositoryRoot}</dd>
-			<dt>{messages.liveCommit}</dt>
-			<dd>{liveCommit}</dd>
+		<dl className="facts">
+			<div>
+				<dt>
+					<GitHubIcon />
+					{messages.repository}
+				</dt>
+				<dd className="mono-s">{app.repository}</dd>
+			</div>
+			<div>
+				<dt>
+					<BranchIcon />
+					{messages.branch}
+				</dt>
+				<dd className="mono-s">{app.branch}</dd>
+			</div>
+			<div>
+				<dt>
+					<FolderIcon />
+					{messages.folder}
+				</dt>
+				<dd>{app.rootDirectory || messages.repositoryRoot}</dd>
+			</div>
+			<div>
+				<dt>
+					<CommitIcon />
+					{messages.liveCommit}
+				</dt>
+				<dd>{liveCommit}</dd>
+			</div>
 		</dl>
 	);
 }

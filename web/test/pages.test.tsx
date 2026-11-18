@@ -50,7 +50,7 @@ describe('setup page', () => {
 		expect(await screen.findByRole('img', { name: /QR code/ })).toBeTruthy();
 		expect(screen.getByText('ABC')).toBeTruthy();
 
-		const code = screen.getByLabelText('6-digit code from the app');
+		const code = screen.getByLabelText('6-digit code');
 		expect(code).toHaveProperty('autocomplete', 'one-time-code');
 		expect(code.getAttribute('inputmode')).toBe('numeric');
 	});
@@ -99,7 +99,7 @@ describe('login page', () => {
 
 		const password = await screen.findByLabelText('Password');
 		expect(password).toHaveProperty('autocomplete', 'current-password');
-		const code = screen.getByLabelText('6-digit code from your authenticator app');
+		const code = screen.getByLabelText('6-digit code');
 		expect(code).toHaveProperty('autocomplete', 'one-time-code');
 
 		await userEvent.type(password, 'a long enough passphrase');
@@ -127,7 +127,7 @@ describe('home page', () => {
 
 		await vi.advanceTimersByTimeAsync(30 * 60 * 1000 + 5 * 1000);
 
-		expect(await screen.findByRole('heading', { name: 'Log in to Tero' })).toBeTruthy();
+		expect(await screen.findByRole('heading', { name: 'Log in' })).toBeTruthy();
 		expect(screen.queryByRole('heading', { name: 'Apps' })).toBeNull();
 		vi.useRealTimers();
 	});

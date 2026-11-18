@@ -1,5 +1,6 @@
 import { type SubmitEvent, useState } from 'react';
 
+import { PlusIcon } from '../../../components/icons';
 import { errorMessage } from '../../../lib/utils/api';
 import { useMessages } from '../../../lib/utils/locale';
 import { isCancelled, isPasskeySupported, registerPasskey } from '../../../lib/utils/passkeys';
@@ -19,7 +20,7 @@ export function AddPasskeyForm({ isEndingOthers, confirmation, onAdd }: AddPassk
 	const [isAdding, setIsAdding] = useState(false);
 
 	if (!isPasskeySupported()) {
-		return <p>{messages.settings.passkeys.unsupported}</p>;
+		return <p className="muted">{messages.settings.passkeys.unsupported}</p>;
 	}
 
 	const add = async () => {
@@ -46,24 +47,30 @@ export function AddPasskeyForm({ isEndingOthers, confirmation, onAdd }: AddPassk
 	};
 
 	return (
-		<form onSubmit={submit} aria-describedby={error ? 'add-passkey-error' : undefined}>
-			<label htmlFor="new-passkey-name">{messages.settings.passkeys.nameLabel}</label>
-			<input
-				id="new-passkey-name"
-				type="text"
-				required
-				maxLength={64}
-				value={name}
-				onChange={(event) => setName(event.target.value)}
-			/>
+		<form className="stack" onSubmit={submit} aria-describedby={error ? 'add-passkey-error' : undefined}>
+			<div className="t-field">
+				<label htmlFor="new-passkey-name">{messages.settings.passkeys.nameLabel}</label>
+				<input
+					className="t-input"
+					id="new-passkey-name"
+					type="text"
+					required
+					maxLength={64}
+					value={name}
+					onChange={(event) => setName(event.target.value)}
+				/>
+			</div>
 			{error && (
-				<p id="add-passkey-error" role="alert">
+				<p className="t-error" id="add-passkey-error" role="alert">
 					{error}
 				</p>
 			)}
-			<button type="submit" disabled={isAdding || confirmation.isAwaiting}>
-				{messages.settings.passkeys.add}
-			</button>
+			<div className="row">
+				<button className="t-btn secondary" type="submit" disabled={isAdding || confirmation.isAwaiting}>
+					<PlusIcon />
+					{messages.settings.passkeys.add}
+				</button>
+			</div>
 		</form>
 	);
 }

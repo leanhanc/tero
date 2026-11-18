@@ -24,17 +24,25 @@ export function DeployOnPushSetting({ appName, deployOnPush, onChange }: DeployO
 	};
 
 	return (
-		<section aria-label={messages.app.deployOnPush.sectionLabel}>
-			<input
-				id="deploy-on-push"
-				type="checkbox"
-				checked={deployOnPush}
-				onChange={(event) => toggle(event.target.checked)}
-				aria-describedby="deploy-on-push-hint"
-			/>
-			<label htmlFor="deploy-on-push">{messages.app.deployOnPush.label}</label>
-			<p id="deploy-on-push-hint">{messages.app.deployOnPush.hint}</p>
-			{error && <p role="alert">{error}</p>}
-		</section>
+		<div className="stack">
+			<label className="t-switch">
+				<input
+					id="deploy-on-push"
+					type="checkbox"
+					role="switch"
+					checked={deployOnPush}
+					onChange={(event) => toggle(event.target.checked)}
+					aria-labelledby="deploy-on-push-label"
+					aria-describedby="deploy-on-push-hint"
+				/>
+				<b id="deploy-on-push-label">{messages.app.deployOnPush.label}</b>
+				<span id="deploy-on-push-hint">{messages.app.deployOnPush.hint}</span>
+			</label>
+			{error && (
+				<p className="t-error" role="alert">
+					{error}
+				</p>
+			)}
+		</div>
 	);
 }

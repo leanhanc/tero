@@ -19,7 +19,7 @@ const emptyApp: NewApp = { repository: '', branch: '', displayName: '', name: ''
  * yet. The address follows the name until the admin edits it. The server
  * checks every field again.
  */
-export function NewAppForm({ onCreated }: { onCreated: (name: string) => void }) {
+export function NewAppForm({ onCreated, onCancel }: { onCreated: (name: string) => void; onCancel: () => void }) {
 	const messages = useMessages();
 	const formMessages = messages.newApp;
 	const [newApp, setNewApp] = useState<NewApp>(emptyApp);
@@ -113,61 +113,83 @@ export function NewAppForm({ onCreated }: { onCreated: (name: string) => void })
 	const hasAddressPreview = appDomain !== '' && newApp.name !== '';
 	const addressPreview = hasAddressPreview ? formMessages.address.preview(`https://${newApp.name}.${appDomain}`) : '';
 	const addressHint = `${addressPreview}${formMessages.address.hint}`;
+	const addressSuffix = appDomain ? `.${appDomain}` : undefined;
+	// A folder set, or one the server rejected, keeps the advanced options open.
+	const hasRootDirectory = newApp.rootDirectory !== '' || fieldErrors.rootDirectory !== undefined;
 
 	return (
-		<form onSubmit={submit}>
+		<form className="card form" onSubmit={submit}>
 			<TextField
 				id="repository"
 				label={formMessages.repository.label}
 				placeholder={formMessages.repository.placeholder}
 				hint={formMessages.repository.hint}
 				isRequired
+				isCode
 				value={newApp.repository}
 				onChange={setRepositoryURL}
 				onBlur={fillFromRepository}
 				error={fieldErrors.repository ?? ''}
 			/>
 			<GitHubRepositoryPicker selectedID={newApp.githubRepositoryId} onPick={pickRepository} />
-			<TextField
-				id="branch"
-				label={formMessages.branch.label}
-				hint={formMessages.branch.hint}
-				isRequired
-				value={newApp.branch}
-				onChange={setField('branch')}
-				error={fieldErrors.branch ?? ''}
-			/>
-			<TextField
-				id="displayName"
-				label={formMessages.displayName.label}
-				hint={formMessages.displayName.hint}
-				isRequired
-				value={newApp.displayName}
-				onChange={setDisplayName}
-				error={fieldErrors.displayName ?? ''}
-			/>
+			<div className="grid2">
+				<TextField
+					id="branch"
+					label={formMessages.branch.label}
+					hint={formMessages.branch.hint}
+					isRequired
+					isCode
+					value={newApp.branch}
+					onChange={setField('branch')}
+					error={fieldErrors.branch ?? ''}
+				/>
+				<TextField
+					id="displayName"
+					label={formMessages.displayName.label}
+					hint={formMessages.displayName.hint}
+					isRequired
+					value={newApp.displayName}
+					onChange={setDisplayName}
+					error={fieldErrors.displayName ?? ''}
+				/>
+			</div>
 			<TextField
 				id="name"
 				label={formMessages.address.label}
 				hint={addressHint}
 				isRequired
+				isCode
+				suffix={addressSuffix}
 				value={newApp.name}
 				onChange={setAddress}
 				error={fieldErrors.name ?? ''}
 			/>
 			<AddressHelp address={appDomain} />
-			<TextField
-				id="rootDirectory"
-				label={formMessages.rootDirectory.label}
-				hint={formMessages.rootDirectory.hint}
-				value={newApp.rootDirectory}
-				onChange={setField('rootDirectory')}
-				error={fieldErrors.rootDirectory ?? ''}
-			/>
-			{formError && <p role="alert">{formError}</p>}
-			<button type="submit" disabled={isSubmitting}>
-				{isSubmitting ? formMessages.submitting : formMessages.submit}
-			</button>
+			<details className="more" open={hasRootDirectory || undefined}>
+				<summary>{formMessages.advanced}</summary>
+				<TextField
+					id="rootDirectory"
+					label={formMessages.rootDirectory.label}
+					hint={formMessages.rootDirectory.hint}
+					isCode
+					value={newApp.rootDirectory}
+					onChange={setField('rootDirectory')}
+					error={fieldErrors.rootDirectory ?? ''}
+				/>
+			</details>
+			{formError && (
+				<p className="t-error" role="alert">
+					{formError}
+				</p>
+			)}
+			<div className="row">
+				<button className="t-btn primary" type="submit" disabled={isSubmitting}>
+					{isSubmitting ? formMessages.submitting : formMessages.submit}
+				</button>
+				<button className="t-btn quiet" type="button" onClick={onCancel}>
+					{formMessages.cancel}
+				</button>
+			</div>
 		</form>
 	);
 }

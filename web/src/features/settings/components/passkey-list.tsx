@@ -2,6 +2,7 @@ import { type SubmitEvent, useState } from 'react';
 
 import { errorMessage, type PasskeyInfo, removePasskey, renamePasskey } from '../../../lib/utils/api';
 import { useFormatTime, useMessages } from '../../../lib/utils/locale';
+import { FingerprintIcon } from '../../../components/icons';
 import type { Confirmation } from '../settings-page';
 import { AddPasskeyForm } from './add-passkey-form';
 
@@ -38,44 +39,40 @@ export function PasskeyList({ passkeys, confirmation }: PasskeyListProps) {
 		});
 
 	return (
-		<section aria-labelledby="passkeys-heading">
-			<h2 id="passkeys-heading">{messages.settings.passkeys.heading}</h2>
-			<p>{messages.settings.passkeys.intro}</p>
+		<section className="card" aria-labelledby="passkeys-heading">
+			<h2 className="h2" id="passkeys-heading">
+				{messages.settings.passkeys.heading}
+			</h2>
+			<p className="muted">{messages.settings.passkeys.intro}</p>
 			{passkeys.length === 0 ? (
-				<p>{messages.settings.passkeys.empty}</p>
+				<p className="muted">{messages.settings.passkeys.empty}</p>
 			) : (
-				<table>
-					<caption>{messages.settings.passkeys.caption}</caption>
-					<thead>
-						<tr>
-							<th scope="col">{messages.settings.passkeys.nameColumn}</th>
-							<th scope="col">{messages.settings.passkeys.addedColumn}</th>
-							<th scope="col">{messages.settings.passkeys.lastUsedColumn}</th>
-							<th scope="col">{messages.settings.passkeys.actionsColumn}</th>
-						</tr>
-					</thead>
-					<tbody>
-						{passkeys.map((passkey) => (
-							<PasskeyRow
-								key={passkey.id}
-								passkey={passkey}
-								isDisabled={confirmation.isAwaiting}
-								onRename={(name) => run(() => renamePasskey(passkey.id, name))}
-								onRemove={() => remove(passkey)}
-							/>
-						))}
-					</tbody>
-				</table>
+				<ul className="t-rows plain" aria-label={messages.settings.passkeys.caption}>
+					{passkeys.map((passkey) => (
+						<PasskeyRow
+							key={passkey.id}
+							passkey={passkey}
+							isDisabled={confirmation.isAwaiting}
+							onRename={(name) => run(() => renamePasskey(passkey.id, name))}
+							onRemove={() => remove(passkey)}
+						/>
+					))}
+				</ul>
 			)}
-			{error && <p role="alert">{error}</p>}
-			{status && <p role="status">{status}</p>}
-			<input
-				id="passkey-end-others"
-				type="checkbox"
-				checked={isEndingOthers}
-				onChange={(event) => setIsEndingOthers(event.target.checked)}
-			/>
-			<label htmlFor="passkey-end-others">{messages.settings.passkeys.endOthers}</label>
+			{error && (
+				<p className="t-error" role="alert">
+					{error}
+				</p>
+			)}
+			{status && (
+				<p className="t-note ok" role="status">
+					{status}
+				</p>
+			)}
+			<label className="t-check">
+				<input type="checkbox" checked={isEndingOthers} onChange={(event) => setIsEndingOthers(event.target.checked)} />
+				<b>{messages.settings.passkeys.endOthers}</b>
+			</label>
 			<AddPasskeyForm
 				isEndingOthers={isEndingOthers}
 				confirmation={confirmation}
@@ -99,34 +96,37 @@ function PasskeyRow({ passkey, isDisabled, onRename, onRemove }: PasskeyRowProps
 	const lastUsed = passkey.lastUsedAt ? formatTime(new Date(passkey.lastUsedAt)) : messages.settings.passkeys.neverUsed;
 
 	return (
-		<tr>
-			<th scope="row">
-				{isRenaming ? (
-					<RenameForm
-						passkey={passkey}
-						onSave={async (name) => {
-							await onRename(name);
-							setIsRenaming(false);
-						}}
-						onCancel={() => setIsRenaming(false)}
-					/>
-				) : (
-					passkey.name
-				)}
-			</th>
-			<td>{formatTime(new Date(passkey.createdAt))}</td>
-			<td>{lastUsed}</td>
-			<td>
+		<li className="t-row">
+			{isRenaming ? (
+				<RenameForm
+					passkey={passkey}
+					onSave={async (name) => {
+						await onRename(name);
+						setIsRenaming(false);
+					}}
+					onCancel={() => setIsRenaming(false)}
+				/>
+			) : (
+				<span className="name">
+					<FingerprintIcon />
+					{passkey.name}
+				</span>
+			)}
+			<div className="acts">
 				{!isRenaming && (
-					<button type="button" onClick={() => setIsRenaming(true)} disabled={isDisabled}>
+					<button className="t-btn secondary sm" type="button" onClick={() => setIsRenaming(true)} disabled={isDisabled}>
 						{messages.settings.passkeys.rename}
 					</button>
 				)}
-				<button type="button" onClick={onRemove} disabled={isDisabled}>
+				<button className="t-btn danger sm" type="button" onClick={onRemove} disabled={isDisabled}>
 					{messages.settings.passkeys.remove(passkey.name)}
 				</button>
-			</td>
-		</tr>
+			</div>
+			<span className="meta">
+				{messages.settings.passkeys.addedColumn}: {formatTime(new Date(passkey.createdAt))} · {messages.settings.passkeys.lastUsedColumn}:{' '}
+				{lastUsed}
+			</span>
+		</li>
 	);
 }
 
@@ -147,9 +147,10 @@ function RenameForm({ passkey, onSave, onCancel }: RenameFormProps) {
 	};
 
 	return (
-		<form onSubmit={submit}>
+		<form className="t-field" onSubmit={submit}>
 			<label htmlFor={inputID}>{messages.settings.passkeys.nameLabel}</label>
 			<input
+				className="t-input"
 				id={inputID}
 				type="text"
 				required
@@ -157,10 +158,14 @@ function RenameForm({ passkey, onSave, onCancel }: RenameFormProps) {
 				value={name}
 				onChange={(event) => setName(event.target.value)}
 			/>
-			<button type="submit">{messages.settings.passkeys.save}</button>
-			<button type="button" onClick={onCancel}>
-				{messages.settings.passkeys.cancel}
-			</button>
+			<div className="row">
+				<button className="t-btn secondary sm" type="submit">
+					{messages.settings.passkeys.save}
+				</button>
+				<button className="t-btn quiet sm" type="button" onClick={onCancel}>
+					{messages.settings.passkeys.cancel}
+				</button>
+			</div>
 		</form>
 	);
 }

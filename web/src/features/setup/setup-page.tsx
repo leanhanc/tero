@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { AuthCard } from '../../components/auth-card';
 import type { Enrolment } from '../../lib/utils/api';
 import { useMessages } from '../../lib/utils/locale';
 import { AuthenticatorStep } from './components/authenticator-step';
@@ -31,13 +32,12 @@ export function SetupPage() {
 	}
 
 	return (
-		<main>
-			<h1>{messages.setup.heading}</h1>
+		<AuthCard>
 			{enrolment === null ? (
 				<PasswordStep token={token} onEnrolment={setEnrolment} onLinkError={setLinkError} />
 			) : (
 				<AuthenticatorStep token={token} enrolment={enrolment} onLinkError={setLinkError} />
 			)}
-		</main>
+		</AuthCard>
 	);
 }

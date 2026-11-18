@@ -1,6 +1,7 @@
 import { type SubmitEvent, useCallback, useEffect, useState } from 'react';
 
 import { ConfirmForm } from '../../../components/confirm-form';
+import { PlusIcon } from '../../../components/icons';
 import {
 	type AppVariables,
 	errorMessage,
@@ -29,11 +30,17 @@ export function VariablesSection({ appName, onChange }: VariablesSectionProps) {
 	const [loaded, reload] = useVariables(appName, allMessages.errors);
 
 	return (
-		<section aria-labelledby="variables-heading">
-			<h2 id="variables-heading">{messages.heading}</h2>
-			<p>{messages.intro}</p>
-			{loaded === null && <p>{allMessages.common.loading}</p>}
-			{loaded !== null && 'error' in loaded && <p role="alert">{loaded.error}</p>}
+		<section className="stack" aria-labelledby="variables-heading">
+			<h2 className="h2" id="variables-heading">
+				{messages.heading}
+			</h2>
+			<p className="muted">{messages.intro}</p>
+			{loaded === null && <p className="muted">{allMessages.common.loading}</p>}
+			{loaded !== null && 'error' in loaded && (
+				<p className="t-error" role="alert">
+					{loaded.error}
+				</p>
+			)}
 			{loaded !== null && 'variables' in loaded && (
 				<VariablesEditor
 					key={JSON.stringify(loaded.variables)}
@@ -104,16 +111,30 @@ function VariablesEditor({ appName, variables, onSaved }: VariablesEditorProps) 
 		<>
 			<SourceApproval appName={appName} variables={variables} onApprove={onSaved} />
 			{isConfirming && <ConfirmForm onConfirm={confirmThenSave} onCancel={() => setIsConfirming(false)} />}
-			<form onSubmit={submit}>
+			<form className="stack" onSubmit={submit}>
 				<VariablesTable appName={appName} drafts={drafts} onChange={changeDraft} onRemoveNew={removeNewDraft} messages={messages} />
-				<button type="button" onClick={() => setDrafts((current) => [...current, newDraft()])}>
-					{messages.add}
-				</button>
-				<button type="submit" disabled={!hasChanges || isSaving || isConfirming} aria-describedby="variables-save-hint">
-					{messages.save}
-				</button>
-				<p id="variables-save-hint">{messages.saveHint}</p>
-				{error && <p role="alert">{error}</p>}
+				<div className="row">
+					<button className="t-btn secondary" type="button" onClick={() => setDrafts((current) => [...current, newDraft()])}>
+						<PlusIcon />
+						{messages.add}
+					</button>
+					<button
+						className="t-btn primary"
+						type="submit"
+						disabled={!hasChanges || isSaving || isConfirming}
+						aria-describedby="variables-save-hint"
+					>
+						{messages.save}
+					</button>
+				</div>
+				<p className="cap" id="variables-save-hint">
+					{messages.saveHint}
+				</p>
+				{error && (
+					<p className="t-error" role="alert">
+						{error}
+					</p>
+				)}
 			</form>
 			<EnvFilePaste onPaste={(entries) => setDrafts((current) => addPastedEntries(current, entries))} drafts={drafts} />
 		</>
@@ -130,33 +151,35 @@ type VariablesTableProps = {
 
 function VariablesTable({ appName, drafts, onChange, onRemoveNew, messages }: VariablesTableProps) {
 	if (drafts.length === 0) {
-		return <p>{messages.empty}</p>;
+		return <p className="muted">{messages.empty}</p>;
 	}
 
 	return (
-		<table>
-			<caption>{messages.caption}</caption>
-			<thead>
-				<tr>
-					<th scope="col">{messages.nameColumn}</th>
-					<th scope="col">{messages.valueColumn}</th>
-					<th scope="col">{messages.scopeColumn}</th>
-					<th scope="col">{messages.sealedColumn}</th>
-					<th scope="col">{messages.actionsColumn}</th>
-				</tr>
-			</thead>
-			<tbody>
-				{drafts.map((draft) => (
-					<VariableRow
-						key={draft.key}
-						appName={appName}
-						draft={draft}
-						onChange={(next) => onChange(draft.key, next)}
-						onRemoveNew={() => onRemoveNew(draft.key)}
-					/>
-				))}
-			</tbody>
-		</table>
+		<div className="t-table-wrap">
+			<table className="t-table">
+				<caption>{messages.caption}</caption>
+				<thead>
+					<tr>
+						<th scope="col">{messages.nameColumn}</th>
+						<th scope="col">{messages.valueColumn}</th>
+						<th scope="col">{messages.scopeColumn}</th>
+						<th scope="col">{messages.sealedColumn}</th>
+						<th scope="col">{messages.actionsColumn}</th>
+					</tr>
+				</thead>
+				<tbody>
+					{drafts.map((draft) => (
+						<VariableRow
+							key={draft.key}
+							appName={appName}
+							draft={draft}
+							onChange={(next) => onChange(draft.key, next)}
+							onRemoveNew={() => onRemoveNew(draft.key)}
+						/>
+					))}
+				</tbody>
+			</table>
+		</div>
 	);
 }
 

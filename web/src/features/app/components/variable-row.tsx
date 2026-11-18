@@ -26,6 +26,7 @@ export function VariableRow({ appName, draft, onChange, onRemoveNew }: VariableR
 					draft.name
 				) : (
 					<input
+						className="t-input code"
 						aria-label={messages.nameLabel}
 						type="text"
 						autoComplete="off"
@@ -42,6 +43,7 @@ export function VariableRow({ appName, draft, onChange, onRemoveNew }: VariableR
 			</td>
 			<td>
 				<select
+					className="t-input"
 					aria-label={messages.scopeLabel(nameLabel)}
 					value={draft.scope}
 					onChange={(event) => onChange({ ...draft, scope: event.target.value as VariableScope })}
@@ -60,11 +62,11 @@ export function VariableRow({ appName, draft, onChange, onRemoveNew }: VariableR
 			</td>
 			<td>
 				{isStored ? (
-					<button type="button" onClick={() => onChange({ ...draft, isRemoved: !draft.isRemoved })}>
+					<button className="t-btn danger sm" type="button" onClick={() => onChange({ ...draft, isRemoved: !draft.isRemoved })}>
 						{draft.isRemoved ? messages.keep : messages.remove}
 					</button>
 				) : (
-					<button type="button" onClick={onRemoveNew}>
+					<button className="t-btn danger sm" type="button" onClick={onRemoveNew}>
 						{messages.remove}
 					</button>
 				)}
@@ -88,6 +90,7 @@ function ValueField({ draft, label, onChange }: ValueFieldProps) {
 	return (
 		<>
 			<textarea
+				className="t-input"
 				aria-label={label}
 				autoComplete="off"
 				spellCheck={false}
@@ -153,7 +156,7 @@ function VariableReads({ appName, name }: { appName: string; name: string }) {
 
 	return (
 		<>
-			<button type="button" onClick={load}>
+			<button className="t-btn quiet sm" type="button" onClick={load}>
 				{messages.showReads}
 			</button>
 			{error && <p role="alert">{error}</p>}

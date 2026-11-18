@@ -1,5 +1,6 @@
 import { type SubmitEvent, useEffect, useRef, useState } from 'react';
 
+import { CodeInput } from '../../../components/code-input';
 import { ApiError, type Enrolment, errorMessage, finishSetup } from '../../../lib/utils/api';
 import { useMessages } from '../../../lib/utils/locale';
 import { navigate } from '../../../lib/utils/navigation';
@@ -44,38 +45,35 @@ export function AuthenticatorStep({ token, enrolment, onLinkError }: Authenticat
 	};
 
 	const hasError = codeError !== '';
+	const describedBy = hasError ? 'code-hint code-error' : 'code-hint';
 
 	return (
 		<form onSubmit={submit}>
-			<h2 ref={headingRef} tabIndex={-1}>
+			<p className="stepn">{messages.setup.step(2, 2)}</p>
+			<h1 className="ah" ref={headingRef} tabIndex={-1}>
 				{messages.setup.authenticator.heading}
-			</h2>
-			<p>{messages.setup.authenticator.scanInstructions}</p>
-			<img src={enrolment.qrCode} alt={messages.setup.authenticator.qrCodeAlt} width={256} height={256} />
-			<p>
-				{messages.setup.authenticator.manualKey} <code>{enrolment.secret}</code>
-			</p>
-			<label htmlFor="code">{messages.setup.authenticator.codeLabel}</label>
-			<input
-				id="code"
-				name="code"
-				type="text"
-				inputMode="numeric"
-				autoComplete="one-time-code"
-				required
-				pattern="[0-9]{6}"
-				maxLength={6}
-				value={code}
-				onChange={(event) => setCode(event.target.value.trim())}
-				aria-describedby={hasError ? 'code-error' : undefined}
-				aria-invalid={hasError}
-			/>
-			{hasError && (
-				<p id="code-error" role="alert">
-					{codeError}
-				</p>
-			)}
-			<button type="submit" disabled={isSubmitting}>
+			</h1>
+			<p className="muted">{messages.setup.authenticator.scanInstructions}</p>
+			<p className="cap">{messages.setup.authenticator.appHint}</p>
+			<img className="qr" src={enrolment.qrCode} alt={messages.setup.authenticator.qrCodeAlt} width={168} height={168} />
+			<details className="more">
+				<summary>{messages.setup.authenticator.manualKey}</summary>
+				<p className="cap">{messages.setup.authenticator.manualKeyIntro}</p>
+				<code className="key">{enrolment.secret}</code>
+			</details>
+			<div className="t-field">
+				<label htmlFor="code">{messages.setup.authenticator.codeLabel}</label>
+				<CodeInput id="code" value={code} onChange={setCode} describedBy={describedBy} isInvalid={hasError} />
+				<span className="t-help" id="code-hint">
+					{messages.common.codeHint}
+				</span>
+				{hasError && (
+					<span className="t-error" id="code-error" role="alert">
+						{codeError}
+					</span>
+				)}
+			</div>
+			<button className="t-btn primary wide" type="submit" disabled={isSubmitting}>
 				{messages.setup.authenticator.submit}
 			</button>
 		</form>

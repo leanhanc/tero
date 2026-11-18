@@ -41,14 +41,29 @@ export function PendingChanges({ app, onRedeploy }: PendingChangesProps) {
 	const hint = app.pendingNeedsBuild ? messages.buildHint : messages.restartHint;
 
 	return (
-		<section aria-label={messages.label}>
-			<p role="status">{messages.count(pendingCount)}</p>
-			<p>{app.pendingChanges.join(', ')}</p>
-			<button type="button" onClick={startRedeploy} disabled={hasDeployQueued || isSubmitting} aria-describedby="pending-changes-hint">
-				{messages.submit}
-			</button>
-			<p id="pending-changes-hint">{hint}</p>
-			{error && <p role="alert">{error}</p>}
+		<section className="t-note busy" aria-label={messages.label}>
+			<span className="t-state busy" aria-hidden="true" />
+			<div className="stack">
+				<b role="status">{messages.count(pendingCount)}</b>
+				<p className="mono-s">{app.pendingChanges.join(', ')}</p>
+				<div className="row">
+					<button
+						className="t-btn primary sm"
+						type="button"
+						onClick={startRedeploy}
+						disabled={hasDeployQueued || isSubmitting}
+						aria-describedby="pending-changes-hint"
+					>
+						{messages.submit}
+					</button>
+				</div>
+				<p id="pending-changes-hint">{hint}</p>
+				{error && (
+					<p className="t-error" role="alert">
+						{error}
+					</p>
+				)}
+			</div>
 		</section>
 	);
 }

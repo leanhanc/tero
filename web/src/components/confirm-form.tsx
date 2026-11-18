@@ -4,6 +4,7 @@ import { AccountNameField } from './account-name-field';
 import { confirmIdentity, errorMessage } from '../lib/utils/api';
 import { useMessages } from '../lib/utils/locale';
 import { CodeInput } from './code-input';
+import { PasswordInput } from './password-input';
 
 type ConfirmFormProps = {
 	onConfirm: () => void;
@@ -47,35 +48,41 @@ export function ConfirmForm({ onConfirm, onCancel }: ConfirmFormProps) {
 	};
 
 	return (
-		<section aria-labelledby="confirm-heading">
-			<h2 id="confirm-heading">{messages.settings.confirm.heading}</h2>
+		<section className="t-dialog" aria-labelledby="confirm-heading">
+			<h2 className="h2" id="confirm-heading">
+				{messages.settings.confirm.heading}
+			</h2>
 			<p id="confirm-intro">{messages.settings.confirm.intro}</p>
-			<form onSubmit={submit} aria-describedby={formError ? 'confirm-intro confirm-error' : 'confirm-intro'}>
+			<form className="stack" onSubmit={submit} aria-describedby={formError ? 'confirm-intro confirm-error' : 'confirm-intro'}>
 				<AccountNameField />
-				<label htmlFor="confirm-password">{messages.settings.confirm.passwordLabel}</label>
-				<input
-					ref={passwordRef}
-					id="confirm-password"
-					name="password"
-					type="password"
-					autoComplete="current-password"
-					required
-					value={password}
-					onChange={(event) => setPassword(event.target.value)}
-				/>
-				<label htmlFor="confirm-code">{messages.settings.confirm.codeLabel}</label>
-				<CodeInput id="confirm-code" value={code} onChange={setCode} />
+				<div className="t-field">
+					<label htmlFor="confirm-password">{messages.settings.confirm.passwordLabel}</label>
+					<PasswordInput
+						inputRef={passwordRef}
+						id="confirm-password"
+						name="password"
+						autoComplete="current-password"
+						value={password}
+						onChange={setPassword}
+					/>
+				</div>
+				<div className="t-field">
+					<label htmlFor="confirm-code">{messages.settings.confirm.codeLabel}</label>
+					<CodeInput id="confirm-code" value={code} onChange={setCode} />
+				</div>
 				{formError && (
-					<p id="confirm-error" role="alert">
+					<p className="t-error" id="confirm-error" role="alert">
 						{formError}
 					</p>
 				)}
-				<button type="submit" disabled={isSubmitting}>
-					{messages.settings.confirm.submit}
-				</button>
-				<button type="button" onClick={onCancel}>
-					{messages.settings.confirm.cancel}
-				</button>
+				<div className="acts">
+					<button className="t-btn quiet" type="button" onClick={onCancel}>
+						{messages.settings.confirm.cancel}
+					</button>
+					<button className="t-btn primary" type="submit" disabled={isSubmitting}>
+						{messages.settings.confirm.submit}
+					</button>
+				</div>
 			</form>
 		</section>
 	);

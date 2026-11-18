@@ -52,20 +52,33 @@ export function SourceApproval({ appName, variables, onApprove }: SourceApproval
 	};
 
 	return (
-		<section aria-label={messages.label}>
-			<p role="alert">{messages.changed}</p>
-			{variables.isRepositoryReplaced && <p>{messages.replaced}</p>}
-			<dl>
-				<dt>{messages.approved}</dt>
-				<dd>{describeSource(variables.approvedSource, messages)}</dd>
-				<dt>{messages.current}</dt>
-				<dd>{describeSource(variables.source, messages)}</dd>
-			</dl>
-			{isConfirming && <ConfirmForm onConfirm={confirmThenApprove} onCancel={() => setIsConfirming(false)} />}
-			<button type="button" onClick={approve} disabled={isConfirming}>
-				{messages.approve}
-			</button>
-			{error && <p role="alert">{error}</p>}
+		<section className="t-note err" aria-label={messages.label}>
+			<span className="t-state err" aria-hidden="true" />
+			<div className="stack">
+				<p role="alert">{messages.changed}</p>
+				{variables.isRepositoryReplaced && <p>{messages.replaced}</p>}
+				<dl className="facts">
+					<div>
+						<dt>{messages.approved}</dt>
+						<dd>{describeSource(variables.approvedSource, messages)}</dd>
+					</div>
+					<div>
+						<dt>{messages.current}</dt>
+						<dd>{describeSource(variables.source, messages)}</dd>
+					</div>
+				</dl>
+				{isConfirming && <ConfirmForm onConfirm={confirmThenApprove} onCancel={() => setIsConfirming(false)} />}
+				<div className="row">
+					<button className="t-btn secondary" type="button" onClick={approve} disabled={isConfirming}>
+						{messages.approve}
+					</button>
+				</div>
+				{error && (
+					<p className="t-error" role="alert">
+						{error}
+					</p>
+				)}
+			</div>
 		</section>
 	);
 }

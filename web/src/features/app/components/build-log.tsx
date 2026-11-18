@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 
+import { DeployStateBadge } from '../../../components/deploy-state-badge';
 import { type Deploy, deployLogURL } from '../../../lib/utils/api';
 import { formatDuration } from '../../../lib/utils/duration';
 import { useMessages } from '../../../lib/utils/locale';
@@ -14,7 +15,7 @@ const quietAfterMs = 30_000;
  * Streams a deploy's build log from the server and shows it as plain text.
  * React escapes it, so build output can never become markup.
  */
-export function BuildLog({ deploy }: { deploy: Deploy }) {
+export function BuildLog({ deploy, action }: { deploy: Deploy; action?: ReactNode }) {
 	const messages = useMessages().app.buildLog;
 	const [log, setLog] = useState('');
 	const [status, setStatus] = useState<LogStatus>('streaming');
@@ -44,13 +45,34 @@ export function BuildLog({ deploy }: { deploy: Deploy }) {
 		return () => source.close();
 	}, [deploy.id]);
 
+	const isStreaming = status === 'streaming';
+	const headingID = `build-log-heading-${deploy.id}`;
+
 	return (
-		<section aria-labelledby="build-log-heading">
-			<h2 id="build-log-heading">{messages.heading(deploy.id)}</h2>
-			{status === 'streaming' && <p aria-live="polite">{messages.streaming}</p>}
-			{status === 'streaming' && <DeployProgress queuedAt={deploy.queuedAt} lastOutputAt={lastOutputAt} />}
-			{status === 'unavailable' && <p role="alert">{messages.unavailable}</p>}
-			<pre>{log || messages.empty}</pre>
+		<section className="deploy" aria-labelledby={headingID}>
+			<div className="dh">
+				<DeployStateBadge state={deploy.state} />
+				<h2 id={headingID}>{messages.heading(deploy.id)}</h2>
+				<div className="meta">{isStreaming && <DeployProgress queuedAt={deploy.queuedAt} lastOutputAt={lastOutputAt} />}</div>
+				{action}
+			</div>
+			{status === 'unavailable' && (
+				<div className="t-note err" role="alert">
+					<span className="t-state err" aria-hidden="true" />
+					<div>
+						<p>{messages.unavailable}</p>
+					</div>
+				</div>
+			)}
+			<pre className="log">
+				{log || messages.empty}
+				{isStreaming && (
+					<span className="live" aria-live="polite">
+						{'\n'}
+						{messages.streaming}
+					</span>
+				)}
+			</pre>
 		</section>
 	);
 }

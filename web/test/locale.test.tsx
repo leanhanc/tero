@@ -35,8 +35,8 @@ describe('Spanish', () => {
 			</LocaleContext>,
 		);
 
-		expect(await screen.findByRole('heading', { name: 'Iniciá sesión en Tero' })).toBeTruthy();
+		expect(await screen.findByRole('heading', { name: 'Iniciar sesión' })).toBeTruthy();
 		expect(screen.getByLabelText('Contraseña')).toBeTruthy();
-		expect(screen.getByRole('button', { name: 'Iniciar sesión' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Entrar' })).toBeTruthy();
 	});
 });

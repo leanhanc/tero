@@ -189,7 +189,7 @@ describe('apps', () => {
 	});
 
 	it('renames an app without changing its address', async () => {
-		openAt('/apps/api');
+		openAt('/apps/api?tab=settings');
 		const renamedApp = { ...failedApp, displayName: 'Storefront API' };
 		const calls = mockAPI({
 			'/api/state': [loggedIn],
@@ -202,7 +202,7 @@ describe('apps', () => {
 		mockEventSource([]);
 		render(<App />);
 
-		const name = await screen.findByLabelText<HTMLInputElement>('Name');
+		const name = await screen.findByLabelText<HTMLInputElement>('App name');
 		await userEvent.clear(name);
 		await userEvent.type(name, 'Storefront API');
 		await userEvent.click(screen.getByRole('button', { name: 'Save name' }));
@@ -212,7 +212,7 @@ describe('apps', () => {
 	});
 
 	it('shows why a deploy failed and its log as plain text', async () => {
-		openAt('/apps/api');
+		openAt('/apps/api?tab=deploys');
 		mockAPI({ '/api/state': [loggedIn], '/api/apps/api': [{ status: 200, body: failedApp }] });
 		const opened = mockEventSource([
 			{ type: 'log', data: JSON.stringify('#3 ERROR: <img src=x onerror=alert(1)>\n') },
@@ -255,7 +255,7 @@ describe('apps', () => {
 	});
 
 	it('says who started each deploy', async () => {
-		openAt('/apps/api');
+		openAt('/apps/api?tab=deploys');
 		mockAPI({ '/api/state': [loggedIn], '/api/apps/api': [{ status: 200, body: failedApp }] });
 		mockEventSource([]);
 		render(<App />);
@@ -264,7 +264,7 @@ describe('apps', () => {
 	});
 
 	it('turns off deploy on push and keeps the other setting', async () => {
-		openAt('/apps/api');
+		openAt('/apps/api?tab=settings');
 		const calls = mockAPI({
 			'/api/state': [loggedIn],
 			'/api/apps/api': [
@@ -352,7 +352,7 @@ function savedChanges(calls: { path: string; body: unknown }[]) {
 describe('variables', () => {
 	// app-variables: New variable
 	it('saves a new variable as both, and deploys nothing', async () => {
-		openAt('/apps/api');
+		openAt('/apps/api?tab=variables');
 		const calls = mockAPI({
 			'/api/state': [loggedIn],
 			'/api/apps/api': [{ status: 200, body: failedApp }],
@@ -372,7 +372,7 @@ describe('variables', () => {
 
 	// app-variables: Sealing switches the scope
 	it('switches a variable to runtime only when it is sealed', async () => {
-		openAt('/apps/api');
+		openAt('/apps/api?tab=variables');
 		mockAPI({
 			'/api/state': [loggedIn],
 			'/api/apps/api': [{ status: 200, body: failedApp }],
@@ -393,7 +393,7 @@ describe('variables', () => {
 
 	// app-variables: Sealed value never returned, No way back
 	it('offers only replacing and removing a sealed variable, and keeps its value without a new one', async () => {
-		openAt('/apps/api');
+		openAt('/apps/api?tab=variables');
 		const calls = mockAPI({
 			'/api/state': [loggedIn],
 			'/api/apps/api': [{ status: 200, body: failedApp }],
@@ -415,7 +415,7 @@ describe('variables', () => {
 
 	// app-variables: Unconfirmed seal, Several saves after one check
 	it('asks for a fresh check when the server wants one, then saves', async () => {
-		openAt('/apps/api');
+		openAt('/apps/api?tab=variables');
 		const calls = mockAPI({
 			'/api/state': [loggedIn],
 			'/api/apps/api': [{ status: 200, body: failedApp }],
@@ -434,7 +434,7 @@ describe('variables', () => {
 		await userEvent.click(screen.getByRole('button', { name: 'Save variables' }));
 
 		await userEvent.type(await screen.findByLabelText('Password'), 'pw');
-		await userEvent.type(screen.getByLabelText('6-digit code from your authenticator app'), '123456');
+		await userEvent.type(screen.getByLabelText('6-digit code'), '123456');
 		await userEvent.click(screen.getByRole('button', { name: 'Confirm' }));
 
 		await waitFor(() => expect(calls.filter((call) => call.path === '/api/apps/api/variables' && call.body).length).toBe(2));
@@ -442,7 +442,7 @@ describe('variables', () => {
 
 	// app-variables: Paste then save, Paste isn't saved by itself, Paste names a sealed variable
 	it('fills the form from a pasted .env file and skips sealed names', async () => {
-		openAt('/apps/api');
+		openAt('/apps/api?tab=variables');
 		const calls = mockAPI({
 			'/api/state': [loggedIn],
 			'/api/apps/api': [{ status: 200, body: failedApp }],
@@ -490,7 +490,7 @@ describe('variables', () => {
 
 	// app-variables: Approving a new source
 	it('shows both sources and approves the current one', async () => {
-		openAt('/apps/api');
+		openAt('/apps/api?tab=variables');
 		const calls = mockAPI({
 			'/api/state': [loggedIn],
 			'/api/apps/api': [{ status: 200, body: failedApp }],
@@ -519,7 +519,7 @@ describe('variables', () => {
 
 	// Audit finding TERO-06: a repository took over the approved address.
 	it('explains a repository that replaced the approved one', async () => {
-		openAt('/apps/api');
+		openAt('/apps/api?tab=variables');
 		mockAPI({
 			'/api/state': [loggedIn],
 			'/api/apps/api': [{ status: 200, body: failedApp }],
@@ -545,7 +545,7 @@ describe('variables', () => {
 
 	// app-variables: Release shown
 	it('lists when a sealed variable was read', async () => {
-		openAt('/apps/api');
+		openAt('/apps/api?tab=variables');
 		mockAPI({
 			'/api/state': [loggedIn],
 			'/api/apps/api': [{ status: 200, body: failedApp }],
