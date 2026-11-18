@@ -64,8 +64,8 @@ export const es: Messages = {
 		},
 	},
 	passkeyOffer: {
-		heading: 'Entrar más rápido la próxima vez',
-		intro: 'Con una llave de acceso entras con tu huella, tu cara o el PIN del dispositivo, en lugar de la contraseña y un código. Tu contraseña y tu app de autenticación siguen funcionando.',
+		heading: 'Una forma más simple de entrar',
+		intro: 'La llave de acceso se guarda en este dispositivo y se abre con tu huella, tu cara o el PIN. La contraseña y el código seguirán funcionando si los necesitas.',
 		notNow: 'Ahora no',
 		expired: 'Esta página estuvo abierta demasiado tiempo para agregar una llave de acceso desde aquí. Puedes agregarla en Configuración.',
 	},
