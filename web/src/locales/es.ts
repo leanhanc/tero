@@ -34,9 +34,7 @@ export const es: Messages = {
 		},
 		authenticator: {
 			heading: 'Agregar Tero a tu app de autenticación',
-			scanInstructions: 'Escanea este código con cualquier app que genere códigos de 6 dígitos.',
-			appHint:
-				'Si usas un gestor de contraseñas, es probable que ya tengas una. Sirven 1Password, Bitwarden, Contraseñas de Apple, Google Authenticator y muchas más.',
+			scanInstructions: 'Escanea el código con tu app de autenticación o tu gestor de contraseñas, por ejemplo 1Password o Google Authenticator.',
 			qrCodeAlt: 'Código QR que agrega Tero a una app de autenticación',
 			manualKey: '¿No se puede escanear?',
 			manualKeyIntro: 'Escribe esta clave en la app:',

@@ -54,8 +54,7 @@ export function AuthenticatorStep({ token, enrolment, onLinkError }: Authenticat
 				{messages.setup.authenticator.heading}
 			</h1>
 			<p className="muted">{messages.setup.authenticator.scanInstructions}</p>
-			<p className="cap">{messages.setup.authenticator.appHint}</p>
-			<img className="qr" src={enrolment.qrCode} alt={messages.setup.authenticator.qrCodeAlt} width={168} height={168} />
+			<img className="qr" src={enrolment.qrCode} alt={messages.setup.authenticator.qrCodeAlt} width={144} height={144} />
 			<details className="more">
 				<summary>{messages.setup.authenticator.manualKey}</summary>
 				<p className="cap">{messages.setup.authenticator.manualKeyIntro}</p>

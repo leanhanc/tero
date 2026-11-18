@@ -558,14 +558,14 @@
 		padding: 28px 24px;
 		display: flex;
 		flex-direction: column;
-		gap: 16px;
+		gap: 20px;
 		box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
 	}
 
 	.box form {
 		display: flex;
 		flex-direction: column;
-		gap: 16px;
+		gap: 20px;
 	}
 
 	.box form > .t-btn {
@@ -585,7 +585,7 @@
 		font: var(--text-small);
 		color: var(--text-muted);
 		text-align: center;
-		margin-bottom: -10px;
+		margin-bottom: 4px;
 		max-width: none;
 	}
 
@@ -616,8 +616,8 @@
 	}
 
 	.qr {
-		width: 168px;
-		height: 168px;
+		width: 144px;
+		height: 144px;
 		align-self: center;
 		border-radius: 8px;
 		border: 1px solid var(--border);

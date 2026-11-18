@@ -39,9 +39,7 @@ export const en = {
 		},
 		authenticator: {
 			heading: 'Add Tero to your authenticator app',
-			scanInstructions: 'Scan this code with any app that makes 6-digit codes.',
-			appHint:
-				'If you use a password manager, you probably have one already. 1Password, Bitwarden, Apple Passwords, Google Authenticator and many more work.',
+			scanInstructions: 'Scan the code with your authenticator app or password manager, for example 1Password or Google Authenticator.',
 			qrCodeAlt: 'QR code that adds Tero to an authenticator app',
 			manualKey: "Can't scan it?",
 			manualKeyIntro: 'Enter this key in the app instead:',
