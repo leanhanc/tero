@@ -88,7 +88,7 @@ export const es: Messages = {
 		github: {
 			heading: 'GitHub',
 			intro:
-				'Conecta GitHub para desplegar repositorios privados y desplegar en cada push. Tero crea para este servidor una GitHub App que solo puede leer código, y tú eliges qué repositorios ve. Los repositorios públicos funcionan sin ella.',
+				'Conecta GitHub para desplegar repositorios privados y desplegar en cada push. Tero crea para este servidor una GitHub App que solo puede leer código, y se eligen los repositorios que puede ver. Los repositorios públicos funcionan sin ella.',
 			ownerLegend: 'Dónde vive la App',
 			personal: 'Mi cuenta de GitHub',
 			organization: 'Una organización que administro',
@@ -327,7 +327,7 @@ export const es: Messages = {
 			},
 			source: {
 				label: 'Origen de esta app',
-				changed: 'El origen de esta app no es el aprobado para sus variables, así que los despliegues se rechazan hasta aprobarlo. Si no lo cambiaste tú, no lo apruebes: alguien puede haber manipulado esta app.',
+				changed: 'El origen de esta app no es el aprobado para sus variables, así que los despliegues se rechazan hasta aprobarlo. Si no lo cambiaste, no lo apruebes: alguien puede haber manipulado esta app.',
 				replaced:
 					'GitHub tiene ahora otro repositorio en esta dirección que el aprobado: el aprobado se borró, o se renombró y alguien más tomó su nombre anterior.',
 				approved: 'Origen aprobado',
