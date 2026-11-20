@@ -55,6 +55,8 @@ The script downloads the latest release binary for the server's architecture, ch
 sudo tero init
 ```
 
+Tero needs TCP ports 80 and 443 open to the internet. Init checks them and, when your cloud provider's firewall blocks them (AWS, Google Cloud, Azure and Oracle Cloud do by default), says how to open them. [Opening ports 80 and 443](docs/ports.md) has the steps.
+
 ## Verify a release
 
 Every release binary has a signed [SLSA](https://slsa.dev) Build Level 3 provenance attestation, made by the release workflow through GitHub artifact attestations, and an SPDX SBOM attached to the release. To check a binary yourself, download it from the [releases page](https://github.com/leanhanc/tero/releases) and run, with the [GitHub CLI](https://cli.github.com) signed in:

@@ -17,6 +17,7 @@ import (
 	"github.com/leanhanc/tero/internal/config"
 	"github.com/leanhanc/tero/internal/hostfs"
 	"github.com/leanhanc/tero/internal/loginlink"
+	"github.com/leanhanc/tero/internal/portcheck"
 	"github.com/leanhanc/tero/internal/sysexec"
 )
 
@@ -28,8 +29,10 @@ type Options struct {
 	// one if it is attached to a terminal, and otherwise uses <ip>.nip.io.
 	Domain        string
 	IsInteractive bool
-	In            io.Reader
-	Out           io.Writer
+	// HasColor is true when Out is a terminal and NO_COLOR is unset.
+	HasColor bool
+	In       io.Reader
+	Out      io.Writer
 }
 
 // host is what every check and step acts on.
@@ -69,11 +72,16 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}
 
-	return finish(ctx, h, opts.Version, domain)
+	ports := checkWebPorts(ctx, h, publicIP, portcheck.Style{HasColor: opts.HasColor})
+
+	return finish(ctx, h, opts.Version, domain, ports)
 }
 
-func finish(ctx context.Context, h host, version, domain string) error {
-	hasCertificate := waitForCertificate(ctx, domain, 3*time.Minute)
+func finish(ctx context.Context, h host, version, domain string, ports []portcheck.Result) error {
+	// With both web ports closed no ACME challenge can pass, so waiting for a
+	// certificate would only delay the help above.
+	isBlocked := portcheck.AllHaveStatus(ports, portcheck.Closed)
+	hasCertificate := !isBlocked && waitForCertificate(ctx, domain, 3*time.Minute)
 
 	link, err := loginlink.Run(ctx, loginlink.Issue)
 	if err != nil {
@@ -85,7 +93,7 @@ func finish(ctx context.Context, h host, version, domain string) error {
 		return err
 	}
 
-	if !hasCertificate {
+	if !hasCertificate && !isBlocked {
 		fmt.Fprintf(h.out, "\nThe page may take a few minutes to load: %s has to point to this server's IP address first.\n", domain)
 	}
 	// The link is the last line, so it is easy to find and copy.

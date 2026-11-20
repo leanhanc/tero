@@ -116,6 +116,7 @@ func runInit(ctx context.Context, args []string) error {
 		Version:       version,
 		Domain:        *domain,
 		IsInteractive: isTerminal(os.Stdin),
+		HasColor:      hasColor(os.Stdout),
 		In:            os.Stdin,
 		Out:           os.Stdout,
 	})
@@ -227,6 +228,12 @@ func runAgent(ctx context.Context) error {
 	poller := agent.Poller{DB: db, Now: time.Now}
 
 	return agent.Run(ctx, agent.Options{DB: db, Pipeline: pipeline, Variables: keyService, Background: []agent.Background{gitHubApp, poller}})
+}
+
+// hasColor follows https://no-color.org: color only on a terminal, and never
+// when NO_COLOR is set to anything but the empty string.
+func hasColor(file *os.File) bool {
+	return isTerminal(file) && os.Getenv("NO_COLOR") == ""
 }
 
 func isTerminal(file *os.File) bool {

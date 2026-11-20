@@ -33,6 +33,7 @@ build() {
 	local arch="$1"
 	make build-e2e E2E_ARCH="$arch"
 	GOOS=linux GOARCH="$arch" CGO_ENABLED=0 go build -o "bin/fake-github-linux-$arch" ./e2e/fakegithub
+	GOOS=linux GOARCH="$arch" CGO_ENABLED=0 go build -o "bin/fake-probe-linux-$arch" ./e2e/fakeprobe
 	GOOS=linux GOARCH="$arch" CGO_ENABLED=0 go install \
 		"github.com/letsencrypt/pebble/v2/cmd/pebble@$pebble_version" \
 		"github.com/letsencrypt/pebble/v2/cmd/pebble-challtestsrv@$pebble_version"
@@ -64,6 +65,7 @@ pebble_bin="$(pebble_dir "$arch")"
 scp -q -i "$TERO_SSH_KEY" bin/tero-e2e-linux-$arch "$pebble_bin/pebble" "$pebble_bin/pebble-challtestsrv" \
 	scripts/vm-test-ca.sh scripts/vm-test-release.sh install.sh "$TERO_SSH:/tmp/"
 scp -q -i "$TERO_SSH_KEY" "bin/fake-github-linux-$arch" "$TERO_SSH:/tmp/fake-github"
+scp -q -i "$TERO_SSH_KEY" "bin/fake-probe-linux-$arch" "$TERO_SSH:/tmp/fake-probe"
 remote sudo bash /tmp/vm-test-ca.sh
 remote sudo bash /tmp/vm-test-release.sh "$arch"
 scripts/vm-test-repo.sh

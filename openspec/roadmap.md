@@ -14,8 +14,8 @@ Change: [add-security-baseline-slice-1](changes/add-security-baseline-slice-1/)
 - [x] Firewall rule that rejects connections from `tero` and `tero-agent`, and so from every build and app, to the cloud metadata addresses of AWS, Google Cloud, Azure, Oracle Cloud, Alibaba Cloud, Akamai and Scaleway (169.254.0.0/16, 168.63.129.16, 100.100.100.200, fe80::/10 and the providers' IPv6 metadata addresses), so they can't read the metadata service and its instance credentials
 - [x] Signed releases with SBOMs and provenance, and `install.sh`
 - [ ] Vulnerability checks in CI: `govulncheck ./...` for Go and `bun audit` for the dashboard, failing the build on a reachable vulnerability
-- [ ] Check that ports 80 and 443 are reachable from the internet, since AWS, Google Cloud, Azure and Oracle Cloud block them by default and certificates can't be issued until they're open
-- [ ] When they're closed, explain it clearly and give step-by-step help for the leading providers (security groups, firewall rules, network security groups, security lists). Design with Cele when it shows (during `sudo tero init`, on first dashboard load, or in onboarding) and the wording
+- [x] Check that ports 80 and 443 are reachable from the internet, since AWS, Google Cloud, Azure and Oracle Cloud block them by default and certificates can't be issued until they're open
+- [x] When they're closed, explain it clearly and give step-by-step help for the leading providers (security groups, firewall rules, network security groups, security lists), during `sudo tero init` ([add-port-check-slice-1](changes/add-port-check-slice-1/)). Cele may still rework the wording and where else it shows
 
 ## Slice 2: First deploy of a JS backend
 
@@ -197,6 +197,15 @@ Opt-in ways to keep the server off the public internet, for admins who want a sm
 - [ ] Once on, SSH and the dashboard answer only over WireGuard; Tero first checks for a recent handshake from one of your devices, so turning it on can't lock you out
 - [ ] Only accept web traffic from Cloudflare's IP ranges, for apps whose domain is behind Cloudflare
 - [ ] Later, a Cloudflare Tunnel mode where the server answers on no public port at all
+
+### Lockdown mode
+
+An optional mode where the dashboard is private by default and the server opens web ports only when an app needs them.
+
+- [ ] `sudo tero init` can start Tero in lockdown mode: the dashboard is reached only over an SSH tunnel or WireGuard (see Private access), and Tero's nftables keep 80 and 443 closed
+- [ ] Tero opens 80 and 443 in its own nftables when the first site goes public
+- [ ] Tero can't open provider firewalls (AWS security groups, DigitalOcean cloud firewall and the like), so when a site goes public the dashboard tells the admin to open 80 and 443 there too, with steps for the leading providers
+- [ ] Bring your own domain with a DNS provider API token, so certificates are issued through the DNS-01 challenge while 443 stays closed; nip.io addresses can't use DNS-01, so they need 80 or 443 open to get a certificate
 
 ### Private container registries
 

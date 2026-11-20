@@ -168,8 +168,12 @@ func addSSHPort(t *testing.T) {
 	waitUntil(t, 30*time.Second, func() bool { return run(t, "nc -z -w 2 127.0.0.1 2222").exitCode == 0 })
 }
 
+// testInit runs init with port 80 reported closed by the fake port check, so
+// one run covers both an open and a closed port.
 func testInit(t *testing.T) {
-	got := run(t, "sudo env TERO_E2E_PUBLIC_IP="+publicIP+" tero init")
+	startFakePortCheck(t)
+
+	got := run(t, "sudo env TERO_E2E_PUBLIC_IP="+publicIP+" TERO_E2E_PORT_PROBE=http://"+fakePortCheckAddress+" tero init")
 	if got.exitCode != 0 {
 		t.Fatalf("init failed (%d):\n%s", got.exitCode, got.output)
 	}
@@ -179,10 +183,35 @@ func testInit(t *testing.T) {
 		t.Error("init did not see the HTTPS certificate")
 	}
 
+	t.Run("server-init: Port closed at the provider", func(t *testing.T) {
+		assertContains(t, got.output, "❌ Port 80 is closed to the internet")
+		assertContains(t, got.output, "✅ Port 443 is open to the internet")
+		assertContains(t, got.output, "docs/ports.md")
+		// The suite runs on EC2, so the help is AWS's.
+		assertContains(t, got.output, "security group")
+	})
+	t.Run("server-init: No color off a terminal", func(t *testing.T) {
+		if strings.Contains(got.output, "\033[") {
+			t.Error("init printed escape sequences without a terminal")
+		}
+	})
+
 	setupLink = lastLine(got.output)
 	if !strings.HasPrefix(setupLink, "https://"+skippedDomain+"/setup#") {
 		t.Fatalf("the last line of init is not the setup link: %q", setupLink)
 	}
+}
+
+// fakePortCheckAddress is where the fake connect-back service listens.
+const fakePortCheckAddress = "127.0.0.1:9901"
+
+// startFakePortCheck runs a stand-in for echoip's port check that answers
+// with the made-up public IP and reports port 80 closed.
+func startFakePortCheck(t *testing.T) {
+	must(t, "sudo install -D -m 0755 /tmp/fake-probe /opt/tero-e2e/fake-probe")
+	must(t, "sudo systemd-run --quiet --unit=tero-e2e-probe --property=DynamicUser=yes /opt/tero-e2e/fake-probe"+
+		" -listen "+fakePortCheckAddress+" -ip "+publicIP+" -closed 80")
+	waitUntil(t, 30*time.Second, func() bool { return run(t, "curl -sf http://"+fakePortCheckAddress+"/port/1").exitCode == 0 })
 }
 
 func lastLine(output string) string {
