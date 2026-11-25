@@ -44,7 +44,7 @@ func testKey(t *testing.T, comment string) string {
 	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshKey))) + " " + comment + "\n"
 }
 
-const hardenedSSHSettings = "permitrootlogin no\npasswordauthentication no\nkbdinteractiveauthentication no\npermitemptypasswords no\ndenyusers tero tero-agent tero-keys\n"
+const hardenedSSHSettings = "permitrootlogin no\npasswordauthentication no\nkbdinteractiveauthentication no\npermitemptypasswords no\ndenyusers tero tero-agent tero-podman tero-keys\n"
 
 const defaultSSHSettings = "port 22\npubkeyauthentication yes\nstrictmodes yes\nauthorizedkeysfile .ssh/authorized_keys .ssh/authorized_keys2\npubkeyacceptedalgorithms ssh-ed25519,rsa-sha2-512,rsa-sha2-256\n"
 
@@ -390,8 +390,8 @@ func TestFirewallBlocksMetadataForTerosUsers(t *testing.T) {
 	}
 	for _, want := range []string{
 		"type filter hook output priority filter; policy accept;",
-		`meta skuid { "tero", "tero-agent" } ip daddr { 169.254.0.0/16, 168.63.129.16, 100.100.100.200 } reject`,
-		`meta skuid { "tero", "tero-agent" } ip6 daddr { fe80::/10, fd00:ec2::254, fd20:ce::254, fd00:c1::a9fe:a9fe, fd00:a9fe:a9fe::1, fd00:42::42 } reject`,
+		`meta skuid { "tero", "tero-agent", "tero-podman" } ip daddr { 169.254.0.0/16, 168.63.129.16, 100.100.100.200 } reject`,
+		`meta skuid { "tero", "tero-agent", "tero-podman" } ip6 daddr { fe80::/10, fd00:ec2::254, fd20:ce::254, fd00:c1::a9fe:a9fe, fd00:a9fe:a9fe::1, fd00:42::42 } reject`,
 	} {
 		if !strings.Contains(string(rules), want) {
 			t.Errorf("rules lack %q:\n%s", want, rules)
@@ -435,14 +435,14 @@ func TestHardenSSHRequiresTheServiceUsersDenied(t *testing.T) {
 	h := newGuardHost(t)
 	recorder := h.run.(*sysexec.Recorder)
 	recorder.Outputs["ssh -Q kex"] = "curve25519-sha256\n"
-	recorder.Outputs["sshd -T"] = strings.Replace(hardenedSSHSettings, "denyusers tero tero-agent tero-keys", "denyusers tero tero-keys", 1)
+	recorder.Outputs["sshd -T"] = strings.Replace(hardenedSSHSettings, "denyusers tero tero-agent tero-podman tero-keys", "denyusers tero tero-keys", 1)
 
 	err := hardenSSH(context.Background(), h)
 	if err == nil || !strings.Contains(err.Error(), "tero-agent") {
 		t.Fatalf("hardenSSH() without tero-agent in DenyUsers = %v", err)
 	}
 	drop, _ := embedded.ReadFile("files/sshd-hardening.conf")
-	if !strings.Contains(string(drop), "\nDenyUsers tero tero-agent tero-keys\n") {
+	if !strings.Contains(string(drop), "\nDenyUsers tero tero-agent tero-podman tero-keys\n") {
 		t.Error("the drop-in doesn't deny the service users")
 	}
 }

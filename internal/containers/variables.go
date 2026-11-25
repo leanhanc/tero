@@ -26,18 +26,17 @@ import (
 // configuration at export.
 const SourceLabel = "tero.source"
 
-// envFileMode lets the app's process read its file: --userns=auto maps it away
-// from tero-agent's uid. The directory, which only tero-agent can enter, keeps
-// everyone else out, and the container reaches its file through the mount.
+// envFileMode lets the app's process read its file: --userns=auto maps it to
+// one of tero-podman's subordinate ids. The directory, which only tero-agent
+// and tero-podman can enter, keeps everyone else out, and the container
+// reaches its file through the mount.
 const envFileMode = 0o644
 
-// runtimeDir is tmpfs, created by systemd for tero-agent's user manager.
-var runtimeDir = func() string {
-	return fmt.Sprintf("/run/user/%d", os.Getuid())
-}
-
-func envDir() string {
-	return filepath.Join(runtimeDir(), "tero-env")
+// envDir is on tmpfs. `tero init` has systemd create it at boot, owned by
+// tero-agent, which writes the files, with group tero-podman, whose Podman
+// mounts them: mode 0750.
+var envDir = func() string {
+	return "/run/tero-env"
 }
 
 // appContainerPattern is how Name names app containers. Names come from a
@@ -72,13 +71,6 @@ func WriteEnvFile(container string, variables map[string]string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(envDir(), 0o700); err != nil {
-		return err
-	}
-	if err := os.Chmod(envDir(), 0o700); err != nil {
-		return err
-	}
-
 	temporary, err := os.CreateTemp(envDir(), ".new-*")
 	if err != nil {
 		return err

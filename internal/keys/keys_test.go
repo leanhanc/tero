@@ -592,7 +592,7 @@ func TestOversizedMessageRefused(t *testing.T) {
 	buffer.Write(make([]byte, 16))
 
 	var req request
-	if err := readMessage(&buffer, &req); err == nil {
+	if err := readMessage(&buffer, &req, maxMessage); err == nil {
 		t.Error("an oversized message was read")
 	}
 }

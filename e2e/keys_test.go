@@ -192,11 +192,15 @@ func testAssumeBreach(t *testing.T) {
 		t.Error("assume-breach ran without confirmation")
 	}
 
-	// What an attacker running as tero or tero-agent could leave behind.
+	// What an attacker running as tero, tero-agent or tero-podman could leave
+	// behind.
 	must(t, asTero(`mkdir -p ~/.config/systemd/user && printf '[Service]\nExecStart=/bin/true\n' > ~/.config/systemd/user/planted.service`))
 	must(t, asAgent(`mkdir -p ~/.config/systemd/user && printf '[Service]\nExecStart=/bin/true\n' > ~/.config/systemd/user/planted-agent.service`))
 	must(t, `echo '* * * * * true' | sudo crontab -u tero -`)
 	must(t, `echo '* * * * * true' | sudo crontab -u tero-agent -`)
+	must(t, `sudo -u tero-podman mkdir -p /var/lib/tero-podman/.config/containers`)
+	must(t, `printf '[engine]\nhooks_dir = ["/tmp"]\n' | sudo -u tero-podman tee /var/lib/tero-podman/.config/containers/containers.conf`)
+	must(t, "sudo systemd-run --quiet --uid=tero-podman --unit=tero-e2e-podman-leftover sleep 1000")
 	must(t, "sudo systemd-run --quiet --uid=tero --unit=tero-e2e-leftover sleep 1000")
 	must(t, "sudo systemd-run --quiet --uid=tero-agent --unit=tero-e2e-agent-leftover sleep 1000")
 
@@ -227,18 +231,19 @@ func testAssumeBreach(t *testing.T) {
 	must(t, "systemctl is-active tero")
 	assertContains(t, must(t, "sudo "+keysStatus), `"isSetUp":false`)
 
-	for _, leftover := range []string{"tero-e2e-leftover", "tero-e2e-agent-leftover"} {
+	for _, leftover := range []string{"tero-e2e-leftover", "tero-e2e-agent-leftover", "tero-e2e-podman-leftover"} {
 		if left := run(t, "systemctl is-active "+leftover); left.exitCode == 0 {
 			t.Errorf("%s survived assume-breach", leftover)
 		}
 	}
-	// The moved ~/.config is reported; tero-agent's user manager and Podman
-	// may make a fresh, empty one once they start again.
+	// The moved ~/.config is reported; the user managers and Podman may make a
+	// fresh, empty one once they start again.
 	moved := map[string]string{
 		"/var/lib/tero/.config":               "/var/lib/tero/.config/systemd/user/planted.service",
 		"/var/lib/tero-agent/.config":         "/var/lib/tero-agent/.config/systemd/user/planted-agent.service",
 		"/var/spool/cron/crontabs/tero":       "/var/spool/cron/crontabs/tero",
 		"/var/spool/cron/crontabs/tero-agent": "/var/spool/cron/crontabs/tero-agent",
+		"/var/lib/tero-podman/.config":        "/var/lib/tero-podman/.config/containers/containers.conf",
 	}
 	for reported, planted := range moved {
 		if left := run(t, "sudo test -e "+planted); left.exitCode == 0 {

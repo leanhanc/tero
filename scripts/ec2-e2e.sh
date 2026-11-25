@@ -12,14 +12,24 @@
 #   scripts/ec2-e2e.sh amd64 24.04     one server
 #   scripts/ec2-e2e.sh all 26.04       one release on every architecture
 #   scripts/ec2-e2e.sh cleanup         remove everything tagged tero-e2e
+#   scripts/ec2-e2e.sh cleanup-stale 4 remove what runs started over 4 hours ago left
+#   scripts/ec2-e2e.sh smoke [arch] [release]
+#                                      run scripts/ec2-smoke.sh instead of the
+#                                      suite: a release build, a real Let's
+#                                      Encrypt certificate and Lynis
 #
-# Uses the AWS profile in AWS_PROFILE (default tero) and its Region.
+# Uses the AWS credentials in the environment when there are any, as in CI,
+# and otherwise the profile in AWS_PROFILE (default tero), with the Region in
+# AWS_REGION or the profile's.
 # TERO_E2E_AMD64_TYPE and TERO_E2E_ARM64_TYPE pick the instance types. The
 # defaults, t3.small and t4g.small (2 GiB each), are the smallest the suite
 # passes on in about 35 minutes.
 set -euo pipefail
 
-export AWS_PROFILE="${AWS_PROFILE:-tero}" AWS_PAGER=""
+export AWS_PAGER=""
+if [[ -z "${AWS_ACCESS_KEY_ID:-}" ]]; then
+	export AWS_PROFILE="${AWS_PROFILE:-tero}"
+fi
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 canonical_owner="099720109477"
 root_volume_gib=20
@@ -31,6 +41,15 @@ main() {
 	if [[ "${1:-}" == "cleanup" ]]; then
 		remove_tagged ""
 		return
+	fi
+	if [[ "${1:-}" == "cleanup-stale" ]]; then
+		remove_stale "${2:?how many hours old a run must be}"
+		return
+	fi
+	runner=scripts/ec2-test.sh
+	if [[ "${1:-}" == "smoke" ]]; then
+		runner=scripts/ec2-smoke.sh
+		shift
 	fi
 
 	local archs=("${all_archs[@]}") releases=("${all_releases[@]}")
@@ -46,24 +65,30 @@ main() {
 	mkdir -p "$run_dir"
 	trap 'finish $?' EXIT
 	trap 'exit 130' INT TERM
-	echo "=== Run $run_id in $(aws configure get region), logs in .tero-e2e/$run_id"
+	echo "=== Run $run_id in $(region), logs in .tero-e2e/$run_id"
 
 	git log --oneline -1
 	create_access
 	local arch release
 	for arch in "${archs[@]}"; do
 		echo "=== Building for $arch"
-		scripts/ec2-test.sh build "$arch" >"$run_dir/build-$arch.log" 2>&1 ||
+		"$runner" build "$arch" >"$run_dir/build-$arch.log" 2>&1 ||
 			fail "build for $arch failed, see .tero-e2e/$run_id/build-$arch.log"
 	done
 
+	expected=()
 	for arch in "${archs[@]}"; do
 		for release in "${releases[@]}"; do
+			expected+=("$arch-$release")
 			test_on_server "$arch" "$release" &
 		done
 	done
 	wait
 	report
+}
+
+region() {
+	echo "${AWS_REGION:-$(aws configure get region)}"
 }
 
 fail() {
@@ -120,13 +145,14 @@ test_on_server() {
 		ip="$(wait_for_ssh "$instance_id" 2>>"$log")" || ip=""
 		if [[ -n "$ip" ]]; then
 			say "$name" "running the suite on $ip"
-			if TERO_E2E_PREBUILT=1 scripts/ec2-test.sh "ubuntu@$ip" "$key_file" >>"$log" 2>&1; then
+			if TERO_E2E_PREBUILT=1 "$runner" "ubuntu@$ip" "$key_file" >>"$log" 2>&1; then
 				result=passed
 			fi
 			ssh-keygen -R "$ip" >/dev/null 2>&1 || true
 		fi
-		aws ec2 terminate-instances --instance-ids "$instance_id" >/dev/null
-		aws ec2 wait instance-terminated --instance-ids "$instance_id"
+		# The run's cleanup terminates it if this fails.
+		aws ec2 terminate-instances --instance-ids "$instance_id" >/dev/null || true
+		aws ec2 wait instance-terminated --instance-ids "$instance_id" || true
 		echo $(($(date +%s) - started)) >"$run_dir/$name.seconds"
 	fi
 
@@ -167,7 +193,7 @@ prepare_image() {
 	fi
 	echo "Canonical image $source_id" >&2
 
-	copy_id="$(aws ec2 copy-image --source-region "$(aws configure get region)" \
+	copy_id="$(aws ec2 copy-image --source-region "$(region)" \
 		--source-image-id "$source_id" --name "tero-e2e-$run_id-$name-copy" \
 		--tag-specifications "ResourceType=image,Tags=[$(tags "$name")]" \
 		"ResourceType=snapshot,Tags=[$(tags "$name")]" \
@@ -234,12 +260,13 @@ wait_for_ssh() {
 }
 
 # report prints which servers passed and failed and the instance hours the
-# run used, and fails when any server didn't pass.
+# run used, and fails when any server didn't pass. A server that wrote no
+# result failed.
 report() {
 	local passed=() failed=() seconds=0 file name
-	for file in "$run_dir"/*.result; do
-		name="$(basename "$file" .result)"
-		if [[ "$(cat "$file")" == "passed" ]]; then
+	for name in "${expected[@]}"; do
+		file="$run_dir/$name.result"
+		if [[ -e "$file" && "$(cat "$file")" == "passed" ]]; then
 			passed+=("$name")
 		else
 			failed+=("$name")
@@ -311,6 +338,47 @@ remove_tagged() {
 		echo "deleting security group $id"
 		aws ec2 delete-security-group --group-id "$id" >/dev/null
 	done
+}
+
+# remove_stale removes what runs left that started more than the given hours
+# ago, judged by the start time in their run id, so a scheduled cleanup never
+# touches a run still going.
+remove_stale() {
+	local hours="$1"
+	local now runs run started
+	now="$(date -u +%s)"
+	runs="$( (
+		aws ec2 describe-instances --filters Name=tag-key,Values=tero-e2e \
+			--query 'Reservations[].Instances[].Tags[?Key==`tero-e2e`].Value[]' --output text
+		aws ec2 describe-images --owners self --filters Name=tag-key,Values=tero-e2e \
+			--query 'Images[].Tags[?Key==`tero-e2e`].Value[]' --output text
+		aws ec2 describe-snapshots --owner-ids self --filters Name=tag-key,Values=tero-e2e \
+			--query 'Snapshots[].Tags[?Key==`tero-e2e`].Value[]' --output text
+		aws ec2 describe-key-pairs --filters Name=tag-key,Values=tero-e2e \
+			--query 'KeyPairs[].Tags[?Key==`tero-e2e`].Value[]' --output text
+		aws ec2 describe-security-groups --filters Name=tag-key,Values=tero-e2e \
+			--query 'SecurityGroups[].Tags[?Key==`tero-e2e`].Value[]' --output text
+	) | tr '\t' '\n' | sort -u)"
+
+	for run in $runs; do
+		if ! started="$(run_start "$run")"; then
+			echo "removing run $run, whose id has no start time"
+			remove_tagged "$run"
+			continue
+		fi
+		if ((now - started > hours * 3600)); then
+			echo "removing run $run"
+			remove_tagged "$run"
+		fi
+	done
+}
+
+# run_start prints the Unix time a run id like 20261121-031500-1234 names.
+run_start() {
+	local stamp="${1:0:15}"
+	[[ "$stamp" =~ ^[0-9]{8}-[0-9]{6}$ ]] || return 1
+	date -u -d "${stamp:0:8} ${stamp:9:2}:${stamp:11:2}:${stamp:13:2}" +%s 2>/dev/null ||
+		date -u -j -f "%Y%m%d-%H%M%S" "$stamp" +%s
 }
 
 # Exit on the same line: bash reads a script as it runs, so a run started

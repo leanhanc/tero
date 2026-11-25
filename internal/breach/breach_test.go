@@ -66,7 +66,7 @@ func (s *fakeServer) Run(_ context.Context, name string, args ...string) (string
 		if !s.hasTPM {
 			return "", errors.New("no TPM")
 		}
-	case "pgrep --uid 999", "pgrep --uid 998":
+	case "pgrep --uid 999", "pgrep --uid 998", "pgrep --uid 997":
 		return "", noMatch{}
 	}
 
@@ -118,14 +118,15 @@ func (s *fakeServer) files() keyfiles.Files {
 
 func (s *fakeServer) options(out *bytes.Buffer, answer string) Options {
 	return Options{
-		Domain:   "dash.example.com",
-		In:       strings.NewReader(answer),
-		Out:      out,
-		Root:     s.root,
-		Run:      s,
-		Keys:     s.files(),
-		TeroUID:  999,
-		AgentUID: 998,
+		Domain:    "dash.example.com",
+		In:        strings.NewReader(answer),
+		Out:       out,
+		Root:      s.root,
+		Run:       s,
+		Keys:      s.files(),
+		TeroUID:   999,
+		AgentUID:  998,
+		PodmanUID: 997,
 	}
 }
 
@@ -172,18 +173,23 @@ func TestAssumeBreachResetsEverything(t *testing.T) {
 	stopAgentAt := slices.Index(server.commands, "systemctl stop user-998.slice user-runtime-dir@998.service")
 	killTeroAt := slices.Index(server.commands, "pkill --signal KILL --uid 999")
 	killAgentAt := slices.Index(server.commands, "pkill --signal KILL --uid 998")
+	stopPodmanAt := slices.Index(server.commands, "systemctl stop user-997.slice user-runtime-dir@997.service")
+	killPodmanAt := slices.Index(server.commands, "pkill --signal KILL --uid 997")
+	startPodmanAt := slices.Index(server.commands, "systemctl start user@997.service")
 	// The rotation restarts the key service after the login is reset.
 	clearAt := slices.Index(server.commands, "systemctl restart tero-keys.service")
 	startAgentAt := slices.Index(server.commands, "systemctl start user@998.service")
 	startAt := slices.Index(server.commands, "systemctl start tero.service")
 	clearCacheAt := slices.IndexFunc(server.commands, func(command string) bool {
-		return command == "systemd-run --machine=tero-agent@.host --user --wait --quiet podman system reset --force"
+		return command == "systemd-run --machine=tero-podman@.host --user --wait --quiet podman system reset --force"
 	})
 	releaseAgentAt := slices.Index(server.commands, "systemctl --user --machine=tero-agent@.host start tero-agent.service")
 	isInOrder := stopAt >= 0 && stopTeroAt > stopAt && stopAgentAt > stopAt &&
 		killTeroAt > stopAgentAt && killAgentAt > stopAgentAt &&
 		clearAt > killTeroAt && clearAt > killAgentAt && startAgentAt > clearAt &&
-		clearCacheAt > startAgentAt && releaseAgentAt > clearCacheAt && startAt > releaseAgentAt
+		clearCacheAt > startAgentAt && releaseAgentAt > clearCacheAt && startAt > releaseAgentAt &&
+		stopPodmanAt > stopAt && killPodmanAt > stopPodmanAt && clearAt > killPodmanAt &&
+		startPodmanAt > clearAt && clearCacheAt > startPodmanAt
 	if !isInOrder || !server.dashboardUp {
 		t.Errorf("commands in the wrong order: %v", server.commands)
 	}
@@ -261,6 +267,7 @@ func TestAssumeBreachWithYesDoesntAsk(t *testing.T) {
 const (
 	userUnits      = teroHome + "/.config/systemd/user"
 	agentUserUnits = agentHome + "/.config/systemd/user"
+	podmanConfig   = podmanHome + "/.config/containers"
 	teroCrontab    = crontabDir + "/tero"
 	agentCrontab   = crontabDir + "/tero-agent"
 )
@@ -273,6 +280,8 @@ func TestAssumeBreachReportsWhatToCheck(t *testing.T) {
 	os.WriteFile(filepath.Join(server.root, userUnits, "miner.service"), []byte("[Service]"), 0o600)
 	os.MkdirAll(filepath.Join(server.root, agentUserUnits), 0o700)
 	os.WriteFile(filepath.Join(server.root, agentUserUnits, "backdoor.service"), []byte("[Service]"), 0o600)
+	os.MkdirAll(filepath.Join(server.root, podmanConfig), 0o700)
+	os.WriteFile(filepath.Join(server.root, podmanConfig, "containers.conf"), []byte("[engine]\nconmon_path=[\"/tmp/x\"]\n"), 0o600)
 	var out bytes.Buffer
 
 	if err := Run(context.Background(), server.options(&out, "yes\n")); err != nil {
@@ -280,6 +289,9 @@ func TestAssumeBreachReportsWhatToCheck(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(server.root, agentUserUnits, "backdoor.service")); !os.IsNotExist(err) {
 		t.Error("the unit planted for tero-agent was left in place")
+	}
+	if _, err := os.Stat(filepath.Join(server.root, podmanConfig, "containers.conf")); !os.IsNotExist(err) {
+		t.Error("the Podman settings planted for tero-podman were left in place")
 	}
 
 	for _, want := range []string{"latest Tero", "authenticator app", "authorized_keys", "Redeploy every app", teroHome + "/.config", agentHome + "/.config", "no TPM"} {
@@ -331,7 +343,7 @@ func TestAgentStaysHeldWhenTheCacheCantBeCleared(t *testing.T) {
 	server := newFakeServer(t)
 	server.setUp(t)
 	var out bytes.Buffer
-	server.failing = "systemd-run --machine=tero-agent@.host --user --wait --quiet podman system reset --force"
+	server.failing = "systemd-run --machine=tero-podman@.host --user --wait --quiet podman system reset --force"
 
 	if err := Run(context.Background(), server.options(&out, "yes\n")); err == nil {
 		t.Fatal("Run succeeded")
@@ -543,8 +555,8 @@ func TestAssumeBreachFailsLiveReleases(t *testing.T) {
 	if err := db.QueryRow("SELECT state FROM deploys WHERE id = 1").Scan(&state); err != nil || state != "failed" {
 		t.Errorf("live release after the reset = %q, %v", state, err)
 	}
-	if !slices.Contains(server.commands, "systemd-run --machine=tero-agent@.host --user --wait --quiet podman system reset --force") {
-		t.Errorf("the agent's store wasn't emptied: %v", server.commands)
+	if !slices.Contains(server.commands, "systemd-run --machine=tero-podman@.host --user --wait --quiet podman system reset --force") {
+		t.Errorf("tero-podman's store wasn't emptied: %v", server.commands)
 	}
 	// Audit finding (2026-11-10): only apps with variables had their source
 	// listed to check, though a compromised dashboard can change any app's.
@@ -568,7 +580,7 @@ func TestTemporaryFilesOfTerosUsersGo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	others := Options{Root: root, TeroUID: os.Getuid() + 1, AgentUID: os.Getuid() + 2}
+	others := Options{Root: root, TeroUID: os.Getuid() + 1, AgentUID: os.Getuid() + 2, PodmanUID: os.Getuid() + 3}
 	if err := removeTemporaryFiles(others); err != nil {
 		t.Fatal(err)
 	}
@@ -576,7 +588,7 @@ func TestTemporaryFilesOfTerosUsersGo(t *testing.T) {
 		t.Fatalf("another user's file was removed: %v", err)
 	}
 
-	agent := Options{Root: root, TeroUID: os.Getuid() + 1, AgentUID: os.Getuid()}
+	agent := Options{Root: root, TeroUID: os.Getuid() + 1, AgentUID: os.Getuid(), PodmanUID: os.Getuid() + 3}
 	if err := removeTemporaryFiles(agent); err != nil {
 		t.Fatal(err)
 	}

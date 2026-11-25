@@ -1,4 +1,4 @@
-// Package containers starts and checks app containers under tero-agent's
+// Package containers starts and checks app containers in tero-podman's
 // rootless Podman, with the ADR 0001 rules: no capabilities, no privilege
 // gain, a user namespace slice of their own, and a network namespace of
 // their own that can't reach other apps. Each app's PORT is published on
@@ -82,9 +82,6 @@ func Start(ctx context.Context, appName string, deployID int64, image string, va
 	if err != nil {
 		return "", 0, err
 	}
-	if err := prepareOutputDir(); err != nil {
-		return "", 0, err
-	}
 
 	args := []string{"run", "--detach", "--pull=never", "--name", name,
 		"--label", AppLabel + "=" + appName,
@@ -102,25 +99,45 @@ func Start(ctx context.Context, appName string, deployID int64, image string, va
 	args = append(args, image)
 	args = append(args, command...)
 
-	scope := scopeName(name)
-	_, err = podman.RunInOwnScope(startCtx, scope, args...)
-	if err != nil && startCtx.Err() != nil {
-		// Killing podman leaves its children running in the scope, holding
-		// the storage locks the cleanup needs.
-		killCtx, cancelKill := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-		defer cancelKill()
-		if killErr := podman.KillScope(killCtx, scope); killErr != nil {
-			slog.Warn("kill a container start that didn't finish", "container", name, "error", killErr)
-		}
-		if ctx.Err() == nil {
-			return name, 0, ErrStartTimedOut
-		}
+	_, err = podman.Run(startCtx, args...)
+	if err != nil && startCtx.Err() != nil && ctx.Err() == nil {
+		// Cancelling the client doesn't stop the start in the Podman service,
+		// which could still bring the container up with the app's values.
+		removeUntilGone(context.WithoutCancel(ctx), name)
+		return name, 0, ErrStartTimedOut
 	}
 	if err != nil {
 		return name, 0, fmt.Errorf("start the app's container: %w", err)
 	}
 
 	return name, hostPort, nil
+}
+
+// removeTimeout bounds removeUntilGone. A removal waits for the start it
+// replaces to release Podman's storage lock.
+const removeTimeout = 10 * time.Minute
+
+// removeUntilGone removes a container until Podman no longer has it, so a
+// start still running in the Podman service can't bring it up afterwards.
+func removeUntilGone(ctx context.Context, name string) {
+	ctx, cancel := context.WithTimeout(ctx, removeTimeout)
+	defer cancel()
+
+	for {
+		removeErr := podman.RemoveContainer(ctx, name)
+		left, listErr := podman.Run(ctx, "ps", "--all", "--filter", "name=^"+name+"$", "--format", "{{.Names}}")
+		isGone := removeErr == nil && listErr == nil && left == ""
+		if isGone {
+			return
+		}
+
+		select {
+		case <-ctx.Done():
+			slog.Warn("remove a container whose start timed out", "container", name, "error", removeErr)
+			return
+		case <-time.After(5 * time.Second):
+		}
+	}
 }
 
 // ExitedError means the app's process ended before it answered.
@@ -244,17 +261,8 @@ func publishedPort(entry psEntry) int {
 
 // Resume starts an existing, stopped container again.
 func Resume(ctx context.Context, container string) error {
-	if err := prepareOutputDir(); err != nil {
-		return err
-	}
-	_, err := podman.RunInOwnScope(ctx, scopeName(container), "start", container)
+	_, err := podman.Run(ctx, "start", container)
 	return err
-}
-
-// scopeName is unique per start, since a scope can't be reused while the
-// previous one is still being collected.
-func scopeName(container string) string {
-	return fmt.Sprintf("%s-%d.scope", container, time.Now().UnixNano())
 }
 
 // Stop stops a container and keeps it, so it can be resumed.
@@ -323,7 +331,7 @@ func answersHTTP(ctx context.Context, httpClient *http.Client, url string) bool 
 // apps' ports are published. Podman 5 uses pasta and Podman 4 slirp4netns,
 // each told not to map the host into the container. Podman networks aren't
 // used: on Podman 4 their shared rootless namespace hides the networks
-// stored under tero-agent's home in /var/lib.
+// stored under tero-podman's home in /var/lib.
 func isolatedNetwork(ctx context.Context) (string, error) {
 	networkMu.Lock()
 	defer networkMu.Unlock()
@@ -334,7 +342,7 @@ func isolatedNetwork(ctx context.Context) (string, error) {
 		return networkMode, nil
 	}
 
-	version, err := podman.Run(ctx, "version", "--format", "{{.Client.Version}}")
+	version, err := podman.Run(ctx, "version", "--format", "{{.Server.Version}}")
 	if err != nil {
 		return "", err
 	}

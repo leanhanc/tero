@@ -1,0 +1,195 @@
+# The AWS side of the e2e workflows (.github/workflows/e2e-cloud.yml and
+# e2e-cleanup.yml): a role GitHub Actions assumes with its OIDC token, only
+# from this repository's e2e environment, that can create, tag and remove EC2
+# resources tagged tero-e2e and nothing else, and a monthly budget alert.
+# Deploy it once in the project's Region; docs/e2e-ci.md has the steps.
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Tero e2e CI on EC2
+
+Parameters:
+  Repository:
+    Type: String
+    Default: leanhanc/tero
+    Description: The GitHub repository allowed to assume the role, as owner/name
+  CreateOIDCProvider:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: false when the account already has GitHub's OIDC provider (token.actions.githubusercontent.com)
+  BudgetEmail:
+    Type: String
+    Description: Who gets the budget alerts
+  MonthlyBudgetUSD:
+    Type: Number
+    Default: 20
+
+Conditions:
+  ShouldCreateProvider: !Equals [!Ref CreateOIDCProvider, "true"]
+
+Resources:
+  GitHubProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: ShouldCreateProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+
+  E2ERole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: tero-e2e-ci
+      MaxSessionDuration: 14400
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub repo:${Repository}:environment:e2e
+      Policies:
+        - PolicyName: tero-e2e-ec2
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: Read
+                Effect: Allow
+                Action:
+                  - ec2:DescribeImages
+                  - ec2:DescribeInstances
+                  - ec2:DescribeKeyPairs
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeSnapshots
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeSubnets
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref AWS::Region
+
+              # New resources must carry the tero-e2e tag when they are made.
+              - Sid: CreateTaggedAccess
+                Effect: Allow
+                Action:
+                  - ec2:CreateKeyPair
+                  - ec2:CreateSecurityGroup
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:key-pair/*
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*
+                Condition:
+                  "Null":
+                    aws:RequestTag/tero-e2e: "false"
+              - Sid: LaunchTagged
+                Effect: Allow
+                Action: ec2:RunInstances
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:volume/*
+                Condition:
+                  "Null":
+                    aws:RequestTag/tero-e2e: "false"
+              - Sid: CreateSecurityGroupInVPC
+                Effect: Allow
+                Action: ec2:CreateSecurityGroup
+                Resource: !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:vpc/*
+              # RunInstances also names what an instance uses. The image, key
+              # pair and security group must be the run's own.
+              - Sid: LaunchFromTaggedParts
+                Effect: Allow
+                Action: ec2:RunInstances
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}::image/*
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:key-pair/*
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*
+                Condition:
+                  "Null":
+                    aws:ResourceTag/tero-e2e: "false"
+              - Sid: LaunchInSubnet
+                Effect: Allow
+                Action: ec2:RunInstances
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:subnet/*
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*
+
+              # The run copies Canonical's image and registers its snapshot
+              # again with NitroTPM. Only the run's own snapshots can be
+              # registered.
+              - Sid: CopyAndRegisterImages
+                Effect: Allow
+                Action:
+                  - ec2:CopyImage
+                  - ec2:RegisterImage
+                Resource: !Sub arn:${AWS::Partition}:ec2:${AWS::Region}::image/*
+                Condition:
+                  "Null":
+                    aws:RequestTag/tero-e2e: "false"
+              - Sid: RegisterOwnSnapshots
+                Effect: Allow
+                Action: ec2:RegisterImage
+                Resource: !Sub arn:${AWS::Partition}:ec2:${AWS::Region}::snapshot/*
+                Condition:
+                  "Null":
+                    aws:ResourceTag/tero-e2e: "false"
+
+              - Sid: TagOnlyWhileCreating
+                Effect: Allow
+                Action: ec2:CreateTags
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    ec2:CreateAction:
+                      - RunInstances
+                      - CreateKeyPair
+                      - CreateSecurityGroup
+                      - CopyImage
+                      - RegisterImage
+
+              - Sid: ChangeAndRemoveTagged
+                Effect: Allow
+                Action:
+                  - ec2:AuthorizeSecurityGroupIngress
+                  - ec2:DeleteKeyPair
+                  - ec2:DeleteSecurityGroup
+                  - ec2:DeleteSnapshot
+                  - ec2:DeregisterImage
+                  - ec2:TerminateInstances
+                Resource: "*"
+                Condition:
+                  "Null":
+                    aws:ResourceTag/tero-e2e: "false"
+                  StringEquals:
+                    aws:RequestedRegion: !Ref AWS::Region
+
+  Budget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: tero-e2e
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref MonthlyBudgetUSD
+          Unit: USD
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref BudgetEmail
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref BudgetEmail
+
+Outputs:
+  RoleArn:
+    Description: Set this as the TERO_E2E_ROLE_ARN variable of the repository's e2e environment
+    Value: !GetAtt E2ERole.Arn

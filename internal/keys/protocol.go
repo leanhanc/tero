@@ -9,6 +9,8 @@ import (
 	"io"
 	"log/slog"
 	"time"
+
+	"github.com/leanhanc/tero/internal/recovery"
 )
 
 // The protocol is one request and one answer per connection, each a 4-byte
@@ -18,6 +20,19 @@ import (
 // MaxWebhookBody, base64-encoded in JSON, and so anything else the dashboard
 // accepts.
 const maxMessage = 2 << 20
+
+// maxRootMessage bounds root's requests and their answers, which carry a
+// whole backup of the apps' variables.
+const maxRootMessage = 48 << 20
+
+// messageLimit is how large a caller's requests and answers may be.
+func messageLimit(caller Caller) int {
+	if caller == CallerRoot {
+		return maxRootMessage
+	}
+
+	return maxMessage
+}
 
 // Verbs, and which caller may send each. No verb returns the master key, the
 // password hash, a stored TOTP secret or a token hash; only the three that
@@ -64,6 +79,9 @@ const (
 	VerbVariablesSummary = "variables.summary"
 	VerbVariablesLost    = "variables.mark-lost"
 	VerbSourceApprove    = "source.approve"
+
+	VerbBackupExport = "backup.export"
+	VerbBackupImport = "backup.import"
 )
 
 var verbs = map[Caller]map[string]bool{
@@ -91,6 +109,7 @@ var verbs = map[Caller]map[string]bool{
 		VerbEventAppend: true, VerbEventList: true,
 		VerbGitHubForget: true, VerbGitHubStatus: true,
 		VerbVariablesSummary: true, VerbVariablesLost: true,
+		VerbBackupExport: true, VerbBackupImport: true,
 	},
 }
 
@@ -134,6 +153,11 @@ var errorCodes = map[string]error{
 	"variable_sealed":     ErrVariableSealed,
 	"too_many_variables":  ErrTooManyVariables,
 	"source_not_approved": ErrSourceNotApproved,
+
+	"not_empty":      ErrNotEmpty,
+	"invalid_backup": ErrInvalidBackup,
+	"wrong_key":      recovery.ErrWrongKey,
+	"invalid_key":    recovery.ErrInvalidKey,
 }
 
 const rateLimitedCode = "rate_limited"
@@ -160,12 +184,12 @@ func errorFor(answer response) error {
 	return fmt.Errorf("the key service failed (%s). `journalctl -u tero-keys` says why", code)
 }
 
-func writeMessage(w io.Writer, value any) error {
+func writeMessage(w io.Writer, value any, limit int) error {
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	if len(encoded) > maxMessage {
+	if len(encoded) > limit {
 		return errors.New("message too large")
 	}
 
@@ -178,14 +202,14 @@ func writeMessage(w io.Writer, value any) error {
 	return err
 }
 
-func readMessage(r io.Reader, value any) error {
+func readMessage(r io.Reader, value any, limit int) error {
 	var length [4]byte
 	if _, err := io.ReadFull(r, length[:]); err != nil {
 		return err
 	}
 
 	size := binary.BigEndian.Uint32(length[:])
-	if size > maxMessage {
+	if size > uint32(limit) {
 		return errors.New("message too large")
 	}
 
@@ -494,6 +518,14 @@ func (s *Service) dispatch(ctx context.Context, caller Caller, req request) (any
 		return s.VariablesSummary(ctx)
 	case VerbVariablesLost:
 		return struct{}{}, s.MarkLostVariables(ctx)
+	case VerbBackupExport:
+		return withArgs(req, func(args backupExportArgs) (any, error) {
+			return s.ExportBackup(ctx, args.Recipient)
+		})
+	case VerbBackupImport:
+		return withArgs(req, func(args backupImportArgs) (any, error) {
+			return s.ImportBackup(ctx, args.Secret, args.Sealed)
+		})
 	default:
 		return nil, ErrRefused
 	}

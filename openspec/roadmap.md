@@ -13,7 +13,7 @@ Change: [add-security-baseline-slice-1](changes/add-security-baseline-slice-1/)
 - [x] ASVS L2 mapping document
 - [x] Firewall rule that rejects connections from `tero` and `tero-agent`, and so from every build and app, to the cloud metadata addresses of AWS, Google Cloud, Azure, Oracle Cloud, Alibaba Cloud, Akamai and Scaleway (169.254.0.0/16, 168.63.129.16, 100.100.100.200, fe80::/10 and the providers' IPv6 metadata addresses), so they can't read the metadata service and its instance credentials
 - [x] Signed releases with SBOMs and provenance, and `install.sh`
-- [ ] Vulnerability checks in CI: `govulncheck ./...` for Go and `bun audit` for the dashboard, failing the build on a reachable vulnerability
+- [x] Vulnerability checks in CI: `govulncheck ./...` for Go and `bun audit` for the dashboard, on every push and pull request, failing the build on a reachable vulnerability
 - [x] Check that ports 80 and 443 are reachable from the internet, since AWS, Google Cloud, Azure and Oracle Cloud block them by default and certificates can't be issued until they're open
 - [x] When they're closed, explain it clearly and give step-by-step help for the leading providers (security groups, firewall rules, network security groups, security lists), during `sudo tero init` ([add-port-check-slice-1](changes/add-port-check-slice-1/)). Cele may still rework the wording and where else it shows
 
@@ -101,12 +101,16 @@ Requirements: ASVS 13.3.1, 13.3.2, 14.2.4, 16.2.5; NIST SP 800-190 4.1.4 ([asvs-
 
 ## Moving secrets to a new server
 
-- [ ] Recovery key printed once, and `sudo tero restore` for moving encrypted variables to a new server
-- [ ] A backup of the apps' database, which restoring also needs and nothing makes yet
+Change: [add-backup-restore](changes/add-backup-restore/)
+
+- [x] Recovery key printed once, and `sudo tero restore` for moving encrypted variables to a new server
+- [x] A backup of the apps and their variables with `sudo tero backup`, encrypted to the recovery key
 
 ## Harden the agent's helpers
 
-- [ ] Run Podman's network helpers (pasta or slirp4netns, rootlessport), which carry the apps' traffic, under a uid apart from `tero-agent`, which `tero-keys` trusts with every value
+Change: [harden-podman-helpers](changes/harden-podman-helpers/)
+
+- [x] Run Podman's network helpers (pasta or slirp4netns, rootlessport), which carry the apps' traffic, under a uid apart from `tero-agent`, which `tero-keys` trusts with every value
 
 ## Slice 7: Safe releases and rollback
 

@@ -262,12 +262,12 @@ func testContainerHardening(t *testing.T) {
 		t.Errorf("container has capabilities: %s", options)
 	}
 
-	// --userns=auto gives the container a small slice of tero-agent's range, not
+	// --userns=auto gives the container a small slice of tero-podman's range, not
 	// the whole of it.
 	appPID := must(t, asAgent(`podman inspect --format '{{.State.Pid}}' `+npm))
 	uidMap := must(t, "sudo cat /proc/"+appPID+"/uid_map")
 	if strings.Contains(uidMap, "1000000") {
-		t.Errorf("the app's user namespace maps tero-agent's whole range:\n%s", uidMap)
+		t.Errorf("the app's user namespace maps tero-podman's whole range:\n%s", uidMap)
 	}
 
 	npmUID := firstHostUID(t, npm)
@@ -275,11 +275,11 @@ func testContainerHardening(t *testing.T) {
 	if npmUID == bunUID {
 		t.Errorf("two apps share host uid %s", npmUID)
 	}
-	subUIDStart, _ := strconv.Atoi(must(t, "grep '^tero-agent:' /etc/subuid | cut -d: -f2"))
+	subUIDStart, _ := strconv.Atoi(must(t, "grep '^tero-podman:' /etc/subuid | cut -d: -f2"))
 	for _, uid := range []string{npmUID, bunUID} {
 		hostUID, _ := strconv.Atoi(uid)
 		if hostUID < subUIDStart || hostUID >= subUIDStart+1_000_000 {
-			t.Errorf("app host uid %s is outside tero-agent's subordinate range starting at %d", uid, subUIDStart)
+			t.Errorf("app host uid %s is outside tero-podman's subordinate range starting at %d", uid, subUIDStart)
 		}
 	}
 

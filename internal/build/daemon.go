@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -24,7 +23,7 @@ const BuildKitImage = "docker.io/moby/buildkit:v0.34.2-rootless@sha256:c82522687
 // images and package layers are reused.
 const CacheVolume = "tero-buildkit-cache"
 
-// buildkitIDs is the slice of tero-agent's 1,000,000 subordinate ids
+// buildkitIDs is the slice of tero-podman's 1,000,000 subordinate ids
 // BuildKit runs in: the top 200,000, enough for rootlesskit's nested range
 // (100000-165535). Apps get --userns=auto slices, which Podman hands out from
 // the bottom of the range and never from a running container's map, so
@@ -47,28 +46,15 @@ func PullImage(ctx context.Context) error {
 	return err
 }
 
-// daemonConfig turns off BuildKit's build history, which keeps every step's
-// output in the cache volume on disk: a build step that prints a variable's
-// value would leave it there (NIST SP 800-190 4.1.4).
-const daemonConfig = "[history]\n  maxEntries = 0\n"
+// DaemonConfigPath is BuildKit's buildkitd.toml, which `tero init` writes
+// readable by everyone, since tero-podman's Podman mounts it into a container
+// mapped to subordinate ids. It turns off BuildKit's build history, which
+// keeps every step's output in the cache volume on disk: a build step that
+// prints a variable's value would leave it there (NIST SP 800-190 4.1.4).
+const DaemonConfigPath = "/etc/tero/buildkitd.toml"
 
 // daemonConfigTarget is where the rootless image reads buildkitd.toml.
 const daemonConfigTarget = "/home/user/.config/buildkit/buildkitd.toml"
-
-// writeDaemonConfig writes the config file BuildKit's container mounts. It is
-// readable by everyone, since the container's user is mapped away from
-// tero-agent; workDir, in tero-agent's home, keeps everyone else out.
-func writeDaemonConfig(workDir string) (string, error) {
-	if err := os.MkdirAll(workDir, 0o700); err != nil {
-		return "", err
-	}
-	path := filepath.Join(workDir, "buildkitd.toml")
-	if err := os.WriteFile(path, []byte(daemonConfig), 0o644); err != nil {
-		return "", err
-	}
-
-	return path, os.Chmod(path, 0o644)
-}
 
 type daemon struct {
 	name   string
@@ -78,17 +64,13 @@ type daemon struct {
 // startDaemon starts a fresh rootless BuildKit container and waits until it
 // answers. The client reaches it through `podman exec ... buildctl
 // dial-stdio`, so it publishes no port and exposes no socket.
-func startDaemon(ctx context.Context, deployID int64, workDir string) (*daemon, error) {
+func startDaemon(ctx context.Context, deployID int64) (*daemon, error) {
 	name := fmt.Sprintf("tero-buildkit-%d", deployID)
 	if err := podman.RemoveContainer(ctx, name); err != nil {
 		return nil, err
 	}
-	configPath, err := writeDaemonConfig(workDir)
-	if err != nil {
-		return nil, err
-	}
 
-	_, err = podman.Run(ctx, "run", "--detach", "--rm", "--name", name,
+	_, err := podman.Run(ctx, "run", "--detach", "--rm", "--name", name,
 		// runc inside BuildKit sets each RUN step's hostname and mounts a
 		// fresh /proc; Podman's default seccomp profile and masked /proc paths
 		// forbid both. BuildKit still applies its own seccomp profile to steps.
@@ -97,7 +79,7 @@ func startDaemon(ctx context.Context, deployID int64, workDir string) (*daemon, 
 		"--uidmap", buildkitIDs, "--gidmap", buildkitIDs,
 		"--memory", strconv.FormatInt(memoryLimit(), 10),
 		"--volume", CacheVolume+":/home/user/.local/share/buildkit",
-		"--volume", configPath+":"+daemonConfigTarget+":ro",
+		"--volume", DaemonConfigPath+":"+daemonConfigTarget+":ro",
 		BuildKitImage)
 	if err != nil {
 		return nil, fmt.Errorf("start BuildKit: %w", err)

@@ -1,7 +1,10 @@
-// Package podman runs the podman CLI as the current user, which for Tero is
-// always the agent running as tero-agent. The CLI is used instead of
-// Podman's Go bindings because it behaves the same on every tested Podman
-// version.
+// Package podman runs the podman CLI as a client of the Podman service that
+// tero-podman's user manager runs. tero-podman owns every image and container,
+// and the network helpers Podman starts for them (pasta or slirp4netns, and
+// rootlessport), which carry the apps' traffic. The agent, which tero-keys
+// trusts with every value, runs as tero-agent, so a compromised helper can't
+// ask tero-keys for anything. The CLI is used instead of Podman's Go bindings
+// because it behaves the same on every tested Podman version.
 package podman
 
 import (
@@ -9,11 +12,23 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// ServiceURL is the Podman service's socket. Only tero-podman and the members
+// of its group, which is tero-agent alone, can open it.
+const ServiceURL = "unix:///run/tero-podman/podman.sock"
+
+// UseService points every podman command this process and its children run,
+// BuildKit's connection helper included, at the Podman service: with
+// CONTAINER_HOST set, the podman CLI is a remote client.
+func UseService() error {
+	return os.Setenv("CONTAINER_HOST", ServiceURL)
+}
 
 // waitDelay bounds the wait for podman's output pipes once its context is
 // done. A child podman leaves behind, like the chown of an image into a
@@ -50,31 +65,6 @@ func RunCombined(ctx context.Context, args ...string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-// RunInOwnScope runs podman in a transient systemd scope of its own, so the
-// conmon and port-forwarding processes it leaves behind for a container don't
-// belong to the agent's unit. Otherwise restarting the agent would kill them
-// and cut every app off from the network.
-func RunInOwnScope(ctx context.Context, scope string, args ...string) (string, error) {
-	if err := checkUserNamespace(args); err != nil {
-		return "", err
-	}
-
-	scopeArgs := append([]string{"--user", "--scope", "--quiet", "--collect", "--unit=" + scope, "podman"}, args...)
-	return run(exec.CommandContext(ctx, "systemd-run", scopeArgs...), args)
-}
-
-// KillScope kills every process still in a scope RunInOwnScope started. A
-// plain stop would wait 90 seconds for processes stuck on the disk before
-// killing them.
-func KillScope(ctx context.Context, scope string) error {
-	output, err := exec.CommandContext(ctx, "systemctl", "--user", "kill", "--signal=SIGKILL", scope).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("kill %s: %w: %s", scope, err, strings.TrimSpace(string(output)))
-	}
-
-	return nil
-}
-
 func run(cmd *exec.Cmd, args []string) (string, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -95,14 +85,14 @@ func RemoveContainer(ctx context.Context, name string) error {
 	return err
 }
 
-// ErrOwnUIDMapped refuses a container that could run as the agent's own uid.
-// The key service trusts that uid as the agent, so no container may ever
-// run as it.
-var ErrOwnUIDMapped = errors.New("a container must run only as subordinate ids, never as the agent's own uid")
+// ErrOwnUIDMapped refuses a container that could run as tero-podman's own
+// uid, which owns Podman's storage and every other container, so no container
+// may ever run as it.
+var ErrOwnUIDMapped = errors.New("a container must run only as subordinate ids, never as tero-podman's own uid")
 
 // checkUserNamespace refuses `podman run` unless the container gets an
 // automatic user namespace or explicit uid and gid maps that leave out the
-// agent's own uid. In rootless Podman, host id 0 of a map is the user's own
+// service user's own uid. In rootless Podman, host id 0 of a map is the user's own
 // uid, and the subordinate ids start at 1; without a namespace option,
 // container root is the user's own uid.
 func checkUserNamespace(args []string) error {

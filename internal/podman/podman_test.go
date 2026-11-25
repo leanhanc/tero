@@ -42,7 +42,7 @@ func TestRunReturnsWhenAChildHoldsTheOutputOpen(t *testing.T) {
 	}
 }
 
-// process-isolation: Containers never run as the agent's uid
+// process-isolation: Containers never run as Podman's own uid
 func TestRunRefusesContainersThatCouldMapTheAgentsUID(t *testing.T) {
 	refused := map[string][]string{
 		"no namespace option":   {"run", "image"},

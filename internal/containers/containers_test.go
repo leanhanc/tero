@@ -1,7 +1,6 @@
 package containers
 
 import (
-	"os"
 	"reflect"
 	"slices"
 	"testing"
@@ -67,9 +66,9 @@ func TestImageWithoutALabelHasNoSource(t *testing.T) {
 // process-isolation: File removed, Not visible to other processes
 func TestEnvFile(t *testing.T) {
 	dir := t.TempDir()
-	original := runtimeDir
-	runtimeDir = func() string { return dir }
-	t.Cleanup(func() { runtimeDir = original })
+	original := envDir
+	envDir = func() string { return dir }
+	t.Cleanup(func() { envDir = original })
 
 	kept, left := Name("shop", 1), Name("shop", 2)
 	if err := WriteEnvFile(kept, map[string]string{"A": "1"}); err != nil {
@@ -87,13 +86,6 @@ func TestEnvFile(t *testing.T) {
 		}
 	}
 
-	info, err := os.Stat(envDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o700 {
-		t.Errorf("directory mode = %o", info.Mode().Perm())
-	}
 	if !HasEnvFile(kept) {
 		t.Error("the file wasn't written")
 	}

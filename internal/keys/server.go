@@ -215,7 +215,7 @@ func (s *Service) serveConn(ctx context.Context, conn *net.UnixConn, caller Call
 
 	conn.SetReadDeadline(time.Now().Add(idleTimeout))
 	var req request
-	if err := readMessage(conn, &req); err != nil {
+	if err := readMessage(conn, &req, messageLimit(caller)); err != nil {
 		return
 	}
 
@@ -224,7 +224,7 @@ func (s *Service) serveConn(ctx context.Context, conn *net.UnixConn, caller Call
 	answer := s.handle(requestCtx, caller, req)
 
 	conn.SetWriteDeadline(time.Now().Add(idleTimeout))
-	writeMessage(conn, answer)
+	writeMessage(conn, answer, messageLimit(caller))
 }
 
 // maintain prunes every pruneInterval and flushes the dropped and refused

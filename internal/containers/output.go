@@ -21,8 +21,11 @@ const maxOutputSize = "1mb"
 
 const outputFileSuffix = ".log"
 
-func outputDir() string {
-	return filepath.Join(runtimeDir(), "tero-output")
+// outputDir is on tmpfs. `tero init` has systemd create it at boot, owned by
+// tero-podman, whose conmon writes the files, with group tero-podman, so
+// tero-agent can remove them: mode 2770.
+var outputDir = func() string {
+	return "/run/tero-output"
 }
 
 func outputPath(container string) (string, error) {
@@ -31,17 +34,6 @@ func outputPath(container string) (string, error) {
 	}
 
 	return filepath.Join(outputDir(), container+outputFileSuffix), nil
-}
-
-// prepareOutputDir creates the directory before Podman opens a container's
-// output file in it: a reboot empties tmpfs, and the stopped containers it
-// resumes still name their file there.
-func prepareOutputDir() error {
-	if err := os.MkdirAll(outputDir(), 0o700); err != nil {
-		return err
-	}
-
-	return os.Chmod(outputDir(), 0o700)
 }
 
 // RemoveOutput removes a container's output.

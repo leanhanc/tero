@@ -16,6 +16,12 @@ const (
 	agentHome = "/var/lib/tero-agent"
 	noLogin   = "/usr/sbin/nologin"
 
+	// podmanUser owns Podman, every image and container, and the network
+	// helpers that carry the apps' traffic. Its group is also the group of its
+	// Podman service's socket, and tero-agent is its only other member.
+	podmanUser = "tero-podman"
+	podmanHome = "/var/lib/tero-podman"
+
 	// sharedGroup lets the service and the agent open the database and build
 	// logs in sharedDir, and nobody else.
 	sharedGroup = "tero-shared"
@@ -41,13 +47,22 @@ type serviceAccount struct {
 }
 
 var (
-	teroAccount  = serviceAccount{teroUser, teroHome, "the unprivileged user that runs its service"}
-	agentAccount = serviceAccount{agentUser, agentHome, "the user that builds and runs apps"}
+	teroAccount   = serviceAccount{teroUser, teroHome, "the unprivileged user that runs its service"}
+	agentAccount  = serviceAccount{agentUser, agentHome, "the user that builds and runs apps"}
+	podmanAccount = serviceAccount{podmanUser, podmanHome, "the user that owns Podman and the apps' containers"}
 )
 
 // sharedGroupMembers are the only users allowed in sharedGroup and
 // keysCallersGroup.
 var sharedGroupMembers = []string{teroUser, agentUser}
+
+// groupMembers are the only users allowed in each group Tero shares between
+// its own users.
+var groupMembers = map[string][]string{
+	sharedGroup:      sharedGroupMembers,
+	keysCallersGroup: sharedGroupMembers,
+	podmanUser:       {agentUser},
+}
 
 // createTeroUser creates the unprivileged user the service runs as. It has
 // no subordinate ids and no user manager: it never runs a container.
@@ -55,44 +70,74 @@ func createTeroUser(ctx context.Context, h host) error {
 	return ensureAccount(ctx, h, teroAccount)
 }
 
-// createAgentUser creates the user that owns every container. Its user
-// manager starts later, in startAgentManager, once the user is in the shared
-// groups.
+// createAgentUser creates the user that runs the agent. Its user manager
+// starts later, in startAgentManager, once the user is in the shared groups.
 func createAgentUser(ctx context.Context, h host) error {
 	if err := ensureAccount(ctx, h, agentAccount); err != nil {
 		return err
 	}
 
-	// Podman's storage, BuildKit's cache and the build directories live here.
+	// The build directories and the planner's tools live here.
 	_, err := h.run.Run(ctx, "chmod", "0700", agentHome)
 	return err
 }
 
-// startAgentManager gives tero-agent a subordinate id range big enough for
-// rootless BuildKit, keeps its systemd user manager running without a
-// login, and checks rootless Podman works for it. A user manager keeps the
-// groups it started with, so one an earlier run left running is restarted
-// to pick up the shared groups.
+// createPodmanUser creates the user that owns Podman, and makes tero-agent
+// the only other member of its group, so the agent can open its Podman
+// service's socket.
+func createPodmanUser(ctx context.Context, h host) error {
+	if err := ensureAccount(ctx, h, podmanAccount); err != nil {
+		return err
+	}
+
+	// Podman's storage and BuildKit's cache live here.
+	if _, err := h.run.Run(ctx, "chmod", "0700", podmanHome); err != nil {
+		return err
+	}
+
+	_, err := h.run.Run(ctx, "usermod", "--append", "--groups", podmanUser, agentUser)
+	return err
+}
+
+// startAgentManager keeps tero-agent's systemd user manager running without
+// a login. A user manager keeps the groups it started with, so one an earlier
+// run left running is restarted to pick up the shared groups.
 func startAgentManager(ctx context.Context, h host) error {
-	hasNewRange, err := ensureSubIDRanges(ctx, h, agentUser)
+	return startUserManager(ctx, h, agentUser)
+}
+
+// startPodmanManager gives tero-podman a subordinate id range big enough for
+// rootless BuildKit, keeps its systemd user manager running without a login,
+// and checks rootless Podman works for it.
+func startPodmanManager(ctx context.Context, h host) error {
+	hasNewRange, err := ensureSubIDRanges(ctx, h, podmanUser)
+	if err != nil {
+		return err
+	}
+	if err := startUserManager(ctx, h, podmanUser); err != nil {
+		return err
+	}
+
+	podman, err := lookupAccount(h, podmanUser)
 	if err != nil {
 		return err
 	}
 
-	agent, err := lookupAccount(h, agentUser)
+	return checkRootlessPodman(ctx, h, podman.uid, hasNewRange)
+}
+
+func startUserManager(ctx context.Context, h host, name string) error {
+	user, err := lookupAccount(h, name)
 	if err != nil {
 		return err
 	}
 
-	userManager := fmt.Sprintf("user@%d.service", agent.uid)
+	userManager := fmt.Sprintf("user@%d.service", user.uid)
 	if _, err := h.run.Run(ctx, "systemctl", "try-restart", userManager); err != nil {
 		return err
 	}
-	if err := enableLinger(ctx, h, agentUser, agent.uid); err != nil {
-		return err
-	}
 
-	return checkRootlessPodman(ctx, h, agent.uid, hasNewRange)
+	return enableLinger(ctx, h, name, user.uid)
 }
 
 // shareState creates the groups the service and the agent share, puts both
@@ -196,14 +241,15 @@ func checkSharedGroups(h host) error {
 		return err
 	}
 
-	for _, name := range []string{sharedGroup, keysCallersGroup} {
+	for _, name := range []string{sharedGroup, keysCallersGroup, podmanUser} {
 		existing, exists := groups[name]
 		if !exists {
 			continue
 		}
 
+		allowed := groupMembers[name]
 		hasOnlyTeroMembers := !slices.ContainsFunc(existing.members, func(member string) bool {
-			return !slices.Contains(sharedGroupMembers, member)
+			return !slices.Contains(allowed, member)
 		})
 		if existing.gid < systemIDLimit && hasOnlyTeroMembers {
 			continue
@@ -335,27 +381,27 @@ func enableLinger(ctx context.Context, h host, name string, uid int) error {
 	return nil
 }
 
-// checkRootlessPodman fails init early if Podman can't run as the agent's
-// user. After a subordinate id change Podman must migrate its storage to the
-// new mapping.
+// checkRootlessPodman fails init early if Podman can't run as tero-podman.
+// After a subordinate id change Podman must migrate its storage to the new
+// mapping.
 func checkRootlessPodman(ctx context.Context, h host, uid int, hasNewRange bool) error {
-	asAgent := []string{"--user", agentUser, "--", "env",
-		"HOME=" + agentHome, fmt.Sprintf("XDG_RUNTIME_DIR=/run/user/%d", uid)}
+	asPodman := []string{"--user", podmanUser, "--", "env",
+		"HOME=" + podmanHome, fmt.Sprintf("XDG_RUNTIME_DIR=/run/user/%d", uid)}
 
 	if hasNewRange {
-		migrate := append(append([]string{}, asAgent...), "podman", "system", "migrate")
+		migrate := append(append([]string{}, asPodman...), "podman", "system", "migrate")
 		if _, err := h.run.Run(ctx, "runuser", migrate...); err != nil {
 			return err
 		}
 	}
 
-	info := append(append([]string{}, asAgent...), "podman", "info", "--format", "{{.Host.Security.Rootless}}")
+	info := append(append([]string{}, asPodman...), "podman", "info", "--format", "{{.Host.Security.Rootless}}")
 	output, err := h.run.Run(ctx, "runuser", info...)
 	if err != nil {
-		return fmt.Errorf("rootless Podman doesn't work for %s: %w", agentUser, err)
+		return fmt.Errorf("rootless Podman doesn't work for %s: %w", podmanUser, err)
 	}
 	if output != "true" {
-		return fmt.Errorf("Podman is not running rootless for %s (got %q)", agentUser, output)
+		return fmt.Errorf("Podman is not running rootless for %s (got %q)", podmanUser, output)
 	}
 
 	return nil

@@ -18,6 +18,7 @@ import (
 	"github.com/leanhanc/tero/internal/hostfs"
 	"github.com/leanhanc/tero/internal/loginlink"
 	"github.com/leanhanc/tero/internal/portcheck"
+	"github.com/leanhanc/tero/internal/recovery"
 	"github.com/leanhanc/tero/internal/sysexec"
 )
 
@@ -67,6 +68,9 @@ func Run(ctx context.Context, opts Options) error {
 	fmt.Fprintln(h.out, "Setting up this server. This takes a few minutes...")
 
 	for _, s := range steps(config.Config{DashboardDomain: domain, PublicIP: publicIP.String()}) {
+		if s.title == skippedStep() {
+			continue
+		}
 		if err := s.apply(ctx, h); err != nil {
 			return fmt.Errorf("Setup stopped while %s.\n\n%s\n\nFix the problem above and run `sudo tero init` again. Finished steps are skipped", s.title, capitalize(err.Error()))
 		}
@@ -88,10 +92,19 @@ func finish(ctx context.Context, h host, version, domain string, ports []portche
 		return fmt.Errorf("Setup stopped while creating the dashboard setup link.\n\n%s\n\nRun `sudo tero init` again. Finished steps are skipped", capitalize(err.Error()))
 	}
 
+	// Made last, so a run that stops before here never leaves a key that
+	// wasn't shown.
+	recoveryKey, err := recovery.Install(h.files)
+	if err != nil {
+		return fmt.Errorf("Setup stopped while creating the recovery key.\n\n%s\n\nRun `sudo tero init` again. Finished steps are skipped", capitalize(err.Error()))
+	}
+
 	marker := config.Marker{Version: version, Domain: domain, CompletedAt: time.Now().UTC()}
 	if err := config.SaveMarker(h.files, marker); err != nil {
 		return err
 	}
+
+	fmt.Fprint(h.out, "\n"+recovery.Announcement(recoveryKey.Secret))
 
 	if !hasCertificate && !isBlocked {
 		fmt.Fprintf(h.out, "\nThe page may take a few minutes to load: %s has to point to this server's IP address first.\n", domain)

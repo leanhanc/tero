@@ -1,0 +1,5 @@
+# Written by `tero init`. BuildKit's settings for every build. Build history
+# keeps each step's output in the cache volume on disk, where a step that
+# prints a variable's value would leave it, so it is off.
+[history]
+  maxEntries = 0

@@ -50,7 +50,7 @@ type Request struct {
 	Variables map[string]string
 }
 
-// Build plans and builds the app and loads the image into tero-agent's
+// Build plans and builds the app and loads the image into tero-podman's
 // Podman store, returning the image name. Errors the admin can act on are Failures.
 func Build(ctx context.Context, req Request) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, buildTimeout)
@@ -81,7 +81,7 @@ func Build(ctx context.Context, req Request) (string, error) {
 // buildTarball runs the build in a throwaway BuildKit daemon, which is
 // removed whatever the outcome.
 func buildTarball(ctx context.Context, req Request, buildPlan *plan.BuildPlan, imageName, tarballPath string) error {
-	buildkitDaemon, err := startDaemon(ctx, req.DeployID, req.WorkDir)
+	buildkitDaemon, err := startDaemon(ctx, req.DeployID)
 	if err != nil {
 		return explainContextError(ctx, err)
 	}

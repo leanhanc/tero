@@ -14,7 +14,7 @@ const keysHome = "/var/lib/tero-keys"
 // forbiddenKeysGroups are groups the key service's user must never be in:
 // Tero's other users' groups would share their files, the others would give
 // it root or the journal.
-var forbiddenKeysGroups = append([]string{teroUser, agentUser, sharedGroup, keysCallersGroup, "systemd-journal", "adm"}, sudoGroups...)
+var forbiddenKeysGroups = append([]string{teroUser, agentUser, podmanUser, sharedGroup, keysCallersGroup, "systemd-journal", "adm"}, sudoGroups...)
 
 // checkKeysAccount refuses init when a tero-keys user or group exists that
 // isn't one an earlier init created.

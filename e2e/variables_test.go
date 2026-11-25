@@ -243,7 +243,7 @@ func testVariablesReachTheirPhases(t *testing.T) {
 
 func testValuesStayOffTheDisk(t *testing.T) {
 	pattern := searchPattern()
-	for _, directory := range []string{"/var/lib/tero-agent", "/var/lib/tero-shared", "/var/lib/tero", "/var/lib/tero-keys"} {
+	for _, directory := range []string{"/var/lib/tero-agent", "/var/lib/tero-podman", "/var/lib/tero-shared", "/var/lib/tero", "/var/lib/tero-keys"} {
 		if found := run(t, fmt.Sprintf("sudo grep -rls --binary-files=text '%s' %s", pattern, directory)).output; strings.TrimSpace(found) != "" {
 			t.Errorf("a value is on disk under %s:\n%s", directory, found)
 		}
@@ -260,8 +260,7 @@ func testValuesStayOffTheDisk(t *testing.T) {
 		t.Error("podman inspect shows a value")
 	}
 
-	uid := must(t, "id -u tero-agent")
-	if got := run(t, asTero(fmt.Sprintf("cat /run/user/%s/tero-env/%s", uid, container))); got.exitCode == 0 {
+	if got := run(t, asTero("cat /run/tero-env/"+container)); got.exitCode == 0 {
 		t.Error("a process running as tero read the app's values")
 	}
 
@@ -334,7 +333,6 @@ func testNewValuesBreakTheApp(t *testing.T) {
 // key service stopped. Tero's own reboot test runs later on the real thing.
 func testVariablesWithoutTheKeyService(t *testing.T) {
 	container := liveVariablesContainer(t)
-	uid := must(t, "id -u tero-agent")
 
 	// An app that merely exits still has its values.
 	must(t, "sudo systemctl stop tero-keys.socket tero-keys.service")
@@ -345,7 +343,7 @@ func testVariablesWithoutTheKeyService(t *testing.T) {
 	})
 
 	must(t, asAgent("podman stop --time 1 "+container))
-	must(t, asAgent(fmt.Sprintf("rm /run/user/%s/tero-env/%s", uid, container)))
+	must(t, asAgent("rm /run/tero-env/"+container))
 	waitUntil(t, time.Minute, func() bool {
 		return strings.Contains(getDashboard(t, "admin", "/api/apps/"+variablesApp).body, "key service")
 	})
@@ -395,9 +393,8 @@ func testSourceApproval(t *testing.T) {
 // testVariablesAfterRotation runs once `sudo tero rotate-key` has run.
 func testVariablesAfterRotation(t *testing.T) {
 	container := liveVariablesContainer(t)
-	uid := must(t, "id -u tero-agent")
 	must(t, asAgent("podman stop --time 1 "+container))
-	must(t, asAgent(fmt.Sprintf("rm /run/user/%s/tero-env/%s", uid, container)))
+	must(t, asAgent("rm /run/tero-env/"+container))
 	waitUntil(t, 3*time.Minute, func() bool {
 		return strings.Contains(fetchApp(t, variablesApp, "/").output, markedValue("sealed"))
 	})

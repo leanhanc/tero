@@ -1,8 +1,8 @@
 // Package agent is `tero agent`, the process that builds and runs apps. It
-// runs as tero-agent under that user's systemd user manager, outside any
-// service sandbox, because rootless Podman needs the setuid id-mapping
-// helpers a sandboxed service may not use. It listens on nothing: the deploy
-// queue in the SQLite store is its only input.
+// runs as tero-agent under that user's systemd user manager, and drives
+// tero-podman's Podman service, which owns every image and container, through
+// its socket. It listens on nothing: the deploy queue in the SQLite store is
+// its only input.
 package agent
 
 import (
@@ -16,6 +16,7 @@ import (
 
 	"github.com/leanhanc/tero/internal/build"
 	"github.com/leanhanc/tero/internal/deploys"
+	"github.com/leanhanc/tero/internal/podman"
 	"github.com/leanhanc/tero/internal/variables"
 )
 
@@ -52,6 +53,9 @@ type Options struct {
 func Run(ctx context.Context, opts Options) error {
 	if os.Geteuid() == 0 {
 		return errors.New("tero agent must not run as root: it is started for the tero user by systemd")
+	}
+	if err := podman.UseService(); err != nil {
+		return err
 	}
 
 	now := opts.Now

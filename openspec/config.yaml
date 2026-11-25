@@ -17,8 +17,8 @@ context: |
   hash and encrypted TOTP secret and the security log, identifying callers by uid and exact systemd unit;
   `sudo tero rotate-key` and `sudo tero assume-breach`) and 4 (account security: `tero-keys` holds sessions,
   trusted browsers, login throttles and passkeys, and the settings page) are built. Slice 5:
-  deploy on push. The agent runs as its own system user `tero-agent` (rootless Podman, the subordinate ids and
-  every container belong to it), shares the SQLite database and build logs with the service through the group
+  deploy on push. The agent runs as its own system user `tero-agent`, drives Podman through a socket-activated service run by
+  `tero-podman` (which owns rootless Podman, the subordinate ids, every container and the network helpers), shares the SQLite database and build logs with the service through the group
   `tero-shared` in /var/lib/tero-shared, and is a `tero-keys` caller known by uid. Each server creates a private,
   read-only GitHub App (manifest flow, personal account or organization); `tero-keys` holds its private key and
   webhook secret, signs App JWTs for the agent only and verifies webhook signatures for the dashboard. Only the

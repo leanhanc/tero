@@ -27,7 +27,7 @@ table inet tero {
 	}
 
 	# Rootless Podman's network helpers open every connection of a build or an
-	# app as sockets of tero-agent, so matching the two users covers them.
+	# app as sockets of tero-podman, so matching Tero's users covers them.
 	# Metadata services hand out the server's cloud credentials (NIST SP
 	# 800-190 4.4.2): AWS, GCP, Azure, Oracle, DigitalOcean and Hetzner answer on
 	# link-local 169.254.169.254, Azure also on 168.63.129.16, Alibaba on
@@ -37,7 +37,7 @@ table inet tero {
 	chain output {
 		type filter hook output priority filter; policy accept;
 
-		meta skuid { "tero", "tero-agent" } ip daddr { 169.254.0.0/16, 168.63.129.16, 100.100.100.200 } reject
-		meta skuid { "tero", "tero-agent" } ip6 daddr { fe80::/10, fd00:ec2::254, fd20:ce::254, fd00:c1::a9fe:a9fe, fd00:a9fe:a9fe::1, fd00:42::42 } reject
+		meta skuid { "tero", "tero-agent", "tero-podman" } ip daddr { 169.254.0.0/16, 168.63.129.16, 100.100.100.200 } reject
+		meta skuid { "tero", "tero-agent", "tero-podman" } ip6 daddr { fe80::/10, fd00:ec2::254, fd20:ce::254, fd00:c1::a9fe:a9fe, fd00:a9fe:a9fe::1, fd00:42::42 } reject
 	}
 }

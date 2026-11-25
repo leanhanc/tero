@@ -1,0 +1,17 @@
+# Written by `tero init`. The socket of the Podman service the agent drives,
+# in tero-podman's systemd user manager. tero-podman owns Podman, every image
+# and container, and the network helpers that carry the apps' traffic, so
+# none of them run as tero-agent, which the key service trusts with every
+# value. Its directory, created by tmpfiles.d, lets in only tero-podman and its
+# group, whose only other member is tero-agent.
+[Unit]
+Description=Podman API for the Tero agent
+Documentation=https://github.com/leanhanc/tero
+ConditionUser=tero-podman
+
+[Socket]
+ListenStream=/run/tero-podman/podman.sock
+SocketMode=0660
+
+[Install]
+WantedBy=sockets.target

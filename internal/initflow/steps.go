@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/leanhanc/tero/internal/build"
 	"github.com/leanhanc/tero/internal/config"
 	"github.com/leanhanc/tero/internal/keys"
 )
@@ -36,8 +37,11 @@ func steps(cfg config.Config) []step {
 		{"installing Podman, nftables, auditd and automatic updates", installPackages},
 		{"creating the tero system user", createTeroUser},
 		{"creating the tero-agent system user", createAgentUser},
+		{"creating the tero-podman system user", createPodmanUser},
 		{"sharing the database between tero and tero-agent", shareState},
+		{"sharing app files between tero-agent and tero-podman", shareWithPodman},
 		{"starting tero-agent's user manager", startAgentManager},
+		{"starting tero-podman's user manager", startPodmanManager},
 		{"locking down SSH", hardenSSH},
 		{"turning on the firewall", enableFirewall},
 		{"turning on automatic security updates", enableAutomaticUpdates},
@@ -50,6 +54,7 @@ func steps(cfg config.Config) []step {
 		{"sealing the master key", sealMasterKey},
 		{"starting the key service", startKeyService},
 		{"starting the Tero service", startService},
+		{"starting the Podman service for the agent", startPodmanService},
 		{"starting the Tero agent", startAgent},
 	}
 }
@@ -154,7 +159,7 @@ func checkEffectiveSSH(ctx context.Context, h host) error {
 }
 
 // deniedSSHUsers are Tero's service users, which never log in over SSH.
-var deniedSSHUsers = []string{teroUser, agentUser, keys.User}
+var deniedSSHUsers = []string{teroUser, agentUser, podmanUser, keys.User}
 
 // preferredKex lists the SSH key exchanges Tero allows, best first. Older
 // OpenSSH releases lack some of them, such as the post-quantum mlkem768x25519
@@ -323,6 +328,41 @@ func startService(ctx context.Context, h host) error {
 		[]string{"systemctl", "daemon-reload"},
 		[]string{"systemctl", "enable", "tero.service"},
 		[]string{"systemctl", "restart", "tero.service"},
+	)
+}
+
+// shareWithPodman has systemd create, at every boot, the tmpfs directories
+// where the agent hands files to tero-podman's Podman: the apps' variables
+// and the socket's directory. A boot empties /run, so tmpfiles.d recreates
+// them. It also writes BuildKit's settings, which every build mounts.
+func shareWithPodman(ctx context.Context, h host) error {
+	if _, err := writeEmbedded(h, "tero-tmpfiles.conf", "/etc/tmpfiles.d/tero.conf", 0o644); err != nil {
+		return err
+	}
+	if _, err := writeEmbedded(h, "buildkitd.toml", build.DaemonConfigPath, 0o644); err != nil {
+		return err
+	}
+
+	_, err := h.run.Run(ctx, "systemd-tmpfiles", "--create", "/etc/tmpfiles.d/tero.conf")
+	return err
+}
+
+// startPodmanService installs the socket-activated Podman service the agent
+// drives, as user units that only tero-podman's user manager runs. Its
+// socket is in a directory only tero-podman and its group can enter.
+func startPodmanService(ctx context.Context, h host) error {
+	for _, unit := range []string{"tero-podman.socket", "tero-podman.service"} {
+		if _, err := writeEmbedded(h, unit, "/etc/systemd/user/"+unit, 0o644); err != nil {
+			return err
+		}
+	}
+
+	const podmanManager = "--machine=" + podmanUser + "@.host"
+
+	return runAll(ctx, h,
+		[]string{"systemctl", "--global", "enable", "tero-podman.socket"},
+		[]string{"systemctl", "--user", podmanManager, "daemon-reload"},
+		[]string{"systemctl", "--user", podmanManager, "restart", "tero-podman.socket"},
 	)
 }
 

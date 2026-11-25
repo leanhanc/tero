@@ -33,11 +33,11 @@ func NewClient(socketPath string) *Client {
 		}
 		conn.SetDeadline(deadline)
 
-		if err := writeMessage(conn, req); err != nil {
+		if err := writeMessage(conn, req, maxRootMessage); err != nil {
 			return response{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
 		}
 		var answer response
-		if err := readMessage(conn, &answer); err != nil {
+		if err := readMessage(conn, &answer, maxRootMessage); err != nil {
 			return response{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
 		}
 
@@ -329,4 +329,20 @@ func (c *Client) VariablesSummary(ctx context.Context) ([]AppVariablesSummary, e
 // loaded are gone. Root only.
 func (c *Client) MarkLostVariables(ctx context.Context) error {
 	return c.call(ctx, VerbVariablesLost, nil, nil)
+}
+
+// ExportBackup seals every app's approved source and variables to the
+// recovery key's recipient. Root only.
+func (c *Client) ExportBackup(ctx context.Context, recipient string) (ExportedVariables, error) {
+	var exported ExportedVariables
+	err := c.call(ctx, VerbBackupExport, backupExportArgs{Recipient: recipient}, &exported)
+	return exported, err
+}
+
+// ImportBackup opens a backup's sealed variables with the recovery key and
+// stores them on this server. Root only.
+func (c *Client) ImportBackup(ctx context.Context, secret string, sealed []byte) (RestoredVariables, error) {
+	var restored RestoredVariables
+	err := c.call(ctx, VerbBackupImport, backupImportArgs{Secret: secret, Sealed: sealed}, &restored)
+	return restored, err
 }

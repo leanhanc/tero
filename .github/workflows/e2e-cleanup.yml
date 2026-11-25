@@ -1,0 +1,36 @@
+# Removes EC2 servers, images, snapshots, key pairs and security groups that
+# e2e runs started over four hours ago left behind, such as after a cancelled
+# run. The longest run takes under two and a half hours, so a run still going
+# is never touched.
+name: E2E cleanup
+
+on:
+  schedule:
+    - cron: "17 */3 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    environment: e2e
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.TERO_E2E_ROLE_ARN }}
+          aws-region: ${{ vars.TERO_E2E_REGION }}
+          role-session-name: tero-e2e-cleanup-${{ github.run_id }}
+          # A run can take two and a half hours; the default session lasts one.
+          role-duration-seconds: 14400
+
+      - name: Remove stale e2e resources
+        run: scripts/ec2-e2e.sh cleanup-stale 4

@@ -45,7 +45,7 @@ Implements all of slice 6: the new capability `app-variables` and this change's 
 ## 8. End to end and docs
 
 - [x] 8.1 Add an e2e fixture that reports its environment at an HTTP path, and e2e tests for the scenarios above, including searches of the disk, the saved image, the shared directory and the journal for known values
-- [ ] 8.2 Run the whole e2e suite, slices 1 to 5 included, on both releases and both architectures. Verified by a green run on each. Done on arm64 for 26.04 and 24.04; amd64 still to run
+- [x] 8.2 Run the whole e2e suite, slices 1 to 5 included, on both releases and both architectures. Verified by a green run on each
 - [x] 8.3 Update `docs/security/asvs-l2.md` (v5.0.0-13.3.1, 13.3.2, 14.2.4, 16.2.5, the cryptographic inventory, Sensitive data), `docs/security/sp800-190.md` (4.1.4, and 4.4.3's mounts), `openspec/config.yaml`'s context, `README.md` and `openspec/drafts/apps/spec.md`, stating the limits: a value typed into a compromised dashboard is exposed, tmpfs can reach swap, and masking catches exact matches only
 - [x] 8.4 Document for admins how variables work: the three scopes and their defaults, that sealing switches to runtime only and that unsealed values reach builds by default, which runs dependencies' install scripts, and that saving deploys nothing until a redeploy. Verified by the page existing and linked from `README.md`
 - [x] 8.5 Update `openspec/roadmap.md`: link this change under slice 6, reword its "a change restarts" item to a redeploy the admin starts, tick slice 5's items, move the recovery key and `sudo tero restore` to a slice of their own, and add running Podman's helpers under their own uid

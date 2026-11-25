@@ -35,7 +35,7 @@ func checkPreflight(ctx context.Context, h host) error {
 		return err
 	}
 
-	for _, service := range []serviceAccount{teroAccount, agentAccount} {
+	for _, service := range []serviceAccount{teroAccount, agentAccount, podmanAccount} {
 		if err := checkServiceAccount(h, service); err != nil {
 			return err
 		}

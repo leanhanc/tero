@@ -1,5 +1,5 @@
-# Publishes a release for every version tag, once the tests and a scan for
-# known vulnerabilities pass. The build itself runs in the reusable workflow,
+# Publishes a release for every version tag, once the tests, a scan for
+# known vulnerabilities and the end-to-end suite on EC2 pass. The build itself runs in the reusable workflow,
 # isolated from this caller, which is what makes the provenance SLSA Build
 # Level 3.
 name: Release
@@ -43,8 +43,15 @@ jobs:
           GOOS=linux GOARCH=arm64 "$(go env GOPATH)/bin/govulncheck" ./...
           cd web && bun audit
 
-  release:
+  e2e:
     needs: check
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/e2e-cloud.yml
+
+  release:
+    needs: [check, e2e]
     permissions:
       contents: write
       id-token: write

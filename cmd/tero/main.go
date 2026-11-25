@@ -47,6 +47,9 @@ const usage = `Usage:
   sudo tero reset-login              Reset the dashboard login
   sudo tero rotate-key               Replace the master key
   sudo tero assume-breach [--yes]    Lock everything down after a suspected breach
+  sudo tero backup [--output FILE]   Back up the apps and their variables
+  sudo tero restore [--yes] FILE     Restore a backup onto a new server
+  sudo tero new-recovery-key         Replace the recovery key that opens backups
   tero version                       Print the version
   tero help                          Show this list
 `
@@ -91,6 +94,12 @@ func run(ctx context.Context, args []string) error {
 		return runRotateKey(ctx)
 	case "assume-breach":
 		return runAssumeBreach(ctx, commandArgs)
+	case "backup":
+		return runBackup(ctx, commandArgs)
+	case "restore":
+		return runRestore(ctx, commandArgs)
+	case "new-recovery-key":
+		return runNewRecoveryKey()
 	case build.PlanCommand:
 		return build.RunPlanCommand(os.Stdin, os.Stdout)
 	case "version", "--version":
@@ -187,6 +196,10 @@ func runAssumeBreach(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	podmanUID, err := lookupUID("tero-podman")
+	if err != nil {
+		return err
+	}
 
 	return breach.Run(ctx, breach.Options{
 		Domain:      cfg.DashboardDomain,
@@ -198,6 +211,7 @@ func runAssumeBreach(ctx context.Context, args []string) error {
 		Keys:        keyfiles.Host(),
 		TeroUID:     teroUID,
 		AgentUID:    agentUID,
+		PodmanUID:   podmanUID,
 	})
 }
 

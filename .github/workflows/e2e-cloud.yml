@@ -1,0 +1,83 @@
+# Runs the end-to-end suite and the release smoke test on throwaway EC2
+# servers, amd64 and arm64 on every tested Ubuntu release. The suite uses a
+# test certificate authority and a fake GitHub; the smoke test installs a
+# release build, gets a real Let's Encrypt certificate and checks the Lynis
+# minimum. Every server is tagged tero-e2e and terminated at the end, pass or
+# fail; e2e-cleanup.yml catches anything a cancelled run leaves.
+#
+# It runs by hand and before every release (release.yml calls it). AWS access
+# comes from GitHub's OIDC token, through a role that can only touch e2e
+# resources (infra/e2e-ci.yaml), so no AWS key is stored in the repository.
+name: E2E on EC2
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: "amd64, arm64 or all"
+        default: all
+      release:
+        description: "26.04, 24.04, or empty for both"
+        default: ""
+      skip_step:
+        description: "An init step to leave out, to prove the suite fails (for example: hardening kernel settings)"
+        default: ""
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [suite, smoke]
+    environment: e2e
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.TERO_E2E_ROLE_ARN }}
+          aws-region: ${{ vars.TERO_E2E_REGION }}
+          role-session-name: tero-e2e-${{ github.run_id }}
+          # A run can take two and a half hours; the default session lasts one.
+          role-duration-seconds: 14400
+
+      - name: Run on EC2
+        env:
+          MODE: ${{ matrix.mode }}
+          ARCH: ${{ inputs.arch || 'all' }}
+          RELEASE: ${{ inputs.release }}
+          TERO_E2E_SKIP_STEP: ${{ inputs.skip_step }}
+        run: |
+          (cd web && bun install --frozen-lockfile)
+          if [[ "$MODE" == "smoke" ]]; then
+            scripts/ec2-e2e.sh smoke "$ARCH" $RELEASE
+          else
+            scripts/ec2-e2e.sh "$ARCH" $RELEASE
+          fi
+
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-${{ matrix.mode }}-logs
+          path: .tero-e2e/
+          retention-days: 14

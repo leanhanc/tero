@@ -51,6 +51,9 @@ const (
 	EventSourceApproved         EventType = "source_approved"
 	EventVariablesRefused       EventType = "variables_release_refused"
 	EventSealedVariableReleased EventType = "sealed_variable_released"
+
+	EventBackupExported EventType = "backup_exported"
+	EventBackupRestored EventType = "backup_restored"
 )
 
 // Source is who recorded an event. The key service records its own events;
@@ -97,6 +100,9 @@ var eventMessages = map[EventType]string{
 	EventSourceApproved:         "App source approved for its variables",
 	EventVariablesRefused:       "App variables refused to a deploy from an unapproved source",
 	EventSealedVariableReleased: "Sealed app variable released to the agent",
+
+	EventBackupExported: "Apps' variables exported in a backup with sudo tero backup",
+	EventBackupRestored: "Apps' variables restored from a backup with sudo tero restore",
 }
 
 // warnings are written to the journal at warning priority.
@@ -106,7 +112,7 @@ var warnings = map[EventType]bool{
 	EventBreachReset: true, EventConfirmFailed: true, EventConfirmCodeFailed: true, EventPasskeyLoginFailed: true,
 	EventPasskeyCounterMismatch: true, EventPasswordChanged: true, EventPasskeyAdded: true, EventPasskeyRemoved: true,
 	EventGitHubConnected: true, EventGitHubDisconnected: true, EventWebhookSignatureFailed: true,
-	EventVariablesRefused: true, EventSourceApproved: true,
+	EventVariablesRefused: true, EventSourceApproved: true, EventBackupExported: true, EventBackupRestored: true,
 }
 
 // appendable lists the events each caller may append. Everything else is

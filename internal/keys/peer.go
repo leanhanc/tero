@@ -20,8 +20,8 @@ var errUnknownCaller = errors.New("the caller is neither the dashboard, the agen
 //
 // The agent is known by its uid alone. Its user manager delegates its cgroup
 // subtree to tero-agent, so a cgroup proves nothing there; but only the agent
-// and the Podman helpers it starts run as tero-agent, and containers run as
-// subordinate ids, never as tero-agent itself.
+// and the build planner it confines run as tero-agent. Podman, its network
+// helpers and every container run as tero-podman or its subordinate ids.
 const dashboardCgroup = "/system.slice/tero.service"
 
 // peers tells callers apart for one server.

@@ -1,0 +1,19 @@
+# Written by `tero init`. The Podman service behind tero-podman.socket. It
+# exits when idle and starts again on the next connection. KillMode=process
+# stops only Podman itself: the conmon and network helper processes it starts
+# for each container stay, so the apps keep running and keep their traffic.
+[Unit]
+Description=Podman API for the Tero agent
+Documentation=https://github.com/leanhanc/tero
+ConditionUser=tero-podman
+Requires=tero-podman.socket
+After=tero-podman.socket
+# `tero assume-breach` holds Podman back with this file until it has run to
+# the end.
+ConditionPathExists=!/etc/tero/reset-in-progress
+
+[Service]
+Type=exec
+Delegate=true
+KillMode=process
+ExecStart=/usr/bin/podman system service --time=5

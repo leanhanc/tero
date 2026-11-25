@@ -1,13 +1,14 @@
 // Package breach is `sudo tero assume-breach`: the one command for a server
-// that may be compromised. It stops the dashboard, the agent and every other
-// process running as tero or tero-agent, so nothing an attacker left in
-// memory survives, moves aside what either user could have planted to run
-// later, replaces everything the dashboard could have read or used
+// that may be compromised. It stops the dashboard, the agent, the apps and
+// every other process running as tero, tero-agent or tero-podman, so nothing
+// an attacker left in memory survives, moves aside what any of them could
+// have planted to run later, replaces everything the dashboard could have read or used
 // (sessions, trusted browsers, certificates and their keys, the login and
 // passkeys), rotates the master key, and tells the admin what to do outside
 // the server. It also deletes every image, container and cache in
-// tero-agent's Podman store, which something running as tero-agent could have
-// changed, so apps stay down until the admin redeploys them from source.
+// tero-podman's Podman store, which something running as tero-agent or
+// tero-podman could have changed, so apps stay down until the admin redeploys
+// them from source.
 package breach
 
 import (
@@ -38,10 +39,12 @@ const (
 	// caddyStorage holds the dashboard's and apps' certificates, their
 	// private keys and the ACME account key.
 	caddyStorage = "/var/lib/tero/caddy"
-	// teroHome and agentHome are the users' home directories. Their parent
-	// belongs to root, so neither user can replace its home with a link.
+	// teroHome, agentHome and podmanHome are the users' home directories.
+	// Their parent belongs to root, so no user can replace its home with a
+	// link.
 	teroHome   = "/var/lib/tero"
 	agentHome  = "/var/lib/tero-agent"
+	podmanHome = "/var/lib/tero-podman"
 	crontabDir = "/var/spool/cron/crontabs"
 	// QuarantineDir keeps what was moved out of those places, readable only
 	// by root.
@@ -54,7 +57,7 @@ const (
 // containers.conf (runtime, conmon, hooks), registries and policies, and SSH
 // keys, which would let the user's processes back in through port and socket
 // forwarding. Tero never puts anything there: the agent's unit is in
-// /etc/systemd/user, and init denies both users SSH login.
+// /etc/systemd/user, and init denies these users SSH login.
 var plantDirs = []string{
 	".ssh",
 	".config",
@@ -77,10 +80,11 @@ type Options struct {
 	Root string
 	Run  sysexec.Runner
 	Keys keyfiles.Files
-	// TeroUID and AgentUID are the uids of tero and tero-agent, whose
-	// sessions, user managers and processes are stopped.
-	TeroUID  int
-	AgentUID int
+	// TeroUID, AgentUID and PodmanUID are the uids of tero, tero-agent and
+	// tero-podman, whose sessions, user managers and processes are stopped.
+	TeroUID   int
+	AgentUID  int
+	PodmanUID int
 }
 
 // serviceUser is one of the users the reset clears.
@@ -94,6 +98,7 @@ func (o Options) users() []serviceUser {
 	return []serviceUser{
 		{"tero", o.TeroUID, teroHome},
 		{"tero-agent", o.AgentUID, agentHome},
+		{"tero-podman", o.PodmanUID, podmanHome},
 	}
 }
 
@@ -129,10 +134,10 @@ func sourceLocation(source keys.AppSource) string {
 const plan = `This resets everything a compromised dashboard could have read or planted:
 
   - stops the dashboard, the agent, the apps and every other process running as
-    tero or tero-agent
+    tero, tero-agent or tero-podman
   - deletes every app's image and container and the build cache:
     apps stay down until you redeploy them
-  - moves aside units and cron jobs something running as either user added, and
+  - moves aside units and cron jobs something running as those users added, and
     deletes their temporary files
   - ends every dashboard session and forgets every trusted browser
   - deletes the dashboard's and apps' certificates and keys, so new ones are issued
@@ -173,7 +178,7 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return keepStopped(err)
 	}
-	if err := emptyAgentStore(ctx, opts); err != nil {
+	if err := emptyPodmanStore(ctx, opts); err != nil {
 		return keepStopped(err)
 	}
 	if err := os.Remove(filepath.Join(opts.Root, ResetHoldPath)); err != nil {
@@ -192,13 +197,14 @@ func keepStopped(err error) error {
 	return fmt.Errorf("%w\n\nThe dashboard and the agent stay stopped. Fix the problem above and run `sudo tero assume-breach` again", err)
 }
 
-// stopAndQuarantine stops everything running as tero or tero-agent and moves
-// aside what either could have planted, returning the quarantine directory and
+// stopAndQuarantine stops everything running as Tero's users and moves aside
+// what any of them could have planted, returning the quarantine directory and
 // the paths moved there.
 func stopAndQuarantine(ctx context.Context, opts Options) (string, []string, error) {
 	// Each user's slice holds every session of that user, cron jobs
-	// included, and tero-agent's also holds its user manager (the agent,
-	// builds and apps); /run/user/<uid> goes with user-runtime-dir.
+	// included, and tero-agent's and tero-podman's also hold their user
+	// managers (the agent, Podman, builds and apps); /run/user/<uid> goes with
+	// user-runtime-dir.
 	for _, user := range opts.users() {
 		uid := strconv.Itoa(user.uid)
 		if _, err := opts.Run.Run(ctx, "systemctl", "stop", "user-"+uid+".slice", "user-runtime-dir@"+uid+".service"); err != nil {
@@ -215,7 +221,7 @@ func stopAndQuarantine(ctx context.Context, opts Options) (string, []string, err
 	if err != nil {
 		return "", nil, fmt.Errorf("move aside the crontabs: %w", err)
 	}
-	// Anything left running as either user (a process started outside its
+	// Anything left running as one of them (a process started outside its
 	// slice) could keep acting as the dashboard or the agent once the reset
 	// is done. With none left, nothing can change their files while they are
 	// checked and moved.
@@ -235,13 +241,13 @@ func stopAndQuarantine(ctx context.Context, opts Options) (string, []string, err
 	return aside, append(moved, units...), nil
 }
 
-// temporaryDirs are shared directories where tero and tero-agent can leave
+// temporaryDirs are shared directories where Tero's users can leave
 // files a later run would use, such as the mise binary the build planner runs
 // from /tmp/railpack. Ubuntu empties them only at boot.
 var temporaryDirs = []string{"/tmp", "/var/tmp", "/dev/shm"}
 
 // removeTemporaryFiles deletes every entry in temporaryDirs that belongs to
-// tero or tero-agent. Nothing runs as either user by now, so nothing changes
+// one of Tero's users. Nothing runs as them by now, so nothing changes
 // between the check and the removal, and RemoveAll never follows a link.
 func removeTemporaryFiles(opts Options) error {
 	uids := map[uint32]bool{}
@@ -296,14 +302,17 @@ func holdServices(opts Options) error {
 	return nil
 }
 
-// emptyAgentStore starts tero-agent's user manager, with the agent still held
-// back, since Podman needs it, and empties the agent's store.
-func emptyAgentStore(ctx context.Context, opts Options) error {
-	userManager := "user@" + strconv.Itoa(opts.AgentUID) + ".service"
-	if _, err := opts.Run.Run(ctx, "systemctl", "start", userManager); err != nil {
-		return err
+// emptyPodmanStore starts tero-agent's and tero-podman's user managers, with
+// the agent and the Podman service still held back, and empties tero-podman's
+// store, which needs its user manager.
+func emptyPodmanStore(ctx context.Context, opts Options) error {
+	for _, uid := range []int{opts.AgentUID, opts.PodmanUID} {
+		userManager := "user@" + strconv.Itoa(uid) + ".service"
+		if _, err := opts.Run.Run(ctx, "systemctl", "start", userManager); err != nil {
+			return err
+		}
 	}
-	if err := resetAgentStorage(ctx, opts); err != nil {
+	if err := resetPodmanStorage(ctx, opts); err != nil {
 		return fmt.Errorf("delete the apps' images and the build cache: %w", err)
 	}
 
@@ -321,16 +330,18 @@ func startServices(ctx context.Context, opts Options) error {
 }
 
 const (
-	agentManager = "--machine=tero-agent@.host"
-	agentService = "tero-agent.service"
+	agentManager  = "--machine=tero-agent@.host"
+	agentService  = "tero-agent.service"
+	podmanManager = "--machine=tero-podman@.host"
 )
 
-// resetAgentStorage empties tero-agent's Podman store: app images and
+// resetPodmanStorage empties tero-podman's Podman store: app images and
 // containers, BuildKit's image and its cache volume. Something running as
-// tero-agent could have changed any of them, to serve its own code as an app
-// or to poison later builds.
-func resetAgentStorage(ctx context.Context, opts Options) error {
-	_, err := opts.Run.Run(ctx, "systemd-run", agentManager, "--user", "--wait", "--quiet", "podman", "system", "reset", "--force")
+// tero-agent or tero-podman could have changed any of them, to serve its own
+// code as an app or to poison later builds. It runs Podman directly, since
+// the Podman service is held back.
+func resetPodmanStorage(ctx context.Context, opts Options) error {
+	_, err := opts.Run.Run(ctx, "systemd-run", podmanManager, "--user", "--wait", "--quiet", "podman", "system", "reset", "--force")
 	return err
 }
 
@@ -340,7 +351,7 @@ type appSource struct {
 }
 
 // failLiveReleases marks every live release failed in the shared database,
-// since its image goes with the agent's store: the agent then doesn't try to
+// since its image goes with tero-podman's store: the agent then doesn't try to
 // start it, and the dashboard asks for a redeploy. It returns every app's
 // source as the database holds it, which a compromised dashboard could have
 // changed, for the admin to check before redeploying.
