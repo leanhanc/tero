@@ -5,7 +5,7 @@ go 1.27.4
 require (
 	filippo.io/age v1.3.2
 	github.com/caddyserver/caddy/v2 v2.11.7
-	github.com/fxamacker/cbor/v2 v2.9.4
+	github.com/fxamacker/cbor/v2 v2.10.0
 	github.com/go-git/go-git/v5 v5.19.3
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/landlock-lsm/go-landlock v0.11.0
